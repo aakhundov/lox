@@ -8,8 +8,31 @@ import java.util.Map;
 import static jlox.TokenType.*;
 
 class Scanner {
+  private static final Map<String, TokenType> keywords;
+
+  static {
+    keywords = new HashMap<>();
+    keywords.put("and", AND);
+    keywords.put("class", CLASS);
+    keywords.put("else", ELSE);
+    keywords.put("false", FALSE);
+    keywords.put("for", FOR);
+    keywords.put("fun", FUN);
+    keywords.put("if", IF);
+    keywords.put("nil", NIL);
+    keywords.put("or", OR);
+    keywords.put("print", PRINT);
+    keywords.put("return", RETURN);
+    keywords.put("super", SUPER);
+    keywords.put("this", THIS);
+    keywords.put("true", TRUE);
+    keywords.put("var", VAR);
+    keywords.put("while", WHILE);
+  }
+
   private final String source;
   private final List<Token> tokens = new ArrayList<>();
+
   private int start = 0;
   private int current = 0;
   private int line = 1;
@@ -26,10 +49,6 @@ class Scanner {
 
     tokens.add(new Token(EOF, "", null, line));
     return tokens;
-  }
-
-  private boolean isAtEnd() {
-    return current >= source.length();
   }
 
   private void scanToken() {
@@ -65,6 +84,15 @@ class Scanner {
       case '*':
         addToken(STAR);
         break;
+      case '/':
+        if (match('/')) {
+          // ignore the comment till the end of the line
+          while (peek() != '\n' && !isAtEnd())
+            advance();
+        } else {
+          addToken(SLASH);
+        }
+        break;
       case '!':
         addToken(match('=') ? BANG_EQUAL : BANG);
         break;
@@ -76,15 +104,6 @@ class Scanner {
         break;
       case '<':
         addToken(match('=') ? LESS_EQUAL : LESS);
-        break;
-      case '/':
-        if (match('/')) {
-          // ignore the comment till the end of the line
-          while (peek() != '\n' && !isAtEnd())
-            advance();
-        } else {
-          addToken(SLASH);
-        }
         break;
       case ' ':
       case '\r':
@@ -99,6 +118,8 @@ class Scanner {
       default:
         if (isDigit(c)) {
           number();
+        } else if (isAlpha(c)) {
+          identifier();
         } else {
           Lox.error(line, "Unexpected character: '" + c + "'.");
         }
@@ -106,27 +127,22 @@ class Scanner {
     }
   }
 
-  private char advance() {
-    return source.charAt(current++);
+  private boolean isDigit(char c) {
+    return c >= '0' && c <= '9';
   }
 
-  private void addToken(TokenType type) {
-    addToken(type, null);
+  private boolean isAlpha(char c) {
+    return (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        c == '_';
   }
 
-  private void addToken(TokenType type, Object literal) {
-    String lexeme = source.substring(start, current);
-    tokens.add(new Token(type, lexeme, literal, line));
+  private boolean isAlphaNumeric(char c) {
+    return isAlpha(c) || isDigit(c);
   }
 
-  private boolean match(char expected) {
-    if (isAtEnd())
-      return false;
-    if (source.charAt(current) != expected)
-      return false;
-
-    current++;
-    return true;
+  private boolean isAtEnd() {
+    return current >= source.length();
   }
 
   private char peek() {
@@ -139,6 +155,29 @@ class Scanner {
     if (current + 1 >= source.length())
       return '\0';
     return source.charAt(current + 1);
+  }
+
+  private char advance() {
+    return source.charAt(current++);
+  }
+
+  private boolean match(char expected) {
+    if (isAtEnd())
+      return false;
+    if (source.charAt(current) != expected)
+      return false;
+
+    current++;
+    return true;
+  }
+
+  private void addToken(TokenType type) {
+    addToken(type, null);
+  }
+
+  private void addToken(TokenType type, Object literal) {
+    String lexeme = source.substring(start, current);
+    tokens.add(new Token(type, lexeme, literal, line));
   }
 
   private void string() {
@@ -160,10 +199,6 @@ class Scanner {
     addToken(STRING, literal);
   }
 
-  private boolean isDigit(char c) {
-    return c >= '0' && c <= '9';
-  }
-
   private void number() {
     // consume integer part
     while (isDigit(peek()))
@@ -178,5 +213,15 @@ class Scanner {
     }
 
     addToken(NUMBER, Double.parseDouble(source.substring(start, current)));
+  }
+
+  private void identifier() {
+    while (isAlphaNumeric(peek()))
+      advance();
+    
+    String lexeme = source.substring(start, current);
+    TokenType type = keywords.get(lexeme);
+    if (type == null) type = IDENTIFIER;
+    addToken(type);
   }
 }
