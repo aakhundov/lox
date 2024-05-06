@@ -9,7 +9,7 @@ import java.nio.file.Paths;
 import java.util.List;
 
 public class Lox {
-  private static boolean hadError = false;
+  static boolean hadError = false;
 
   public static void main(String[] args) throws IOException {
     if (args.length > 1) {
@@ -55,7 +55,7 @@ public class Lox {
     }
   }
 
-  private static void error(int line, String message) {
+  static void error(int line, String message) {
     report(line, "", message);
   }
 
