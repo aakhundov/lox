@@ -4,7 +4,7 @@ import java.util.List;
 
 import static jlox.TokenType.*;
 
-public class Parser {
+class Parser {
   private static class ParseError extends RuntimeException {
   }
 

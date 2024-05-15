@@ -9,7 +9,7 @@ public class GenerateAst {
   public static void main(String[] args) throws IOException {
     if (args.length != 1) {
       System.err.println("Usage: generate_ast <output directory>");
-      System.exit(64);
+      System.exit(64); // EX_USAGE
     }
     String outputDir = args[0];
     defineAst(outputDir, "Expr", Arrays.asList(
@@ -55,7 +55,7 @@ public class GenerateAst {
       String typeName = type.split(":")[0].trim();
       writer.println(
           "    R visit" + typeName + "(" +
-          typeName + " " + baseName.toLowerCase() + ");");
+              typeName + " " + baseName.toLowerCase() + ");");
     }
 
     writer.println("  }");

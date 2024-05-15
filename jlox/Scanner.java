@@ -212,16 +212,19 @@ class Scanner {
         advance();
     }
 
-    addToken(NUMBER, Double.parseDouble(source.substring(start, current)));
+    String substring = source.substring(start, current);
+    Double literal = Double.parseDouble(substring);
+    addToken(NUMBER, literal);
   }
 
   private void identifier() {
     while (isAlphaNumeric(peek()))
       advance();
-    
+
     String lexeme = source.substring(start, current);
     TokenType type = keywords.get(lexeme);
-    if (type == null) type = IDENTIFIER;
+    if (type == null)
+      type = IDENTIFIER;
     addToken(type);
   }
 }

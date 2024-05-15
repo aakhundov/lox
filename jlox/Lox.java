@@ -10,6 +10,9 @@ import java.util.List;
 
 public class Lox {
   static boolean hadError = false;
+  static boolean hadRuntimeError = false;
+
+  private static final Interpreter interpreter = new Interpreter();
 
   public static void main(String[] args) throws IOException {
     if (args.length > 1) {
@@ -26,9 +29,10 @@ public class Lox {
     byte[] bytes = Files.readAllBytes(Paths.get(path));
     run(new String(bytes, Charset.defaultCharset()));
 
-    if (hadError) {
+    if (hadError)
       System.exit(65); // EX_DATAERR
-    }
+    if (hadError)
+      System.exit(70); // EX_SOFTWARE
   }
 
   private static void runPrompt() throws IOException {
@@ -43,6 +47,7 @@ public class Lox {
       }
       run(line);
       hadError = false;
+      hadRuntimeError = false;
     }
   }
 
@@ -56,6 +61,7 @@ public class Lox {
     for (Token token : tokens) {
       System.out.println(token);
     }
+    System.out.println("---------------");
 
     Parser parser = new Parser(tokens);
     Expr expression = parser.parse();
@@ -63,12 +69,20 @@ public class Lox {
     if (hadError)
       return;
 
-    System.out.println("--------------");
     System.out.println(new AstPrinter().print(expression));
+    System.out.println("===============");
+
+    String result = interpreter.interpret(expression);
+
+    if (hadRuntimeError)
+      return;
+
+    System.out.println(result);
   }
 
   static void error(int line, String message) {
     report(line, "", message);
+    hadError = true;
   }
 
   static void error(Token token, String message) {
@@ -77,10 +91,15 @@ public class Lox {
     } else {
       report(token.line, " at '" + token.lexeme + "'", message);
     }
+    hadError = true;
+  }
+
+  static void runtimeError(RuntimeError error) {
+    report(error.token.line, "", error.getMessage());
+    hadRuntimeError = true;
   }
 
   private static void report(int line, String where, String message) {
     System.err.println("[line " + line + "] Error" + where + ": " + message);
-    hadError = true;
   }
 }
