@@ -1,14 +1,29 @@
 package jlox;
 
-class Interpreter implements Expr.Visitor<Object> {
-  String interpret(Expr expr) {
+import java.util.List;
+
+class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
+  void interpret(List<Stmt> statements) {
     try {
-      Object value = evaluate(expr);
-      return stringify(value);
+      for (Stmt statement : statements) {
+        execute(statement);
+      }
     } catch (RuntimeError error) {
       Lox.runtimeError(error);
-      return null;
     }
+  }
+
+  @Override
+  public Void visitExpression(Stmt.Expression stmt) {
+    evaluate(stmt.expression);
+    return null;
+  }
+
+  @Override
+  public Void visitPrint(Stmt.Print stmt) {
+    Object value = evaluate(stmt.value);
+    System.out.println(stringify(value));
+    return null;
   }
 
   @Override
@@ -81,6 +96,10 @@ class Interpreter implements Expr.Visitor<Object> {
     }
   }
 
+  private void execute(Stmt stmt) {
+    stmt.accept(this);
+  }
+
   private Object evaluate(Expr expr) {
     return expr.accept(this);
   }
@@ -94,7 +113,8 @@ class Interpreter implements Expr.Visitor<Object> {
       double rounded = Math.round(number);
       if (Math.abs(number - rounded) < 1e-8)
         return Integer.valueOf((int) rounded).toString();
-      return value.toString();
+      number = Math.round(number * 1e12) / 1e12;
+      return Double.valueOf(number).toString();
     }
 
     return value.toString();

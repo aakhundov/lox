@@ -12,11 +12,16 @@ public class GenerateAst {
       System.exit(64); // EX_USAGE
     }
     String outputDir = args[0];
+
     defineAst(outputDir, "Expr", Arrays.asList(
         "Binary   : Expr left, Token operator, Expr right",
         "Grouping : Expr expression",
         "Literal  : Object value",
         "Unary    : Token operator, Expr right"));
+
+    defineAst(outputDir, "Stmt", Arrays.asList(
+        "Expression : Expr expression",
+        "Print      : Expr value"));
   }
 
   private static void defineAst(String outputDir, String baseName, List<String> types)

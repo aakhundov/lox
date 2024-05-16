@@ -1,6 +1,7 @@
 package jlox;
 
 import java.util.List;
+import java.util.ArrayList;
 
 import static jlox.TokenType.*;
 
@@ -15,13 +16,30 @@ class Parser {
     this.tokens = tokens;
   }
 
-  Expr parse() {
-    try {
-      return expression();
-    } catch (ParseError error) {
-      synchronize();
-      return null;
-    }
+  List<Stmt> parse() {
+    List<Stmt> statements = new ArrayList<>();
+
+    while (!isAtEnd())
+      statements.add(statement());
+
+    return statements;
+  }
+
+  private Stmt statement() {
+    if (match(PRINT)) return printStatement();
+    return expressionStatement();
+  }
+
+  private Stmt expressionStatement() {
+    Expr expression = expression();
+    consume(SEMICOLON, "Expect ';' after expression.");
+    return new Stmt.Expression(expression);
+  }
+
+  private Stmt printStatement() {
+    Expr value = expression();
+    consume(SEMICOLON, "Expect ';' after value.");
+    return new Stmt.Print(value);
   }
 
   private Expr expression() {
@@ -107,30 +125,30 @@ class Parser {
     throw error(peek(), "Expect expression.");
   }
 
-  private void synchronize() {
-    advance();
+  // private void synchronize() {
+  //   advance();
 
-    while (!isAtEnd()) {
-      if (previous().type == SEMICOLON)
-        return;
+  //   while (!isAtEnd()) {
+  //     if (previous().type == SEMICOLON)
+  //       return;
 
-      switch (peek().type) {
-        case CLASS:
-        case FUN:
-        case VAR:
-        case FOR:
-        case IF:
-        case WHILE:
-        case PRINT:
-        case RETURN:
-          return;
-        default:
-          break;
-      }
+  //     switch (peek().type) {
+  //       case CLASS:
+  //       case FUN:
+  //       case VAR:
+  //       case FOR:
+  //       case IF:
+  //       case WHILE:
+  //       case PRINT:
+  //       case RETURN:
+  //         return;
+  //       default:
+  //         break;
+  //     }
 
-      advance();
-    }
-  }
+  //     advance();
+  //   }
+  // }
 
   private boolean match(TokenType... types) {
     for (TokenType type : types) {

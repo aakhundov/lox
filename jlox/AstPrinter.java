@@ -1,6 +1,10 @@
 package jlox;
 
-public class AstPrinter implements Expr.Visitor<String> {
+public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
+  String print(Stmt stmt) {
+    return stmt.accept(this);
+  }
+
   String print(Expr expr) {
     return expr.accept(this);
   }
@@ -17,12 +21,24 @@ public class AstPrinter implements Expr.Visitor<String> {
 
   @Override
   public String visitLiteral(Expr.Literal expr) {
+    if (expr.value instanceof String)
+      return "\"" + expr.value.toString() + "\"";
     return expr.value.toString();
   }
 
   @Override
   public String visitUnary(Expr.Unary expr) {
     return parenthesize(expr.operator.lexeme, expr.right);
+  }
+
+  @Override
+  public String visitExpression(Stmt.Expression stmt) {
+    return parenthesize("stmt", stmt.expression);
+  }
+
+  @Override
+  public String visitPrint(Stmt.Print stmt) {
+    return parenthesize("print", stmt.value);
   }
 
   private String parenthesize(String name, Expr... exprs) {
@@ -35,17 +51,5 @@ public class AstPrinter implements Expr.Visitor<String> {
     sb.append(")");
 
     return sb.toString();
-  }
-
-  public static void main(String[] args) {
-    Expr expr = new Expr.Binary(
-        new Expr.Unary(
-            new Token(TokenType.MINUS, "-", null, 1),
-            new Expr.Literal(123)),
-        new Token(TokenType.STAR, "*", null, 1),
-        new Expr.Grouping(
-            new Expr.Literal(45.67)));
-
-    System.out.println(new AstPrinter().print(expr));
   }
 }
