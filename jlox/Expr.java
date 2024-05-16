@@ -3,9 +3,14 @@ package jlox;
 abstract class Expr {
   interface Visitor<R> {
     R visitBinary(Binary expr);
+
     R visitGrouping(Grouping expr);
+
     R visitLiteral(Literal expr);
+
     R visitUnary(Unary expr);
+
+    R visitVariable(Variable expr);
   }
 
   abstract <R> R accept(Visitor<R> visitor);
@@ -65,6 +70,19 @@ abstract class Expr {
     @Override
     <R> R accept(Visitor<R> visitor) {
       return visitor.visitUnary(this);
+    }
+  }
+
+  static class Variable extends Expr {
+    final Token name;
+
+    Variable(Token name) {
+      this.name = name;
+    }
+
+    @Override
+    <R> R accept(Visitor<R> visitor) {
+      return visitor.visitVariable(this);
     }
   }
 }

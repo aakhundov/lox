@@ -20,13 +20,36 @@ class Parser {
     List<Stmt> statements = new ArrayList<>();
 
     while (!isAtEnd())
-      statements.add(statement());
+      statements.add(declaration());
 
     return statements;
   }
 
+  private Stmt declaration() {
+    try {
+      if (match(VAR))
+        return varDeclaration();
+      return statement();
+    } catch (ParseError error) {
+      synchronize(); // recover from panic mode
+      return null;
+    }
+  }
+
+  private Stmt varDeclaration() {
+    Token name = consume(IDENTIFIER, "Expect variable name.");
+
+    Expr initializer = null;
+    if (match(EQUAL))
+      initializer = expression();
+
+    consume(SEMICOLON, "Expect ';' after variable declaration.");
+    return new Stmt.Var(name, initializer);
+  }
+
   private Stmt statement() {
-    if (match(PRINT)) return printStatement();
+    if (match(PRINT))
+      return printStatement();
     return expressionStatement();
   }
 
@@ -116,6 +139,10 @@ class Parser {
       return new Expr.Literal(previous().literal);
     }
 
+    if (match(IDENTIFIER)) {
+      return new Expr.Variable(previous());
+    }
+
     if (match(LEFT_PAREN)) {
       Expr expr = expression();
       consume(RIGHT_PAREN, "Expect ')' after expression.");
@@ -125,30 +152,30 @@ class Parser {
     throw error(peek(), "Expect expression.");
   }
 
-  // private void synchronize() {
-  //   advance();
+  private void synchronize() {
+    advance();
 
-  //   while (!isAtEnd()) {
-  //     if (previous().type == SEMICOLON)
-  //       return;
+    while (!isAtEnd()) {
+      if (previous().type == SEMICOLON)
+        return;
 
-  //     switch (peek().type) {
-  //       case CLASS:
-  //       case FUN:
-  //       case VAR:
-  //       case FOR:
-  //       case IF:
-  //       case WHILE:
-  //       case PRINT:
-  //       case RETURN:
-  //         return;
-  //       default:
-  //         break;
-  //     }
+      switch (peek().type) {
+        case CLASS:
+        case FUN:
+        case VAR:
+        case FOR:
+        case IF:
+        case WHILE:
+        case PRINT:
+        case RETURN:
+          return;
+        default:
+          break;
+      }
 
-  //     advance();
-  //   }
-  // }
+      advance();
+    }
+  }
 
   private boolean match(TokenType... types) {
     for (TokenType type : types) {

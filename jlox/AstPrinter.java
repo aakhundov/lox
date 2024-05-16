@@ -2,10 +2,16 @@ package jlox;
 
 public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   String print(Stmt stmt) {
+    if (stmt == null) {
+      return "null";
+    }
     return stmt.accept(this);
   }
 
   String print(Expr expr) {
+    if (expr == null) {
+      return "null";
+    }
     return expr.accept(this);
   }
 
@@ -32,6 +38,11 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
+  public String visitVariable(Expr.Variable expr) {
+    return expr.name.lexeme;
+  }
+
+  @Override
   public String visitExpression(Stmt.Expression stmt) {
     return parenthesize("stmt", stmt.expression);
   }
@@ -39,6 +50,15 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   @Override
   public String visitPrint(Stmt.Print stmt) {
     return parenthesize("print", stmt.value);
+  }
+
+  @Override
+  public String visitVar(Stmt.Var stmt) {
+    Expr name = new Expr.Literal(stmt.name.lexeme);
+    if (stmt.initializer != null) {
+      return parenthesize("var", name, stmt.initializer);
+    }
+    return parenthesize("var", name);
   }
 
   private String parenthesize(String name, Expr... exprs) {
