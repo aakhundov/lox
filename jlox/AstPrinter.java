@@ -3,14 +3,14 @@ package jlox;
 public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   String print(Stmt stmt) {
     if (stmt == null) {
-      return "null";
+      return "nil";
     }
     return stmt.accept(this);
   }
 
   String print(Expr expr) {
     if (expr == null) {
-      return "null";
+      return "nil";
     }
     return expr.accept(this);
   }
@@ -59,6 +59,11 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
+  public String visitBlock(Stmt.Block stmt) {
+    return parenthesize("block", stmt.statements.toArray(new Stmt[0]));
+  }
+
+  @Override
   public String visitVar(Stmt.Var stmt) {
     Expr name = new Expr.Literal(stmt.name.lexeme);
     if (stmt.initializer != null) {
@@ -72,7 +77,19 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
 
     sb.append("(").append(name);
     for (Expr expr : exprs) {
-      sb.append(" ").append(expr.accept(this));
+      sb.append(" ").append(print(expr));
+    }
+    sb.append(")");
+
+    return sb.toString();
+  }
+
+  private String parenthesize(String name, Stmt... stmts) {
+    StringBuilder sb = new StringBuilder();
+
+    sb.append("(").append(name);
+    for (Stmt stmt : stmts) {
+      sb.append(" ").append(print(stmt));
     }
     sb.append(")");
 
