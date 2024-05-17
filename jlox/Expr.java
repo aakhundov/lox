@@ -1,5 +1,7 @@
 package jlox;
 
+import java.util.List;
+
 abstract class Expr {
   interface Visitor<R> {
     R visitAssign(Assign expr);

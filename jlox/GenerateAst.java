@@ -23,7 +23,7 @@ public class GenerateAst {
 
     defineAst(outputDir, "Stmt", Arrays.asList(
         "Expression : Expr expression",
-        "Print      : Expr value",
+        "Print      : List<Expr> values",
         "Var        : Token name, Expr initializer"));
   }
 
@@ -33,8 +33,8 @@ public class GenerateAst {
     PrintWriter writer = new PrintWriter(path, "UTF-8");
 
     writer.println("package jlox;");
-    // writer.println();
-    // writer.println("import java.util.List;");
+    writer.println();
+    writer.println("import java.util.List;");
     writer.println();
     writer.println("abstract class " + baseName + " {");
 

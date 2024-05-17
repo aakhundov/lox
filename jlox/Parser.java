@@ -60,9 +60,15 @@ class Parser {
   }
 
   private Stmt printStatement() {
-    Expr value = expression();
+    List<Expr> values = new ArrayList<>();
+    values.add(expression());
+
+    while (match(COMMA)) {
+      values.add(expression());
+    }
+
     consume(SEMICOLON, "Expect ';' after value.");
-    return new Stmt.Print(value);
+    return new Stmt.Print(values);
   }
 
   private Expr expression() {

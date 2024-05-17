@@ -1,11 +1,11 @@
 package jlox;
 
+import java.util.List;
+
 abstract class Stmt {
   interface Visitor<R> {
     R visitExpression(Expression stmt);
-
     R visitPrint(Print stmt);
-
     R visitVar(Var stmt);
   }
 
@@ -25,10 +25,10 @@ abstract class Stmt {
   }
 
   static class Print extends Stmt {
-    final Expr value;
+    final List<Expr> values;
 
-    Print(Expr value) {
-      this.value = value;
+    Print(List<Expr> values) {
+      this.values = values;
     }
 
     @Override
