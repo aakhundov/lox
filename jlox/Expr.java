@@ -2,18 +2,30 @@ package jlox;
 
 abstract class Expr {
   interface Visitor<R> {
+    R visitAssign(Assign expr);
     R visitBinary(Binary expr);
-
     R visitGrouping(Grouping expr);
-
     R visitLiteral(Literal expr);
-
     R visitUnary(Unary expr);
-
     R visitVariable(Variable expr);
   }
 
   abstract <R> R accept(Visitor<R> visitor);
+
+  static class Assign extends Expr {
+    final Token name;
+    final Expr value;
+
+    Assign(Token name, Expr value) {
+      this.name = name;
+      this.value = value;
+    }
+
+    @Override
+    <R> R accept(Visitor<R> visitor) {
+      return visitor.visitAssign(this);
+    }
+  }
 
   static class Binary extends Expr {
     final Expr left;
