@@ -73,6 +73,11 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
+  public String visitLoopEvent(Stmt.LoopEvent stmt) {
+    return parenthesize(stmt.statement.lexeme);
+  }
+
+  @Override
   public String visitPrint(Stmt.Print stmt) {
     return parenthesize("print", stmt.values.toArray());
   }

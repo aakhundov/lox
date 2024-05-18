@@ -12,6 +12,7 @@ class Parser {
 
   private final List<Token> tokens;
   private int current = 0;
+  private boolean inLoopBody = false;
 
   Parser(List<Token> tokens) {
     this.tokens = tokens;
@@ -57,6 +58,8 @@ class Parser {
       return whileStatement();
     if (match(FOR))
       return forStatement();
+    if (match(BREAK))
+      return loopEventStatement();
     if (match(LEFT_BRACE))
       return new Stmt.Block(block());
 
@@ -81,7 +84,7 @@ class Parser {
     Expr condition = expression();
     consume(RIGHT_PAREN, "Expect ')' after while condition.");
 
-    Stmt body = statement();
+    Stmt body = loopBody();
 
     return new Stmt.While(condition, body);
   }
@@ -107,7 +110,7 @@ class Parser {
       increment = expression();
     consume(RIGHT_PAREN, "Expect ')' after for clauses.");
 
-    Stmt body = statement();
+    Stmt body = loopBody();
 
     if (increment != null)
       body = new Stmt.Block(
@@ -126,6 +129,26 @@ class Parser {
               body));
 
     return body;
+  }
+
+  private Stmt loopBody() {
+    boolean previous = inLoopBody;
+    try {
+      inLoopBody = true;
+      return statement();
+    } finally {
+      inLoopBody = previous;
+    }
+  }
+
+  private Stmt loopEventStatement() {
+    Token token = previous();
+    consume(SEMICOLON, "Expect ';' after '" + token.lexeme + "'.");
+
+    if (!inLoopBody)
+      error(token, "Expect " + token.lexeme + " only inside loop body.");
+
+    return new Stmt.LoopEvent(token);
   }
 
   private Stmt printStatement() {
@@ -194,7 +217,7 @@ class Parser {
   private Expr and() {
     Expr expr = equality();
 
-    while (match(OR)) {
+    while (match(AND)) {
       Token operator = previous();
       Expr right = equality();
       expr = new Expr.Logical(expr, operator, right);

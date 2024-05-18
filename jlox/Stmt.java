@@ -7,6 +7,7 @@ abstract class Stmt {
     R visitBlock(Block stmt);
     R visitExpression(Expression stmt);
     R visitIf(If stmt);
+    R visitLoopEvent(LoopEvent stmt);
     R visitPrint(Print stmt);
     R visitVar(Var stmt);
     R visitWhile(While stmt);
@@ -54,6 +55,19 @@ abstract class Stmt {
     @Override
     <R> R accept(Visitor<R> visitor) {
       return visitor.visitIf(this);
+    }
+  }
+
+  static class LoopEvent extends Stmt {
+    final Token statement;
+
+    LoopEvent(Token statement) {
+      this.statement = statement;
+    }
+
+    @Override
+    <R> R accept(Visitor<R> visitor) {
+      return visitor.visitLoopEvent(this);
     }
   }
 

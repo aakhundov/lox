@@ -3,6 +3,9 @@ package jlox;
 import java.util.List;
 
 class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
+  private class LoopBreak extends RuntimeException {
+  }
+
   private Environment environment = new Environment();
 
   void interpret(List<Stmt> statements) {
@@ -135,6 +138,11 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   }
 
   @Override
+  public Void visitLoopEvent(Stmt.LoopEvent stmt) {
+    throw new LoopBreak();
+  }
+
+  @Override
   public Void visitPrint(Stmt.Print stmt) {
     for (int i = 0; i < stmt.values.size(); ++i) {
       Object value = evaluate(stmt.values.get(i));
@@ -160,7 +168,11 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   @Override
   public Void visitWhile(Stmt.While stmt) {
     while (isTruthy(evaluate(stmt.condition))) {
-      execute(stmt.body);
+      try {
+        execute(stmt.body);
+      } catch (LoopBreak e) {
+        break;
+      }
     }
     return null;
   }

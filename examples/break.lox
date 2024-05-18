@@ -1,0 +1,15 @@
+print("while loop:");
+
+var a = 0;
+while (true) {
+  print a;
+  a = a + 1;
+  if (a >= 5) break;
+}
+
+print("for loop:");
+
+for (a = 0; ; a = a + 1) {
+  if (a >= 5) break;
+  print a;
+}
