@@ -17,7 +17,7 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
 
   @Override
   public String visitAssign(Expr.Assign expr) {
-    Expr name = new Expr.Literal(expr.name.lexeme);
+    Expr name = new Expr.Variable(expr.name);
     return parenthesize("=", name, expr.value);
   }
 
@@ -79,11 +79,16 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
 
   @Override
   public String visitVar(Stmt.Var stmt) {
-    Expr name = new Expr.Literal(stmt.name.lexeme);
+    Expr name = new Expr.Variable(stmt.name);
     if (stmt.initializer != null) {
       return parenthesize("var", name, stmt.initializer);
     }
     return parenthesize("var", name);
+  }
+
+  @Override
+  public String visitWhile(Stmt.While stmt) {
+    return parenthesize("while", stmt.condition, stmt.body);
   }
 
   private String parenthesize(String name, Object... parts) {
