@@ -49,18 +49,25 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
+  public String visitBlock(Stmt.Block stmt) {
+    return parenthesize("block", stmt.statements.toArray());
+  }
+
+  @Override
   public String visitExpression(Stmt.Expression stmt) {
     return parenthesize("stmt", stmt.expression);
   }
 
   @Override
-  public String visitPrint(Stmt.Print stmt) {
-    return parenthesize("print", stmt.values.toArray(new Expr[0]));
+  public String visitIf(Stmt.If stmt) {
+    if (stmt.elseBranch == null)
+      return parenthesize("if", stmt.condition, stmt.thenBranch);
+    return parenthesize("if", stmt.condition, stmt.thenBranch, stmt.elseBranch);
   }
 
   @Override
-  public String visitBlock(Stmt.Block stmt) {
-    return parenthesize("block", stmt.statements.toArray(new Stmt[0]));
+  public String visitPrint(Stmt.Print stmt) {
+    return parenthesize("print", stmt.values.toArray());
   }
 
   @Override
@@ -72,24 +79,21 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
     return parenthesize("var", name);
   }
 
-  private String parenthesize(String name, Expr... exprs) {
+  private String parenthesize(String name, Object... parts) {
     StringBuilder sb = new StringBuilder();
 
     sb.append("(").append(name);
-    for (Expr expr : exprs) {
-      sb.append(" ").append(print(expr));
-    }
-    sb.append(")");
-
-    return sb.toString();
-  }
-
-  private String parenthesize(String name, Stmt... stmts) {
-    StringBuilder sb = new StringBuilder();
-
-    sb.append("(").append(name);
-    for (Stmt stmt : stmts) {
-      sb.append(" ").append(print(stmt));
+    for (Object part : parts) {
+      sb.append(" ");
+      if (part instanceof Expr) {
+        sb.append(print((Expr) part));
+      } else if (part instanceof Stmt) {
+        sb.append(print((Stmt) part));
+      } else if (part == null) {
+        sb.append("nil");
+      } else {
+        sb.append(part.toString());
+      }
     }
     sb.append(")");
 

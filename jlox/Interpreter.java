@@ -98,8 +98,24 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
   }
 
   @Override
+  public Void visitBlock(Stmt.Block stmt) {
+    executeBlock(stmt.statements, new Environment(environment));
+    return null;
+  }
+
+  @Override
   public Void visitExpression(Stmt.Expression stmt) {
     evaluate(stmt.expression);
+    return null;
+  }
+
+  @Override
+  public Void visitIf(Stmt.If stmt) {
+    if (isTruthy(evaluate(stmt.condition))) {
+      execute(stmt.thenBranch);
+    } else if (stmt.elseBranch != null) {
+      execute(stmt.elseBranch);
+    }
     return null;
   }
 
@@ -123,12 +139,6 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     }
 
     environment.define(stmt.name.lexeme, value);
-    return null;
-  }
-
-  @Override
-  public Void visitBlock(Stmt.Block stmt) {
-    executeBlock(stmt.statements, new Environment(environment));
     return null;
   }
 
