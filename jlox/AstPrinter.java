@@ -33,9 +33,16 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
 
   @Override
   public String visitLiteral(Expr.Literal expr) {
+    if (expr.value == null)
+      return "nil";
     if (expr.value instanceof String)
       return "\"" + expr.value.toString() + "\"";
     return expr.value.toString();
+  }
+
+  @Override
+  public String visitLogical(Expr.Logical expr) {
+    return parenthesize(expr.operator.lexeme, expr.left, expr.right);
   }
 
   @Override
