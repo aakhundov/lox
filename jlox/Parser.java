@@ -12,7 +12,6 @@ class Parser {
 
   private final List<Token> tokens;
   private int current = 0;
-  private boolean inLoopBody = false;
 
   Parser(List<Token> tokens) {
     this.tokens = tokens;
@@ -109,7 +108,7 @@ class Parser {
     Expr condition = expression();
     consume(RIGHT_PAREN, "Expect ')' after while condition.");
 
-    Stmt body = loopBody();
+    Stmt body = statement();
 
     return new Stmt.While(condition, body);
   }
@@ -135,7 +134,7 @@ class Parser {
       increment = expression();
     consume(RIGHT_PAREN, "Expect ')' after for clauses.");
 
-    Stmt body = loopBody();
+    Stmt body = statement();
 
     if (increment != null)
       body = new Stmt.Block(
@@ -156,16 +155,6 @@ class Parser {
     return body;
   }
 
-  private Stmt loopBody() {
-    boolean previous = inLoopBody;
-    try {
-      inLoopBody = true;
-      return statement();
-    } finally {
-      inLoopBody = previous;
-    }
-  }
-
   private Stmt returnStatement() {
     Token keyword = previous();
 
@@ -180,10 +169,6 @@ class Parser {
   private Stmt loopEventStatement() {
     Token token = previous();
     consume(SEMICOLON, "Expect ';' after '" + token.lexeme + "'.");
-
-    if (!inLoopBody)
-      error(token, "Expect " + token.lexeme + " only inside loop body.");
-
     return new Stmt.LoopEvent(token);
   }
 

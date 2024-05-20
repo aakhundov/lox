@@ -74,6 +74,12 @@ public class Lox {
     }
     System.out.println("==============================");
 
+    Resolver resolver = new Resolver(interpreter);
+    resolver.resolve(statements);
+
+    if (hadError)
+      return;
+
     interpreter.interpret(statements);
   }
 
