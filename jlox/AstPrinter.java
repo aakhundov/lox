@@ -1,5 +1,8 @@
 package jlox;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   String print(Stmt stmt) {
     if (stmt == null) {
@@ -24,6 +27,14 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   @Override
   public String visitBinary(Expr.Binary expr) {
     return parenthesize(expr.operator.lexeme, expr.left, expr.right);
+  }
+
+  @Override
+  public String visitCall(Expr.Call expr) {
+    List<Expr> exprs = new ArrayList<>();
+    exprs.add(expr.callee);
+    exprs.addAll(expr.arguments);
+    return parenthesize("call", exprs.toArray());
   }
 
   @Override
@@ -66,6 +77,16 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
+  public String visitFunction(Stmt.Function stmt) {
+    List<String> paramNames = new ArrayList<>();
+    for (Token param : stmt.params)
+      paramNames.add(param.lexeme);
+    String params = "(" + String.join(", ", paramNames) + ")";
+    String body = parenthesize("body", stmt.body.toArray());
+    return parenthesize("fun", stmt.name.lexeme, params, body);
+  }
+
+  @Override
   public String visitIf(Stmt.If stmt) {
     if (stmt.elseBranch == null)
       return parenthesize("if", stmt.condition, stmt.thenBranch);
@@ -80,6 +101,11 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   @Override
   public String visitPrint(Stmt.Print stmt) {
     return parenthesize("print", stmt.values.toArray());
+  }
+
+  @Override
+  public String visitReturn(Stmt.Return stmt) {
+    return parenthesize("return", stmt.value);
   }
 
   @Override
