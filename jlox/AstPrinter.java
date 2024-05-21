@@ -67,6 +67,11 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
+  public String visitSuper(Expr.Super expr) {
+    return parenthesize("super", expr.method);
+  }
+
+  @Override
   public String visitThis(Expr.This expr) {
     return "this";
   }
@@ -90,6 +95,9 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   public String visitClass(Stmt.Class stmt) {
     List<Object> parts = new ArrayList<>();
     parts.add(stmt.name);
+    if (stmt.superclass != null) {
+      parts.add(stmt.superclass);
+    }
     parts.addAll(stmt.methods);
     return parenthesize("class", parts.toArray());
   }

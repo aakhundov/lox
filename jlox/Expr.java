@@ -12,6 +12,7 @@ abstract class Expr {
     R visitLiteral(Literal expr);
     R visitLogical(Logical expr);
     R visitSet(Set expr);
+    R visitSuper(Super expr);
     R visitThis(This expr);
     R visitUnary(Unary expr);
     R visitVariable(Variable expr);
@@ -140,6 +141,21 @@ abstract class Expr {
     @Override
     <R> R accept(Visitor<R> visitor) {
       return visitor.visitSet(this);
+    }
+  }
+
+  static class Super extends Expr {
+    final Token keyword;
+    final Token method;
+
+    Super(Token keyword, Token method) {
+      this.keyword = keyword;
+      this.method = method;
+    }
+
+    @Override
+    <R> R accept(Visitor<R> visitor) {
+      return visitor.visitSuper(this);
     }
   }
 
