@@ -1,0 +1,19 @@
+class S {
+  init(s) {
+    this.s = s;
+  }
+
+  join(delim, other) {
+    return S(this.s + delim + other.s);
+  }
+
+  printThis() {
+    print this.s;
+  }
+}
+
+var x = S("hello");
+var y = S("world!");
+var z = x.join(", ", y);
+
+z.printThis();

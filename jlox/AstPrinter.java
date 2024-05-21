@@ -38,6 +38,11 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
+  public String visitGet(Expr.Get expr) {
+    return parenthesize("get", expr.object, expr.name);
+  }
+
+  @Override
   public String visitGrouping(Expr.Grouping expr) {
     return parenthesize("group", expr.expression);
   }
@@ -57,6 +62,16 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
+  public String visitSet(Expr.Set expr) {
+    return parenthesize("set", expr.object, expr.name, expr.value);
+  }
+
+  @Override
+  public String visitThis(Expr.This expr) {
+    return "this";
+  }
+
+  @Override
   public String visitUnary(Expr.Unary expr) {
     return parenthesize(expr.operator.lexeme, expr.right);
   }
@@ -69,6 +84,14 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   @Override
   public String visitBlock(Stmt.Block stmt) {
     return parenthesize("block", stmt.statements.toArray());
+  }
+
+  @Override
+  public String visitClass(Stmt.Class stmt) {
+    List<Object> parts = new ArrayList<>();
+    parts.add(stmt.name);
+    parts.addAll(stmt.methods);
+    return parenthesize("class", parts.toArray());
   }
 
   @Override
@@ -132,6 +155,8 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
         sb.append(print((Expr) part));
       } else if (part instanceof Stmt) {
         sb.append(print((Stmt) part));
+      } else if (part instanceof Token) {
+        sb.append(((Token) part).lexeme);
       } else if (part == null) {
         sb.append("nil");
       } else {
