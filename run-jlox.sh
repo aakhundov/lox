@@ -1,1 +1,4 @@
-javac jlox/Lox.java && java jlox.Lox $1
+#!/bin/bash
+
+javac jlox/Lox.java && \
+java jlox.Lox $1
