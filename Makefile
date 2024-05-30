@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-c -std=c11 -Wall -Werror -fPIC -g
+CFLAGS=-c -std=c11 -Wall -fPIC -g
 LDFLAGS=-g
 
 APP=clox
