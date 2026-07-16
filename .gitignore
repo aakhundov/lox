@@ -1,3 +1,5 @@
 *.class
 .vscode
+.lox.history
 bin
+__pycache__
