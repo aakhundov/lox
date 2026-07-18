@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from prompt_toolkit import PromptSession, print_formatted_text
@@ -74,10 +75,26 @@ def _print_error(e: InterpreterError, source: str) -> None:
 
     error = f"{msg}\n{'=' * len(msg)}\n{source_line}\n{caret}"
     formatted = FormattedText([(f"fg:{ERROR_COLOR}", error)])
-    print_formatted_text(formatted)
+    print_formatted_text(formatted, file=sys.stderr)
 
 
-def main() -> None:
+def _run_file(path: str) -> int:
+    try:
+        source = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 66  # EX_NOINPUT
+
+    try:
+        _run_code(source)
+    except InterpreterError as e:
+        _print_error(e, source)
+        return 65  # EX_DATAERR
+
+    return 0  # EX_OK
+
+
+def _run_repl() -> int:
     prompt = f"<b><{PROMPT_COLOR}>{PROMPT_TEXT}</{PROMPT_COLOR}></b>"
     multiline_hint = HTML(f"{prompt}<{HINT_COLOR}>{MULTILINE_HINT}</{HINT_COLOR}>")
     prompt_line = HTML(prompt)
@@ -113,3 +130,16 @@ def main() -> None:
             _run_code(text)
         except InterpreterError as e:
             _print_error(e, text)
+
+    return 0
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    if len(args) == 0:
+        sys.exit(_run_repl())
+    elif len(args) == 1:
+        sys.exit(_run_file(args[0]))
+    else:
+        print("Usage: plox <path_to_file>", file=sys.stderr)
+        sys.exit(64)  # EX_USAGE
