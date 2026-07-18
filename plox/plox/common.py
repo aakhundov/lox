@@ -1,5 +1,5 @@
-from enum import Enum, auto
 from dataclasses import dataclass
+from enum import Enum, auto
 
 
 class TokenType(Enum):
@@ -52,7 +52,7 @@ class TokenType(Enum):
     EOF = auto()
 
 
-Literal = bool | float | str
+Literal = float | str
 
 
 @dataclass
@@ -71,7 +71,7 @@ class Token:
         if self.literal is not None:
             desc = f"[{self.literal}] "
         elif self.type == TokenType.IDENTIFIER:
-            desc = f"[{self.lexeme}]"
+            desc = f"[{self.lexeme}] "
         return f"{self.type.name} {desc}({self.line_num}:{self.col_num})"
 
 

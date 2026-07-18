@@ -1,3 +1,5 @@
+from typing import NoReturn
+
 from plox.common import (
     InterpreterError,
     Literal,
@@ -176,16 +178,17 @@ class Scanner:
     def _is_alnum(self, c: str) -> bool:
         return self._is_alpha(c) or self._is_digit(c)
 
-    def _raise(self, msg: str) -> None:
+    def _raise(self, msg: str) -> NoReturn:
         raise ScannerError(msg)
 
     def _add_line_metadata(self) -> None:
-        line_meta = {token.offset: [0, 0] for token in self._tokens}
+        token_offsets = {t.offset for t in self._tokens}
+        line_meta: dict[int, tuple[int, int]] = {}
 
         line_num, col_num = 0, 0
         for offset, c in enumerate(self._source):
-            if offset in line_meta:
-                line_meta[offset][:] = line_num + 1, col_num + 1
+            if offset in token_offsets:
+                line_meta[offset] = (line_num + 1, col_num + 1)
 
             if c == "\n":
                 line_num += 1
@@ -194,7 +197,7 @@ class Scanner:
                 col_num += 1
 
         # EOF line / col num aren't covered in the loop above
-        line_meta[len(self._source)] = [line_num + 1, col_num + 1]
+        line_meta[len(self._source)] = (line_num + 1, col_num + 1)
 
         for token in self._tokens:
             token.line_num, token.col_num = line_meta[token.offset]
