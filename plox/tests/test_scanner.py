@@ -94,11 +94,42 @@ def test_maximal_munch(scan, source, expected):
         ),
         ("1 // comment\n2", [(TT.NUMBER, "1", 1.0), (TT.NUMBER, "2", 2.0)]),
         ("// comment\n", []),
-        # no block comments: /* is just two tokens
-        ("/*", [(TT.SLASH, "/", None), (TT.STAR, "*", None)]),
     ],
 )
-def test_comments(scan, source, expected):
+def test_line_comments(scan, source, expected):
+    assert scan(source) == expected + [EOF]
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("/* comment */", []),
+        ("/**/", []),
+        ("/***/", []),  # the content is a single '*'
+        ("/* spans\ntwo lines */", []),
+        ("/* a */ 1", [(TT.NUMBER, "1", 1.0)]),
+        (
+            "1 /* x */ + 2",
+            [
+                (TT.NUMBER, "1", 1.0),
+                (TT.PLUS, "+", None),
+                (TT.NUMBER, "2", 2.0),
+            ],
+        ),
+        # nesting is not allowed: the first */ closes the comment
+        (
+            "/* /* nested */ tail */",
+            [
+                (TT.IDENTIFIER, "tail", None),
+                (TT.STAR, "*", None),
+                (TT.SLASH, "/", None),
+            ],
+        ),
+        # a single */ closes the whole thing even with an inner /* (no nesting)
+        ("/* outer /* inner */", []),
+    ],
+)
+def test_block_comments(scan, source, expected):
     assert scan(source) == expected + [EOF]
 
 
@@ -423,4 +454,21 @@ def test_unterminated_string(source, position):
     with pytest.raises(ScannerError) as excinfo:
         Scanner(source).scan()
     assert str(excinfo.value) == "Unterminated string"
+    assert excinfo.value.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        ("/*", (1, 1)),
+        ("/* never closed", (1, 1)),
+        ("1\n/* dangling", (2, 1)),
+        # an inner /* opens no level, so this stays unterminated
+        ("/* outer /* inner", (1, 1)),
+    ],
+)
+def test_unterminated_block_comment(source, position):
+    with pytest.raises(ScannerError) as excinfo:
+        Scanner(source).scan()
+    assert str(excinfo.value) == "Unterminated comment"
     assert excinfo.value.get_line_info() == position

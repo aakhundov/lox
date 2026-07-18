@@ -103,6 +103,17 @@ class Scanner:
                 # ignore // ... comment
                 while not self._at_end() and self._peek() != "\n":
                     self._advance()
+            elif self._match("*"):
+                # ignore /* ... */ comment (nesting not allowed)
+                while not self._at_end():
+                    if self._peek() == "*" and self._peek_next() == "/":
+                        self._advance()  # eat the closing '*'
+                        self._advance()  # eat the closing '/'
+                        break
+                    self._advance()
+                else:
+                    # the loop finished without breaking
+                    self._raise("Unterminated comment")
             else:
                 self._add_token(TT.SLASH)
         elif c in (" ", "\t", "\n", "\r"):
