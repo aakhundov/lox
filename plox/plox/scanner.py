@@ -2,14 +2,30 @@ from typing import NoReturn
 
 from plox.common import (
     InterpreterError,
-    Literal,
     Token,
     TokenType as TT,
 )
 
 
 class ScannerError(InterpreterError):
-    pass
+    def __init__(self, msg: str, source: str, offset: int):
+        line_num, col_num = self._get_position(source, offset)
+        super().__init__(msg, line_num, col_num)
+
+    @staticmethod
+    def _get_position(source: str, offset: int) -> tuple[int, int]:
+        line_num, col_num = 0, 0
+        for i, c in enumerate(source):
+            if i == offset:
+                break
+
+            if c == "\n":
+                line_num += 1
+                col_num = 0
+            else:
+                col_num += 1
+
+        return line_num + 1, col_num + 1
 
 
 class Scanner:
@@ -99,7 +115,7 @@ class Scanner:
         elif self._is_alpha(c):
             self._identifier()
         else:
-            self._raise(f"Unexpected character: {c}")
+            self._raise(f"Unexpected character: '{c}'")
 
     def _string(self) -> None:
         while not self._at_end() and self._peek() != '"':
@@ -138,7 +154,7 @@ class Scanner:
         else:
             self._add_token(TT.IDENTIFIER)
 
-    def _add_token(self, type_: TT, literal: Literal | None = None) -> None:
+    def _add_token(self, type_: TT, literal: float | str | None = None) -> None:
         lexeme = self._source[self._start : self._current]
         token = Token(type_, lexeme, literal, self._start)
         self._tokens.append(token)
@@ -178,8 +194,10 @@ class Scanner:
     def _is_alnum(self, c: str) -> bool:
         return self._is_alpha(c) or self._is_digit(c)
 
-    def _raise(self, msg: str) -> NoReturn:
-        raise ScannerError(msg)
+    def _raise(self, msg: str, offset: int | None = None) -> NoReturn:
+        if offset is None:
+            offset = self._start
+        raise ScannerError(msg, self._source, offset)
 
     def _add_line_metadata(self) -> None:
         token_offsets = {t.offset for t in self._tokens}

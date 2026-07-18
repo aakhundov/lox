@@ -52,14 +52,11 @@ class TokenType(Enum):
     EOF = auto()
 
 
-Literal = float | str
-
-
 @dataclass
 class Token:
     type: TokenType
     lexeme: str
-    literal: Literal | None
+    literal: float | str | None
     offset: int
 
     # line and col # in the source
@@ -76,4 +73,10 @@ class Token:
 
 
 class InterpreterError(Exception):
-    pass
+    def __init__(self, msg: str, line_num: int, col_num: int):
+        super().__init__(msg)
+        self._line_num = line_num
+        self._col_num = col_num
+
+    def get_line_info(self) -> tuple[int, int]:
+        return self._line_num, self._col_num

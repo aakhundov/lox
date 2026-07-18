@@ -53,14 +53,38 @@ class _FilteredHistory(FileHistory):
         super().append_string(string)
 
 
-def main():
+def _run_code(source: str) -> None:
+    tokens = Scanner(source).scan()
+
+    # for now just print the tokens
+    for i, token in enumerate(tokens):
+        print(f"{i:>04}  {token}")
+
+
+def _print_error(e: InterpreterError, source: str) -> None:
+    line_num, col_num = e.get_line_info()
+    msg = f"{e} [at {line_num}:{col_num}]:"
+
+    # line / col position is one-based
+    source_line = source.split("\n")[line_num - 1]
+    prefix = source_line[: col_num - 1]  # part before the error
+    # this is to print possible tabs from the source as they are
+    padding = "".join(c if c == "\t" else " " for c in prefix)
+    caret = padding + "^"
+
+    error = f"{msg}\n{'=' * len(msg)}\n{source_line}\n{caret}"
+    formatted = FormattedText([(f"fg:{ERROR_COLOR}", error)])
+    print_formatted_text(formatted)
+
+
+def main() -> None:
     prompt = f"<b><{PROMPT_COLOR}>{PROMPT_TEXT}</{PROMPT_COLOR}></b>"
     multiline_hint = HTML(f"{prompt}<{HINT_COLOR}>{MULTILINE_HINT}</{HINT_COLOR}>")
     prompt_line = HTML(prompt)
 
     history = _FilteredHistory(str(HISTORY_PATH))
-    single_line = PromptSession(history=history)
-    multi_line = PromptSession(
+    single_line = PromptSession[str](history=history)
+    multi_line = PromptSession[str](
         history=history,
         multiline=True,
         key_bindings=_make_multiline_bindings(),
@@ -86,8 +110,6 @@ def main():
             break
 
         try:
-            tokens = Scanner(text).scan()
-            for i, token in enumerate(tokens):
-                print(f"{i:>03}  {token}")
+            _run_code(text)
         except InterpreterError as e:
-            print_formatted_text(FormattedText([(f"fg:{ERROR_COLOR}", str(e))]))
+            _print_error(e, text)
