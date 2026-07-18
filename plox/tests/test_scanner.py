@@ -1,7 +1,7 @@
 import pytest
 
 from plox.common import TokenType as TT
-from plox.scanner import Scanner
+from plox.scanner import Scanner, ScannerError
 
 # the scanner always appends this terminal token;
 # expectations include it in the test functions
@@ -395,3 +395,32 @@ def test_eof_position(source, position):
     eof = Scanner(source).scan()[-1]
     assert eof.type == TT.EOF
     assert (eof.line_num, eof.col_num) == position
+
+
+@pytest.mark.parametrize(
+    "source, char, position",
+    [
+        ("@", "@", (1, 1)),
+        ("1 + #", "#", (1, 5)),
+        ("foo\n  ^", "^", (2, 3)),
+    ],
+)
+def test_unexpected_character(source, char, position):
+    with pytest.raises(ScannerError) as excinfo:
+        Scanner(source).scan()
+    assert str(excinfo.value) == f"Unexpected character: '{char}'"
+    assert excinfo.value.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        ('"abc', (1, 1)),
+        ('foo\n"bar', (2, 1)),
+    ],
+)
+def test_unterminated_string(source, position):
+    with pytest.raises(ScannerError) as excinfo:
+        Scanner(source).scan()
+    assert str(excinfo.value) == "Unterminated string"
+    assert excinfo.value.get_line_info() == position
