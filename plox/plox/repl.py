@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
@@ -90,4 +90,4 @@ def main():
             for i, token in enumerate(tokens):
                 print(f"{i:>03}  {token}")
         except InterpreterError as e:
-            print_formatted_text(HTML(f"<{ERROR_COLOR}>{e}</{ERROR_COLOR}>"))
+            print_formatted_text(FormattedText([(f"fg:{ERROR_COLOR}", str(e))]))
