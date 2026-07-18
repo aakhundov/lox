@@ -46,6 +46,7 @@ class Scanner:
 
         self._start = self._current
         self._add_token(TT.EOF)
+        self._add_line_metadata()
 
         return list(self._tokens)
 
@@ -177,3 +178,23 @@ class Scanner:
 
     def _raise(self, msg: str) -> None:
         raise ScannerError(msg)
+
+    def _add_line_metadata(self) -> None:
+        line_meta = {token.offset: [0, 0] for token in self._tokens}
+
+        line_num, col_num = 0, 0
+        for offset, c in enumerate(self._source):
+            if offset in line_meta:
+                line_meta[offset][:] = line_num + 1, col_num + 1
+
+            if c == "\n":
+                line_num += 1
+                col_num = 0
+            else:
+                col_num += 1
+
+        # EOF line / col num aren't covered in the loop above
+        line_meta[len(self._source)] = [line_num + 1, col_num + 1]
+
+        for token in self._tokens:
+            token.line_num, token.col_num = line_meta[token.offset]

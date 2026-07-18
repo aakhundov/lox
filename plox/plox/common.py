@@ -62,11 +62,17 @@ class Token:
     literal: Literal | None
     offset: int
 
+    # line and col # in the source
+    line_num: int | None = None
+    col_num: int | None = None
+
     def __str__(self) -> str:
-        literal = ""
+        desc = ""
         if self.literal is not None:
-            literal = f"[{self.literal}] "
-        return f"{self.type.name} {literal}: {self.offset}"
+            desc = f"[{self.literal}] "
+        elif self.type == TokenType.IDENTIFIER:
+            desc = f"[{self.lexeme}]"
+        return f"{self.type.name} {desc}({self.line_num}:{self.col_num})"
 
 
 class InterpreterError(Exception):

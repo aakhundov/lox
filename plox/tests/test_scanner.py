@@ -359,3 +359,39 @@ def test_token_offsets(source, offsets):
 )
 def test_full_programs(scan, source, expected):
     assert scan(source) == expected + [EOF]
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # single line: column advances with each character (1-based)
+        ("1 + 2", [("1", 1, 1), ("+", 1, 3), ("2", 1, 5)]),
+        # a newline advances the line and resets the column to 1
+        ("a\nbb\nc", [("a", 1, 1), ("bb", 2, 1), ("c", 3, 1)]),
+        ("1\n+ 22", [("1", 1, 1), ("+", 2, 1), ("22", 2, 3)]),
+        # leading indentation is reflected in the column
+        ("if\n  x", [("if", 1, 1), ("x", 2, 3)]),
+    ],
+)
+def test_token_line_and_column(source, expected):
+    tokens = Scanner(source).scan()
+    positions = [
+        (token.lexeme, token.line_num, token.col_num)
+        for token in tokens
+        if token.type != TT.EOF
+    ]
+    assert positions == expected
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        ("abc", (1, 4)),
+        ("a\nbb\nc", (3, 2)),
+        ("", (1, 1)),
+    ],
+)
+def test_eof_position(source, position):
+    eof = Scanner(source).scan()[-1]
+    assert eof.type == TT.EOF
+    assert (eof.line_num, eof.col_num) == position
