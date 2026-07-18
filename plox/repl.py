@@ -3,11 +3,15 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
+from .common import InterpreterError
+from .scanner import Scanner
+
 
 PROMPT_TEXT = ">>> "
-PROMPT_COLOR = "ansicyan"
+PROMPT_COLOR = "ansigreen"
 CONTINUATION_TEXT = "... "
 CONTINUATION_COLOR = "ansibrightblack"
+ERROR_COLOR = "ansired"
 MULTILINE_TRIGGER = ""
 MULTILINE_HINT = "MULTI-LINE ENTRY [\\n\\n to submit]:"
 HINT_COLOR = "ansibrightblack"
@@ -70,7 +74,12 @@ def main():
             # Ctrl-D: exit
             break
 
-        print(text)
+        try:
+            tokens = Scanner(text).scan()
+            for i, token in enumerate(tokens):
+                print(f"{i:>03}  {token}")
+        except InterpreterError as e:
+            print_formatted_text(HTML(f"<{ERROR_COLOR}>{e}</{ERROR_COLOR}>"))
 
 
 if __name__ == "__main__":
