@@ -133,7 +133,7 @@ class Scanner:
             # the identifier is a keyword
             self._add_token(kw_token)
         else:
-            self._add_token(TT.IDENTIFIER, name)
+            self._add_token(TT.IDENTIFIER)
 
     def _add_token(self, type_: TT, literal: Literal | None = None) -> None:
         lexeme = self._source[self._start : self._current]

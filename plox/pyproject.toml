@@ -15,3 +15,7 @@ plox = "plox.repl:main"
 
 [tool.setuptools]
 packages = ["plox"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"

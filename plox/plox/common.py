@@ -63,7 +63,9 @@ class Token:
     offset: int
 
     def __str__(self) -> str:
-        literal = f"[{self.literal}] " if self.literal else ""
+        literal = ""
+        if self.literal is not None:
+            literal = f"[{self.literal}] "
         return f"{self.type.name} {literal}: {self.offset}"
 
 
