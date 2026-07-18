@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
@@ -15,8 +17,8 @@ ERROR_COLOR = "ansired"
 MULTILINE_TRIGGER = ""
 MULTILINE_HINT = "MULTI-LINE ENTRY [\\n\\n to submit]:"
 HINT_COLOR = "ansibrightblack"
-EXIT_RESPONSES = ("exit", "quit", "q")
-HISTORY_FILENAME = ".lox.history"
+EXIT_COMMANDS = ("exit", "quit", "q")
+HISTORY_PATH = Path.home() / ".lox.history"
 
 
 def _make_multiline_bindings():
@@ -42,12 +44,21 @@ def _continuation_prompt(*_):
     return HTML(f"<{CONTINUATION_COLOR}>{CONTINUATION_TEXT}</{CONTINUATION_COLOR}>")
 
 
+class _FilteredHistory(FileHistory):
+    """FileHistory that never records the exit commands."""
+
+    def append_string(self, string):
+        if string.lower().strip() in EXIT_COMMANDS:
+            return
+        super().append_string(string)
+
+
 def main():
     prompt = f"<b><{PROMPT_COLOR}>{PROMPT_TEXT}</{PROMPT_COLOR}></b>"
     multiline_hint = HTML(f"{prompt}<{HINT_COLOR}>{MULTILINE_HINT}</{HINT_COLOR}>")
     prompt_line = HTML(prompt)
 
-    history = FileHistory(HISTORY_FILENAME)
+    history = _FilteredHistory(str(HISTORY_PATH))
     single_line = PromptSession(history=history)
     multi_line = PromptSession(
         history=history,
@@ -65,7 +76,7 @@ def main():
                 print("\x1b[A", end="", flush=True)  # cursor up
                 print_formatted_text(multiline_hint)
                 text = multi_line.prompt(_continuation_prompt())
-            elif text.lower() in EXIT_RESPONSES:
+            elif text.lower().strip() in EXIT_COMMANDS:
                 break
         except KeyboardInterrupt:
             # Ctrl-C: discard current line, keep going
