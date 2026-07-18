@@ -1,4 +1,4 @@
-from .common import (
+from plox.common import (
     InterpreterError,
     Literal,
     Token,

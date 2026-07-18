@@ -3,8 +3,8 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
-from .common import InterpreterError
-from .scanner import Scanner
+from plox.common import InterpreterError
+from plox.scanner import Scanner
 
 
 PROMPT_TEXT = ">>> "
@@ -80,7 +80,3 @@ def main():
                 print(f"{i:>03}  {token}")
         except InterpreterError as e:
             print_formatted_text(HTML(f"<{ERROR_COLOR}>{e}</{ERROR_COLOR}>"))
-
-
-if __name__ == "__main__":
-    main()

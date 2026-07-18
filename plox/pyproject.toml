@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plox"
+version = "0.1.0"
+description = "A Python implementation of the Lox language from Crafting Interpreters"
+authors = [{ name = "Adnan Akhundov" }]
+requires-python = ">=3.12"
+dependencies = ["prompt_toolkit>=3.0"]
+
+[project.scripts]
+plox = "plox.repl:main"
+
+[tool.setuptools]
+packages = ["plox"]

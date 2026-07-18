@@ -3,3 +3,4 @@
 .lox.history
 bin
 __pycache__
+*.egg-info
