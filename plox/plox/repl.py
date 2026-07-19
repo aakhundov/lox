@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import HTML, FormattedText
@@ -22,11 +23,11 @@ EXIT_COMMANDS = ("exit", "quit", "q")
 HISTORY_PATH = Path.home() / ".lox.history"
 
 
-def _make_multiline_bindings():
+def _make_multiline_bindings() -> KeyBindings:
     kb = KeyBindings()
 
     @kb.add("enter")
-    def _(event):
+    def _(event: Any) -> None:
         buf = event.current_buffer
         lines = buf.document.lines
         if len(lines) >= 2 and lines[-2].strip() == "" and lines[-1].strip() == "":
@@ -41,14 +42,14 @@ def _make_multiline_bindings():
     return kb
 
 
-def _continuation_prompt(*_):
+def _continuation_prompt(*_: Any) -> HTML:
     return HTML(f"<{CONTINUATION_COLOR}>{CONTINUATION_TEXT}</{CONTINUATION_COLOR}>")
 
 
 class _FilteredHistory(FileHistory):
     """FileHistory that never records the exit commands."""
 
-    def append_string(self, string):
+    def append_string(self, string: str) -> None:
         if string.lower().strip() in EXIT_COMMANDS:
             return
         super().append_string(string)
@@ -131,7 +132,7 @@ def _run_repl() -> int:
         except InterpreterError as e:
             _print_error(e, text)
 
-    return 0
+    return 0  # EX_OK
 
 
 def main() -> None:

@@ -24,7 +24,7 @@ from ..common import Token
 """
 
 
-def _get_ast_root():
+def _get_ast_root() -> Path:
     this_path = Path(__file__).resolve()
     plox_path = this_path.parents[1]
     ast_root = plox_path / "plox/ast"
@@ -42,7 +42,7 @@ def _get_ast_root():
 def _generate_code(cls: str) -> str:
     lines = [_HEADER]
 
-    def add(indent, line):
+    def add(indent: int, line: str) -> None:
         lines.append(f"{' ' * indent * 4}{line}")
 
     # parent class and nested visitor (abstract)
