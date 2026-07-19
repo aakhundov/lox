@@ -58,7 +58,7 @@ class Scanner:
         self._current = 0
         self._tokens.clear()
 
-        while not self._at_end():
+        while not self._is_at_end():
             self._start = self._current
             self._scan_token()
 
@@ -101,11 +101,11 @@ class Scanner:
         elif c == "/":
             if self._match("/"):
                 # ignore // ... comment
-                while not self._at_end() and self._peek() != "\n":
+                while not self._is_at_end() and self._peek() != "\n":
                     self._advance()
             elif self._match("*"):
                 # ignore /* ... */ comment (nesting not allowed)
-                while not self._at_end():
+                while not self._is_at_end():
                     if self._peek() == "*" and self._peek_next() == "/":
                         self._advance()  # eat the closing '*'
                         self._advance()  # eat the closing '/'
@@ -129,10 +129,10 @@ class Scanner:
             self._raise(f"Unexpected character: '{c}'")
 
     def _string(self) -> None:
-        while not self._at_end() and self._peek() != '"':
+        while not self._is_at_end() and self._peek() != '"':
             self._advance()
 
-        if self._at_end():
+        if self._is_at_end():
             self._raise("Unterminated string")
 
         self._advance()  # eat the closing '"'
@@ -170,7 +170,7 @@ class Scanner:
         token = Token(type_, lexeme, literal, self._start)
         self._tokens.append(token)
 
-    def _at_end(self) -> bool:
+    def _is_at_end(self) -> bool:
         return self._current >= len(self._source)
 
     def _advance(self) -> str:
@@ -179,7 +179,7 @@ class Scanner:
         return c
 
     def _match(self, pattern: str) -> bool:
-        if self._at_end():
+        if self._is_at_end():
             return False
         if self._source[self._current] != pattern:
             return False
@@ -187,7 +187,7 @@ class Scanner:
         return True
 
     def _peek(self) -> str:
-        if self._at_end():
+        if self._is_at_end():
             return "\0"
         return self._source[self._current]
 

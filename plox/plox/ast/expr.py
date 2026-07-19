@@ -4,22 +4,30 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from ..common import Token
+from plox.common import Token
 
 
 class Expr(ABC):
     class Visitor[R](ABC):
         @abstractmethod
-        def visit_binary(self, expr: "Binary") -> R: ...
+        def visit_grouping(self, e: "Grouping") -> R: ...
         @abstractmethod
-        def visit_grouping(self, expr: "Grouping") -> R: ...
+        def visit_binary(self, e: "Binary") -> R: ...
         @abstractmethod
-        def visit_literal(self, expr: "Literal") -> R: ...
+        def visit_unary(self, e: "Unary") -> R: ...
         @abstractmethod
-        def visit_unary(self, expr: "Unary") -> R: ...
+        def visit_literal(self, e: "Literal") -> R: ...
 
     @abstractmethod
     def accept[R](self, visitor: Visitor[R]) -> R: ...
+
+
+@dataclass(frozen=True)
+class Grouping(Expr):
+    expression: Expr
+
+    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
+        return visitor.visit_grouping(self)
 
 
 @dataclass(frozen=True)
@@ -33,11 +41,12 @@ class Binary(Expr):
 
 
 @dataclass(frozen=True)
-class Grouping(Expr):
-    expression: Expr
+class Unary(Expr):
+    operator: Token
+    right: Expr
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
-        return visitor.visit_grouping(self)
+        return visitor.visit_unary(self)
 
 
 @dataclass(frozen=True)
@@ -46,12 +55,3 @@ class Literal(Expr):
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_literal(self)
-
-
-@dataclass(frozen=True)
-class Unary(Expr):
-    operator: Token
-    right: Expr
-
-    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
-        return visitor.visit_unary(self)

@@ -6,10 +6,10 @@ from pathlib import Path
 
 _METADATA = {
     "Expr": {
-        "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Grouping": {"expression": "Expr"},
-        "Literal": {"value": "bool | float | str | None"},
+        "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Unary": {"operator": "Token", "right": "Expr"},
+        "Literal": {"value": "bool | float | str | None"},
     }
 }
 
@@ -20,7 +20,7 @@ _HEADER = """\
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from ..common import Token
+from plox.common import Token
 """
 
 
@@ -50,7 +50,7 @@ def _generate_code(cls: str) -> str:
     add(1, "class Visitor[R](ABC):")
     for sub in _METADATA[cls]:
         add(2, "@abstractmethod")
-        add(2, f'def visit_{sub.lower()}(self, {cls.lower()}: "{sub}") -> R: ...')
+        add(2, f'def visit_{sub.lower()}(self, {cls.lower()[0]}: "{sub}") -> R: ...')
     add(1, "@abstractmethod")
     add(1, "def accept[R](self, visitor: Visitor[R]) -> R: ...")
 
