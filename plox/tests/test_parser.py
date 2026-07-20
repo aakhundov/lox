@@ -40,9 +40,9 @@ def show(parse):
         ("123", "123"),
         ("0", "0"),
         ("123.456", "123.456"),
-        ('"hello"', "hello"),
-        ('""', ""),
-        ('"a b c"', "a b c"),
+        ('"hello"', '"hello"'),
+        ('""', '""'),
+        ('"a b c"', '"a b c"'),
         ("true", "true"),
         ("false", "false"),
         ("nil", "nil"),
@@ -57,7 +57,7 @@ def test_literals(show, source, expected):
     [
         ("(123)", "(grp 123)"),
         ("(true)", "(grp true)"),
-        ('("hi")', "(grp hi)"),
+        ('("hi")', '(grp "hi")'),
         ("((1))", "(grp (grp 1))"),
         # a grouping is transparent to precedence of what it wraps
         ("(1 + 2)", "(grp (+ 1 2))"),

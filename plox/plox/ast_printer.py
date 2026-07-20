@@ -16,6 +16,8 @@ class AstPrinter(Expr.Visitor[str]):
         return self._parens(e.operator.lexeme, e.right)
 
     def visit_literal(self, e: Literal) -> str:
+        if isinstance(e.value, str):
+            return f'"{e.value}"'
         return to_str(e.value)
 
     def _parens(self, head: str, *es: Expr) -> str:

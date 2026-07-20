@@ -21,7 +21,7 @@ def show():
     [
         (123.0, "123"),
         (45.67, "45.67"),
-        ("hello", "hello"),
+        ("hello", '"hello"'),
         (True, "true"),
         (False, "false"),
         (None, "nil"),
@@ -43,7 +43,7 @@ def test_binary(show):
 
 def test_grouping(show):
     assert show(Grouping(Literal(45.67))) == "(grp 45.67)"
-    assert show(Grouping(Literal("hi"))) == "(grp hi)"
+    assert show(Grouping(Literal("hi"))) == '(grp "hi")'
 
 
 def test_nested(show):
