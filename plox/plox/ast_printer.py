@@ -6,7 +6,7 @@ class AstPrinter(Expr.Visitor[str]):
         return e.accept(self)
 
     def visit_grouping(self, e: Grouping) -> str:
-        return self._parens("grouping", e.expression)
+        return self._parens("grp", e.expression)
 
     def visit_binary(self, e: Binary) -> str:
         return self._parens(e.operator.lexeme, e.left, e.right)

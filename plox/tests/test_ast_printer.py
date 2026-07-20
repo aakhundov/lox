@@ -42,15 +42,15 @@ def test_binary(show):
 
 
 def test_grouping(show):
-    assert show(Grouping(Literal(45.67))) == "(grouping 45.67)"
-    assert show(Grouping(Literal("hi"))) == "(grouping hi)"
+    assert show(Grouping(Literal(45.67))) == "(grp 45.67)"
+    assert show(Grouping(Literal("hi"))) == "(grp hi)"
 
 
 def test_nested(show):
-    # -123 * (45.67)  -->  (* (- 123) (grouping 45.67))
+    # -123 * (45.67)  -->  (* (- 123) (grp 45.67))
     expr = Binary(
         Unary(op("-", TT.MINUS), Literal(123.0)),
         op("*", TT.STAR),
         Grouping(Literal(45.67)),
     )
-    assert show(expr) == "(* (- 123) (grouping 45.67))"
+    assert show(expr) == "(* (- 123) (grp 45.67))"

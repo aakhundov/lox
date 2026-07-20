@@ -8,6 +8,8 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
 from plox.common import InterpreterError
+from plox.ast_printer import AstPrinter
+from plox.parser import Parser
 from plox.scanner import Scanner
 
 
@@ -58,9 +60,16 @@ class _FilteredHistory(FileHistory):
 def _run_code(source: str) -> None:
     tokens = Scanner(source).scan()
 
-    # for now just print the tokens
+    # print the tokens
     for i, token in enumerate(tokens):
-        print(f"{i:>04}  {token}")
+        print(f"{i:04}  {token}")
+    print()
+
+    expr = Parser(tokens).parse()
+
+    # print the AST
+    s_expr = AstPrinter().print(expr)
+    print(s_expr)
 
 
 def _print_error(e: InterpreterError, source: str) -> None:
