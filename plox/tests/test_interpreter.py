@@ -154,6 +154,30 @@ def test_comparison(evaluate, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # strings order lexicographically by Unicode code point
+        ('"a" < "b"', True),
+        ('"b" < "a"', False),
+        ('"a" <= "a"', True),
+        ('"b" >= "b"', True),
+        ('"apple" < "banana"', True),
+        ('"apple" > "banana"', False),
+        # a prefix sorts before the longer string
+        ('"ab" < "abc"', True),
+        ('"abc" <= "ab"', False),
+        # uppercase sorts before lowercase (ASCII order)
+        ('"Z" < "a"', True),
+        # equal strings are neither strictly less nor greater
+        ('"a" < "a"', False),
+        ('"a" > "a"', False),
+    ],
+)
+def test_string_comparison(evaluate, source, expected):
+    _assert_value(evaluate(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # same-type equality compares by value
         ("1 == 1", True),
         ("1 == 2", False),
@@ -254,20 +278,23 @@ def test_arithmetic_operand_error(evaluate, source, message, position):
 
 
 @pytest.mark.parametrize(
-    "source, message, position",
+    "source, position",
     [
-        # relational operators are number-only (see backlog)
-        ('1 < "a"', "Right operand must be a number", (1, 3)),
-        ('"a" > 1', "Left operand must be a number", (1, 5)),
-        ("true <= 1", "Left operand must be a number", (1, 6)),
-        ("nil >= 1", "Left operand must be a number", (1, 5)),
-        ('"a" < "b"', "Left operand must be a number", (1, 5)),
+        # relational operators need both operands numbers or both strings;
+        # mixed or otherwise-typed operands are an error
+        ('1 < "a"', (1, 3)),
+        ('"a" > 1', (1, 5)),
+        ("true <= 1", (1, 6)),
+        ("nil >= 1", (1, 5)),
+        # same non-numeric/non-string type on both sides is still an error
+        ("true < false", (1, 6)),
+        ("nil > nil", (1, 5)),
     ],
 )
-def test_comparison_operand_error(evaluate, source, message, position):
+def test_comparison_operand_error(evaluate, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         evaluate(source)
-    assert str(excinfo.value) == message
+    assert str(excinfo.value) == "Operands must both be number or string"
     assert excinfo.value.get_line_info() == position
 
 

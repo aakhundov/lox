@@ -18,11 +18,26 @@ class InterpreterError(LoxErrorFromToken):
 
 
 class Interpreter(Expr.Visitor[LoxValue]):
-    # TT.PLUS isn't here because it applies to both float and str
-    _FLOAT_BINARY_OPS: dict[TT, Callable[[float, float], float | bool]] = {
+    _FLOAT_BINARY_OPS: dict[
+        TT,
+        Callable[
+            [float, float],
+            float,
+        ],
+    ] = {
         TT.MINUS: operator.sub,
         TT.STAR: operator.mul,
         TT.SLASH: operator.truediv,
+    }
+
+    _FLOAT_OR_STR_BINARY_OPS: dict[
+        TT,
+        Callable[
+            [float | str, float | str],
+            float | bool | str,
+        ],
+    ] = {
+        TT.PLUS: operator.add,
         TT.GREATER: operator.gt,
         TT.GREATER_EQUAL: operator.ge,
         TT.LESS: operator.lt,
@@ -40,22 +55,25 @@ class Interpreter(Expr.Visitor[LoxValue]):
         left = self._evaluate(e.left)
         right = self._evaluate(e.right)
 
-        if op.type == TT.PLUS:
-            if isinstance(left, float) and isinstance(right, float):
-                return left + right  # float addition
-            if isinstance(left, str) and isinstance(right, str):
-                return left + right  # str concatenation
-            self._raise("Operands must both be number or string", op)
-
-        if op.type in self._FLOAT_BINARY_OPS:
+        # can only take float args
+        if float_fn := self._FLOAT_BINARY_OPS.get(op.type):
             if not isinstance(left, float):
                 self._raise("Left operand must be a number", op)
             if not isinstance(right, float):
                 self._raise("Right operand must be a number", op)
             if op.type == TT.SLASH and right == 0:
                 self._raise("Division by zero", op)
-            return self._FLOAT_BINARY_OPS[op.type](left, right)
+            return float_fn(left, right)
 
+        # can take float or str args
+        if float_or_str_fn := self._FLOAT_OR_STR_BINARY_OPS.get(op.type):
+            if isinstance(left, float) and isinstance(right, float):
+                return float_or_str_fn(left, right)  # float operation
+            if isinstance(left, str) and isinstance(right, str):
+                return float_or_str_fn(left, right)  # str operation
+            self._raise("Operands must both be number or string", op)
+
+        # can take any arg types
         if op.type == TT.EQUAL_EQUAL:
             return is_equal(left, right)
         if op.type == TT.BANG_EQUAL:
