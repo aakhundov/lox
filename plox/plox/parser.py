@@ -1,15 +1,12 @@
 from collections.abc import Callable
 from typing import NoReturn
 
-from plox.common import Token, TokenType as TT, InterpreterError
+from plox.common import Token, TokenType as TT, LoxErrorFromToken
 from plox.ast.expr import Expr, Grouping, Binary, Unary, Literal
 
 
-class ParserError(InterpreterError):
-    def __init__(self, msg: str, token: Token):
-        assert token.line_num is not None
-        assert token.col_num is not None
-        super().__init__(msg, token.line_num, token.col_num)
+class ParserError(LoxErrorFromToken):
+    pass
 
 
 class Parser:

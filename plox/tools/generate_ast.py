@@ -9,7 +9,7 @@ _METADATA = {
         "Grouping": {"expression": "Expr"},
         "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Unary": {"operator": "Token", "right": "Expr"},
-        "Literal": {"value": "bool | float | str | None"},
+        "Literal": {"value": "LoxValue"},
     }
 }
 
@@ -20,7 +20,7 @@ _HEADER = """\
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from plox.common import Token
+from plox.common import Token, LoxValue
 """
 
 

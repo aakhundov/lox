@@ -4,7 +4,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from plox.common import Token
+from plox.common import Token, LoxValue
 
 
 class Expr(ABC):
@@ -51,7 +51,7 @@ class Unary(Expr):
 
 @dataclass(frozen=True)
 class Literal(Expr):
-    value: bool | float | str | None
+    value: LoxValue
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_literal(self)

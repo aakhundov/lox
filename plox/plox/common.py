@@ -87,7 +87,7 @@ class Token:
         return f"{self.type.name} {desc}({self.line_num}:{self.col_num})"
 
 
-class InterpreterError(Exception):
+class LoxError(Exception):
     def __init__(self, msg: str, line_num: int, col_num: int):
         super().__init__(msg)
         self._line_num = line_num
@@ -95,3 +95,48 @@ class InterpreterError(Exception):
 
     def get_line_info(self) -> tuple[int, int]:
         return self._line_num, self._col_num
+
+
+class LoxErrorFromToken(LoxError):
+    def __init__(self, msg: str, token: Token):
+        assert token.line_num is not None
+        assert token.col_num is not None
+        super().__init__(msg, token.line_num, token.col_num)
+
+
+LoxValue = bool | float | str | None
+
+
+def is_nil(val: LoxValue) -> bool:
+    return val is None
+
+
+def is_equal(a: LoxValue, b: LoxValue) -> bool:
+    if type(a) is not type(b):
+        # must be same type to be equal
+        return False
+    return a == b
+
+
+def is_truthy(val: LoxValue) -> bool:
+    if val is None:
+        return False
+    if isinstance(val, float) and val == 0:
+        # zero numbers are falsy
+        return False
+    if isinstance(val, str) and val == "":
+        # empty strings are falsy
+        return False
+    if isinstance(val, bool):
+        return val
+    return True
+
+
+def to_str(val: LoxValue) -> str:
+    if isinstance(val, bool):
+        return str(val).lower()
+    if isinstance(val, float) and val.is_integer():
+        return str(int(val))
+    if val is None:
+        return "nil"
+    return str(val)

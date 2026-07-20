@@ -7,8 +7,9 @@ from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
-from plox.common import InterpreterError
+from plox.common import LoxError, is_nil, to_str
 from plox.ast_printer import AstPrinter
+from plox.interpreter import Interpreter
 from plox.parser import Parser
 from plox.scanner import Scanner
 
@@ -57,7 +58,7 @@ class _FilteredHistory(FileHistory):
         super().append_string(string)
 
 
-def _run_code(source: str) -> None:
+def _run_code(source: str, interpreter: Interpreter) -> None:
     tokens = Scanner(source).scan()
 
     # print the tokens
@@ -68,11 +69,17 @@ def _run_code(source: str) -> None:
     expr = Parser(tokens).parse()
 
     # print the AST
-    s_expr = AstPrinter().print(expr)
-    print(s_expr)
+    print(AstPrinter().print(expr))
+    print()
+
+    val = interpreter.interpret(expr)
+
+    # print the value
+    if not is_nil(val):
+        print(to_str(val))
 
 
-def _print_error(e: InterpreterError, source: str) -> None:
+def _print_error(e: LoxError, source: str) -> None:
     line_num, col_num = e.get_line_info()
     msg = f"{e} [at {line_num}:{col_num}]:"
 
@@ -96,8 +103,8 @@ def _run_file(path: str) -> int:
         return 66  # EX_NOINPUT
 
     try:
-        _run_code(source)
-    except InterpreterError as e:
+        _run_code(source, Interpreter())
+    except LoxError as e:
         _print_error(e, source)
         return 65  # EX_DATAERR
 
@@ -118,6 +125,10 @@ def _run_repl() -> int:
         prompt_continuation=_continuation_prompt,
     )
 
+    # the interpreter instance is presistent to
+    # keep the state during the whole REPL session
+    interpreter = Interpreter()
+
     while True:
         try:
             text = single_line.prompt(prompt_line)
@@ -137,8 +148,8 @@ def _run_repl() -> int:
             break
 
         try:
-            _run_code(text)
-        except InterpreterError as e:
+            _run_code(text, interpreter)
+        except LoxError as e:
             _print_error(e, text)
 
     return 0  # EX_OK

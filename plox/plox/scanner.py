@@ -1,13 +1,13 @@
 from typing import NoReturn
 
 from plox.common import (
-    InterpreterError,
+    LoxError,
     Token,
     TokenType as TT,
 )
 
 
-class ScannerError(InterpreterError):
+class ScannerError(LoxError):
     def __init__(self, msg: str, source: str, offset: int):
         line_num, col_num = self._get_position(source, offset)
         super().__init__(msg, line_num, col_num)
