@@ -1,4 +1,5 @@
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,6 @@ ERROR_COLOR = "ansired"
 MULTILINE_TRIGGER = ""
 MULTILINE_HINT = "MULTI-LINE ENTRY [\\n\\n to submit]:"
 HINT_COLOR = "ansibrightblack"
-EXIT_COMMANDS = ("exit", "quit", "q")
 HISTORY_PATH = Path.home() / ".lox.history"
 
 
@@ -49,33 +49,48 @@ def _continuation_prompt(*_: Any) -> HTML:
     return HTML(f"<{CONTINUATION_COLOR}>{CONTINUATION_TEXT}</{CONTINUATION_COLOR}>")
 
 
+def _print_formatted_error_text(error: str) -> None:
+    formatted = FormattedText([(f"fg:{ERROR_COLOR}", error)])
+    print_formatted_text(formatted, file=sys.stderr)
+
+
 class _FilteredHistory(FileHistory):
-    """FileHistory that never records the exit commands."""
+    """FileHistory that never records commands."""
 
     def append_string(self, string: str) -> None:
-        if string.lower().strip() in EXIT_COMMANDS:
+        if string.lower().strip().startswith(":"):
             return
         super().append_string(string)
 
 
-def _run_code(source: str, interpreter: Interpreter) -> None:
+@dataclass
+class _RunConfig:
+    print_tokens: bool = False
+    print_ast: bool = False
+
+
+def _run_code(
+    source: str,
+    interpreter: Interpreter,
+    config: _RunConfig,
+) -> None:
     tokens = Scanner(source).scan()
 
-    # print the tokens
-    for i, token in enumerate(tokens):
-        print(f"{i:04}  {token}")
-    print()
+    if config.print_tokens:
+        for i, token in enumerate(tokens):
+            print(f"{i:04}  {token}")
+        print()
 
     expr = Parser(tokens).parse()
 
-    # print the AST
-    print(AstPrinter().print(expr))
-    print()
+    if config.print_ast:
+        print(AstPrinter().print(expr))
+        print()
 
     val = interpreter.interpret(expr)
 
-    # print the value
     if not is_nil(val):
+        # print the value
         print(to_str(val))
 
 
@@ -91,8 +106,7 @@ def _print_error(e: LoxError, source: str) -> None:
     caret = padding + "^"
 
     error = f"{msg}\n{'=' * len(msg)}\n{source_line}\n{caret}"
-    formatted = FormattedText([(f"fg:{ERROR_COLOR}", error)])
-    print_formatted_text(formatted, file=sys.stderr)
+    _print_formatted_error_text(error)
 
 
 def _run_file(path: str) -> int:
@@ -103,12 +117,26 @@ def _run_file(path: str) -> int:
         return 66  # EX_NOINPUT
 
     try:
-        _run_code(source, Interpreter())
+        _run_code(
+            source=source,
+            interpreter=Interpreter(),  # fresh interpreter
+            config=_RunConfig(),  # default config
+        )
     except LoxError as e:
         _print_error(e, source)
         return 65  # EX_DATAERR
 
     return 0  # EX_OK
+
+
+def _update_repl_config(cfg: _RunConfig, command: str) -> None:
+    match command.split():
+        case ["tokens", "on" | "off" as toggle]:
+            cfg.print_tokens = toggle == "on"
+        case ["ast", "on" | "off" as toggle]:
+            cfg.print_ast = toggle == "on"
+        case _:
+            _print_formatted_error_text(f'unrecognized command: "{command}"')
 
 
 def _run_repl() -> int:
@@ -125,9 +153,10 @@ def _run_repl() -> int:
         prompt_continuation=_continuation_prompt,
     )
 
-    # the interpreter instance is presistent to
-    # keep the state during the whole REPL session
+    # the interpreter instance and REPL config
+    # persist for the whole session duration
     interpreter = Interpreter()
+    repl_cfg = _RunConfig()
 
     while True:
         try:
@@ -138,8 +167,12 @@ def _run_repl() -> int:
                 print("\x1b[A", end="", flush=True)  # cursor up
                 print_formatted_text(multiline_hint)
                 text = multi_line.prompt(_continuation_prompt())
-            elif text.lower().strip() in EXIT_COMMANDS:
-                break
+            elif (command := text.lower().strip()).startswith(":"):
+                command = command[1:].strip()  # drop the ':'
+                if command in ("exit", "quit", "q"):
+                    break  # quit the REPL
+                _update_repl_config(repl_cfg, command)
+                continue
         except KeyboardInterrupt:
             # Ctrl-C: discard current line, keep going
             continue
@@ -148,7 +181,11 @@ def _run_repl() -> int:
             break
 
         try:
-            _run_code(text, interpreter)
+            _run_code(
+                source=text,
+                interpreter=interpreter,
+                config=repl_cfg,
+            )
         except LoxError as e:
             _print_error(e, text)
 
