@@ -57,11 +57,25 @@ class Token:
     type: TokenType
     lexeme: str
     literal: float | str | None
-    offset: int
 
-    # line and col # in the source
+    # source position
+    offset: int | None = None
     line_num: int | None = None
     col_num: int | None = None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Token):
+            return NotImplemented
+
+        # ignore source position
+        return (
+            self.type == other.type
+            and self.lexeme == other.lexeme
+            and self.literal == other.literal
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.type, self.lexeme, self.literal))
 
     def __str__(self) -> str:
         desc = ""
@@ -69,6 +83,7 @@ class Token:
             desc = f"[{self.literal}] "
         elif self.type == TokenType.IDENTIFIER:
             desc = f"[{self.lexeme}] "
+
         return f"{self.type.name} {desc}({self.line_num}:{self.col_num})"
 
 

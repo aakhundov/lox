@@ -229,4 +229,5 @@ class Scanner:
         line_meta[len(self._source)] = (line_num + 1, col_num + 1)
 
         for token in self._tokens:
+            assert token.offset is not None
             token.line_num, token.col_num = line_meta[token.offset]
