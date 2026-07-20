@@ -1,10 +1,28 @@
-from plox.ast import Expr, Grouping, Binary, Unary, Literal
+from plox.ast import (
+    Expr,
+    Grouping,
+    Binary,
+    Unary,
+    Literal,
+    Stmt,
+    Print,
+    Expression,
+)
 from plox.common import to_str
 
 
-class AstPrinter(Expr.Visitor[str]):
-    def print(self, e: Expr) -> str:
-        return e.accept(self)
+class AstPrinter(
+    Expr.Visitor[str],
+    Stmt.Visitor[str],
+):
+    def print(self, node: Expr | Stmt) -> str:
+        return node.accept(self)
+
+    def visit_print(self, s: Print) -> str:
+        return self._parens("print", *s.expressions)
+
+    def visit_expression(self, s: Expression) -> str:
+        return self._parens("expr", s.expression)
 
     def visit_grouping(self, e: Grouping) -> str:
         return self._parens("grp", e.expression)
@@ -16,8 +34,8 @@ class AstPrinter(Expr.Visitor[str]):
         return self._parens(e.operator.lexeme, e.right)
 
     def visit_literal(self, e: Literal) -> str:
-        return to_str(e.value)
+        return f'"{e.value}"' if isinstance(e.value, str) else to_str(e.value)
 
-    def _parens(self, head: str, *es: Expr) -> str:
-        exprs = " ".join(e.accept(self) for e in es)
-        return f"({head} {exprs})"
+    def _parens(self, head: str, *nodes: Expr | Stmt) -> str:
+        formatted = " ".join(node.accept(self) for node in nodes)
+        return f"({head} {formatted})"

@@ -11,6 +11,10 @@ _METADATA = {
         "Unary": {"operator": "Token", "right": "Expr"},
         "Literal": {"value": "LoxValue"},
     },
+    "Stmt": {
+        "Expression": {"expression": "Expr"},
+        "Print": {"expressions": "list[Expr]"},
+    },
 }
 
 _HEADER = """\

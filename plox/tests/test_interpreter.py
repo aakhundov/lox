@@ -1,23 +1,47 @@
 import pytest
 
+from plox.common import LoxValue
 from plox.interpreter import Interpreter, InterpreterError
 from plox.parser import Parser
 from plox.scanner import Scanner
 
 
 @pytest.fixture
-def evaluate():
-    """Return a helper that scans, parses, then evaluates `source`.
+def run():
+    """Return a helper that runs `source`, collecting the values it prints.
 
-    Driving the interpreter through the real Scanner and Parser mirrors how
-    it is used in practice and keeps expectations free of AST-construction
-    details -- each case is written as the Lox source a user would type.
+    The interpreter's `print_fn` seam is tapped with a raw collector, so each
+    executed `print` appends its list of evaluated LoxValues (varargs are one
+    group). Operating at the Python-implementation level lets tests observe the
+    actual runtime values rather than their rendered text. A fresh interpreter
+    runs each source, so no state leaks between cases.
     """
 
-    def _evaluate(source):
-        return Interpreter().interpret(Parser(Scanner(source).scan()).parse())
+    def _run(source):
+        collected: list[list[LoxValue]] = []
+        Interpreter(print_fn=collected.append).interpret(
+            Parser(Scanner(source).scan()).parse()
+        )
+        return collected
 
-    return _evaluate
+    return _run
+
+
+@pytest.fixture
+def value(run):
+    """Return a helper that runs a single `print` of one expression.
+
+    Value tests print exactly one expression; the helper unwraps the lone
+    collected group and returns its single LoxValue for assertion.
+    """
+
+    def _value(source):
+        collected = run(source)
+        assert len(collected) == 1
+        assert len(collected[0]) == 1
+        return collected[0][0]
+
+    return _value
 
 
 def _assert_value(result, expected):
@@ -36,163 +60,163 @@ def _assert_value(result, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
-        ("123", 123.0),
-        ("0", 0.0),
-        ("123.456", 123.456),
-        ('"hello"', "hello"),
-        ('""', ""),
-        ('"a b c"', "a b c"),
-        ("true", True),
-        ("false", False),
-        ("nil", None),
+        ("print 123;", 123.0),
+        ("print 0;", 0.0),
+        ("print 123.456;", 123.456),
+        ('print "hello";', "hello"),
+        ('print "";', ""),
+        ('print "a b c";', "a b c"),
+        ("print true;", True),
+        ("print false;", False),
+        ("print nil;", None),
     ],
 )
-def test_literals(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_literals(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
         # a grouping evaluates to whatever it wraps
-        ("(123)", 123.0),
-        ("(true)", True),
-        ('("hi")', "hi"),
-        ("((5))", 5.0),
-        ("(1 + 2)", 3.0),
-        ("2 * (3 + 4)", 14.0),
+        ("print (123);", 123.0),
+        ("print (true);", True),
+        ('print ("hi");', "hi"),
+        ("print ((5));", 5.0),
+        ("print (1 + 2);", 3.0),
+        ("print 2 * (3 + 4);", 14.0),
     ],
 )
-def test_grouping(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_grouping(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
-        ("-5", -5.0),
-        ("-0", 0.0),
-        ("-123.5", -123.5),
+        ("print -5;", -5.0),
+        ("print -0;", 0.0),
+        ("print -123.5;", -123.5),
         # unary minus stacks
-        ("- -5", 5.0),
-        ("--5", 5.0),
-        ("-(1 + 2)", -3.0),
+        ("print - -5;", 5.0),
+        ("print --5;", 5.0),
+        ("print -(1 + 2);", -3.0),
     ],
 )
-def test_unary_negation(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_unary_negation(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
         # only false and nil, plus Python-like empty/zero values, are falsy
-        ("!true", False),
-        ("!false", True),
-        ("!nil", True),
-        ("!0", True),
-        ("!1", False),
-        ("!123.5", False),
-        ('!""', True),
-        ('!"a"', False),
+        ("print !true;", False),
+        ("print !false;", True),
+        ("print !nil;", True),
+        ("print !0;", True),
+        ("print !1;", False),
+        ("print !123.5;", False),
+        ('print !"";', True),
+        ('print !"a";', False),
         # `!` stacks and reflects truthiness back to a bool
-        ("!!true", True),
-        ("!!nil", False),
-        ("!-1", False),
+        ("print !!true;", True),
+        ("print !!nil;", False),
+        ("print !-1;", False),
     ],
 )
-def test_logical_not(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_logical_not(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
-        ("1 + 2", 3.0),
-        ("5 - 3", 2.0),
-        ("4 * 2", 8.0),
-        ("7 / 2", 3.5),
-        ("6 / 3", 2.0),
-        ("1.5 + 2.5", 4.0),
-        ("10 - 20", -10.0),
+        ("print 1 + 2;", 3.0),
+        ("print 5 - 3;", 2.0),
+        ("print 4 * 2;", 8.0),
+        ("print 7 / 2;", 3.5),
+        ("print 6 / 3;", 2.0),
+        ("print 1.5 + 2.5;", 4.0),
+        ("print 10 - 20;", -10.0),
     ],
 )
-def test_arithmetic(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_arithmetic(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
-        ('"foo" + "bar"', "foobar"),
-        ('"a" + ""', "a"),
-        ('"" + "b"', "b"),
-        ('"a" + "b" + "c"', "abc"),
+        ('print "foo" + "bar";', "foobar"),
+        ('print "a" + "";', "a"),
+        ('print "" + "b";', "b"),
+        ('print "a" + "b" + "c";', "abc"),
     ],
 )
-def test_string_concatenation(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_string_concatenation(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
-        ("1 < 2", True),
-        ("2 < 1", False),
-        ("1 <= 1", True),
-        ("2 <= 1", False),
-        ("3 > 2", True),
-        ("2 > 3", False),
-        ("2 >= 2", True),
-        ("2 >= 3", False),
+        ("print 1 < 2;", True),
+        ("print 2 < 1;", False),
+        ("print 1 <= 1;", True),
+        ("print 2 <= 1;", False),
+        ("print 3 > 2;", True),
+        ("print 2 > 3;", False),
+        ("print 2 >= 2;", True),
+        ("print 2 >= 3;", False),
     ],
 )
-def test_comparison(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_comparison(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
         # strings order lexicographically by Unicode code point
-        ('"a" < "b"', True),
-        ('"b" < "a"', False),
-        ('"a" <= "a"', True),
-        ('"b" >= "b"', True),
-        ('"apple" < "banana"', True),
-        ('"apple" > "banana"', False),
+        ('print "a" < "b";', True),
+        ('print "b" < "a";', False),
+        ('print "a" <= "a";', True),
+        ('print "b" >= "b";', True),
+        ('print "apple" < "banana";', True),
+        ('print "apple" > "banana";', False),
         # a prefix sorts before the longer string
-        ('"ab" < "abc"', True),
-        ('"abc" <= "ab"', False),
+        ('print "ab" < "abc";', True),
+        ('print "abc" <= "ab";', False),
         # uppercase sorts before lowercase (ASCII order)
-        ('"Z" < "a"', True),
+        ('print "Z" < "a";', True),
         # equal strings are neither strictly less nor greater
-        ('"a" < "a"', False),
-        ('"a" > "a"', False),
+        ('print "a" < "a";', False),
+        ('print "a" > "a";', False),
     ],
 )
-def test_string_comparison(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_string_comparison(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
         # same-type equality compares by value
-        ("1 == 1", True),
-        ("1 == 2", False),
-        ("1 != 2", True),
-        ('"a" == "a"', True),
-        ('"a" == "b"', False),
-        ("true == true", True),
-        ("true == false", False),
-        ("false == false", True),
-        ("nil == nil", True),
-        ("nil != nil", False),
+        ("print 1 == 1;", True),
+        ("print 1 == 2;", False),
+        ("print 1 != 2;", True),
+        ('print "a" == "a";', True),
+        ('print "a" == "b";', False),
+        ("print true == true;", True),
+        ("print true == false;", False),
+        ("print false == false;", True),
+        ("print nil == nil;", True),
+        ("print nil != nil;", False),
     ],
 )
-def test_equality_same_type(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_equality_same_type(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
@@ -200,61 +224,100 @@ def test_equality_same_type(evaluate, source, expected):
     [
         # values of different types are never equal, even across the
         # bool/number boundary where Python would conflate them
-        ("1 == true", False),
-        ("0 == false", False),
-        ("1 != true", True),
-        ("0 != false", True),
-        ('1 == "1"', False),
-        ('"true" == true', False),
-        ("nil == false", False),
-        ("nil == 0", False),
-        ("nil != 0", True),
+        ("print 1 == true;", False),
+        ("print 0 == false;", False),
+        ("print 1 != true;", True),
+        ("print 0 != false;", True),
+        ('print 1 == "1";', False),
+        ('print "true" == true;', False),
+        ("print nil == false;", False),
+        ("print nil == 0;", False),
+        ("print nil != 0;", True),
     ],
 )
-def test_equality_cross_type(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_equality_cross_type(value, source, expected):
+    _assert_value(value(source), expected)
 
 
 @pytest.mark.parametrize(
     "source, expected",
     [
         # factor binds tighter than term
-        ("1 + 2 * 3", 7.0),
-        ("2 * 3 + 4 * 5", 26.0),
+        ("print 1 + 2 * 3;", 7.0),
+        ("print 2 * 3 + 4 * 5;", 26.0),
         # grouping overrides precedence
-        ("(1 + 2) * 3", 9.0),
+        ("print (1 + 2) * 3;", 9.0),
         # unary binds tighter than factor
-        ("-2 * 3", -6.0),
+        ("print -2 * 3;", -6.0),
         # term is left-associative
-        ("1 - 2 - 3", -4.0),
-        ("8 / 4 / 2", 1.0),
+        ("print 1 - 2 - 3;", -4.0),
+        ("print 8 / 4 / 2;", 1.0),
         # comparison and term
-        ("1 + 2 < 4", True),
-        ("1 + 2 < 3", False),
+        ("print 1 + 2 < 4;", True),
+        ("print 1 + 2 < 3;", False),
         # equality sits below comparison, which sits below arithmetic
-        ("1 < 2 == true", True),
-        ("!true == false", True),
-        ("2 * 3 == 6", True),
+        ("print 1 < 2 == true;", True),
+        ("print !true == false;", True),
+        ("print 2 * 3 == 6;", True),
     ],
 )
-def test_precedence(evaluate, source, expected):
-    _assert_value(evaluate(source), expected)
+def test_precedence(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # each executed print appends one group of evaluated values
+        ("print 1;", [[1.0]]),
+        # varargs evaluate to one group, in order
+        ("print 1, 2, 3;", [[1.0, 2.0, 3.0]]),
+        ("print 1 + 1, 2 * 2;", [[2.0, 4.0]]),
+        # successive prints append successive groups
+        ("print 1; print 2;", [[1.0], [2.0]]),
+        # expression statements evaluate but print nothing
+        ("1 + 2;", []),
+        ("1 + 2; print 3; 4 + 5;", [[3.0]]),
+    ],
+)
+def test_print_grouping(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("print 1 + 2;", "3\n"),
+        # strings are printed without quotes
+        ('print "hello";', "hello\n"),
+        ("print true;", "true\n"),
+        ("print nil;", "nil\n"),
+        # varargs render space-joined on a single line
+        ("print 1, 2, 3;", "1 2 3\n"),
+        ('print "a", 1, nil;', "a 1 nil\n"),
+        # one line per executed print
+        ("print 1; print 2;", "1\n2\n"),
+    ],
+)
+def test_default_print_output(capsys, source, expected):
+    Interpreter().interpret(Parser(Scanner(source).scan()).parse())
+    assert capsys.readouterr().out == expected
 
 
 @pytest.mark.parametrize(
     "source, position",
     [
         # `+` requires both operands to be numbers or both strings
-        ('1 + "a"', (1, 3)),
-        ('"a" + 1', (1, 5)),
-        ("true + 1", (1, 6)),
-        ("1 + true", (1, 3)),
-        ("nil + 2", (1, 5)),
+        ('1 + "a";', (1, 3)),
+        ('"a" + 1;', (1, 5)),
+        ("true + 1;", (1, 6)),
+        ("1 + true;", (1, 3)),
+        ("nil + 2;", (1, 5)),
     ],
 )
-def test_plus_operand_error(evaluate, source, position):
+def test_plus_operand_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
-        evaluate(source)
+        run(source)
     assert str(excinfo.value) == "Operands must both be number or string"
     assert excinfo.value.get_line_info() == position
 
@@ -263,16 +326,16 @@ def test_plus_operand_error(evaluate, source, position):
     "source, message, position",
     [
         # -, *, / require numeric operands; the message names the bad side
-        ('1 - "a"', "Right operand must be a number", (1, 3)),
-        ('"a" * 2', "Left operand must be a number", (1, 5)),
-        ('2 / "b"', "Right operand must be a number", (1, 3)),
-        ("true - 1", "Left operand must be a number", (1, 6)),
-        ("nil * 2", "Left operand must be a number", (1, 5)),
+        ('1 - "a";', "Right operand must be a number", (1, 3)),
+        ('"a" * 2;', "Left operand must be a number", (1, 5)),
+        ('2 / "b";', "Right operand must be a number", (1, 3)),
+        ("true - 1;", "Left operand must be a number", (1, 6)),
+        ("nil * 2;", "Left operand must be a number", (1, 5)),
     ],
 )
-def test_arithmetic_operand_error(evaluate, source, message, position):
+def test_arithmetic_operand_error(run, source, message, position):
     with pytest.raises(InterpreterError) as excinfo:
-        evaluate(source)
+        run(source)
     assert str(excinfo.value) == message
     assert excinfo.value.get_line_info() == position
 
@@ -282,18 +345,18 @@ def test_arithmetic_operand_error(evaluate, source, message, position):
     [
         # relational operators need both operands numbers or both strings;
         # mixed or otherwise-typed operands are an error
-        ('1 < "a"', (1, 3)),
-        ('"a" > 1', (1, 5)),
-        ("true <= 1", (1, 6)),
-        ("nil >= 1", (1, 5)),
+        ('1 < "a";', (1, 3)),
+        ('"a" > 1;', (1, 5)),
+        ("true <= 1;", (1, 6)),
+        ("nil >= 1;", (1, 5)),
         # same non-numeric/non-string type on both sides is still an error
-        ("true < false", (1, 6)),
-        ("nil > nil", (1, 5)),
+        ("true < false;", (1, 6)),
+        ("nil > nil;", (1, 5)),
     ],
 )
-def test_comparison_operand_error(evaluate, source, position):
+def test_comparison_operand_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
-        evaluate(source)
+        run(source)
     assert str(excinfo.value) == "Operands must both be number or string"
     assert excinfo.value.get_line_info() == position
 
@@ -301,15 +364,15 @@ def test_comparison_operand_error(evaluate, source, position):
 @pytest.mark.parametrize(
     "source, position",
     [
-        ("1 / 0", (1, 3)),
-        ("5 / 0", (1, 3)),
-        ("10 / 0", (1, 4)),
-        ("1 / (2 - 2)", (1, 3)),
+        ("1 / 0;", (1, 3)),
+        ("5 / 0;", (1, 3)),
+        ("10 / 0;", (1, 4)),
+        ("1 / (2 - 2);", (1, 3)),
     ],
 )
-def test_division_by_zero_error(evaluate, source, position):
+def test_division_by_zero_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
-        evaluate(source)
+        run(source)
     assert str(excinfo.value) == "Division by zero"
     assert excinfo.value.get_line_info() == position
 
@@ -318,14 +381,14 @@ def test_division_by_zero_error(evaluate, source, position):
     "source, position",
     [
         # unary minus requires a number
-        ("-true", (1, 1)),
-        ("-false", (1, 1)),
-        ("-nil", (1, 1)),
-        ('-"a"', (1, 1)),
+        ("-true;", (1, 1)),
+        ("-false;", (1, 1)),
+        ("-nil;", (1, 1)),
+        ('-"a";', (1, 1)),
     ],
 )
-def test_unary_negation_error(evaluate, source, position):
+def test_unary_negation_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
-        evaluate(source)
+        run(source)
     assert str(excinfo.value) == "Operand must be a number"
     assert excinfo.value.get_line_info() == position

@@ -55,3 +55,30 @@ class Literal(Expr):
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_literal(self)
+
+
+class Stmt(ABC):
+    class Visitor[R](ABC):
+        @abstractmethod
+        def visit_expression(self, s: "Expression") -> R: ...
+        @abstractmethod
+        def visit_print(self, s: "Print") -> R: ...
+
+    @abstractmethod
+    def accept[R](self, visitor: Visitor[R]) -> R: ...
+
+
+@dataclass(frozen=True)
+class Expression(Stmt):
+    expression: Expr
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_expression(self)
+
+
+@dataclass(frozen=True)
+class Print(Stmt):
+    expressions: list[Expr]
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_print(self)

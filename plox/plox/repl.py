@@ -8,7 +8,7 @@ from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
-from plox.common import LoxError, is_nil, to_str
+from plox.common import LoxError
 from plox.ast_printer import AstPrinter
 from plox.interpreter import Interpreter
 from plox.parser import Parser
@@ -78,20 +78,18 @@ def _run_code(
 
     if config.print_tokens:
         for i, token in enumerate(tokens):
-            print(f"{i:04}  {token}")
+            print(f"{i + 1:04}  {token}")
         print()
 
-    expr = Parser(tokens).parse()
+    statements = Parser(tokens).parse()
 
     if config.print_ast:
-        print(AstPrinter().print(expr))
+        for i, statement in enumerate(statements):
+            s_expr = AstPrinter().print(statement)
+            print(f"{i + 1:04}  {s_expr}")
         print()
 
-    val = interpreter.interpret(expr)
-
-    if not is_nil(val):
-        # print the value
-        print(to_str(val))
+    interpreter.interpret(statements)
 
 
 def _print_error(e: LoxError, source: str) -> None:

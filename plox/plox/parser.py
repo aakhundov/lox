@@ -1,8 +1,17 @@
 from collections.abc import Callable
 from typing import NoReturn
 
+from plox.ast import (
+    Expr,
+    Grouping,
+    Binary,
+    Unary,
+    Literal,
+    Stmt,
+    Print,
+    Expression,
+)
 from plox.common import Token, TokenType as TT, LoxErrorFromToken
-from plox.ast import Expr, Grouping, Binary, Unary, Literal
 
 
 class ParserError(LoxErrorFromToken):
@@ -14,24 +23,56 @@ class Parser:
         self._tokens = tokens
         self._current = 0
 
-    def parse(self) -> Expr:
-        return self._expression()
+    def parse(self) -> list[Stmt]:
+        statements: list[Stmt] = []
+        while not self._is_at_end():
+            statements.append(self._statement())
+        return statements
+
+    def _statement(self) -> Stmt:
+        if self._match(TT.PRINT):
+            return self._print_stmt()
+
+        # no prefix match: expression statement
+        return self._expression_stmt()
+
+    def _print_stmt(self) -> Stmt:
+        expressions = [self._expression()]
+        while self._match(TT.COMMA):
+            expressions.append(self._expression())
+
+        self._consume(
+            TT.SEMICOLON,
+            "Expect ';' after values",
+        )
+
+        return Print(expressions)
+
+    def _expression_stmt(self) -> Stmt:
+        expression = self._expression()
+
+        self._consume(
+            TT.SEMICOLON,
+            "Expect ';' after expression",
+        )
+
+        return Expression(expression)
 
     def _expression(self) -> Expr:
-        return self._equality()
+        return self._equality_expr()
 
-    def _equality(self) -> Expr:
+    def _equality_expr(self) -> Expr:
         return self._left_fold_binary(
-            self._comparison,
+            self._comparison_expr,
             (
                 TT.EQUAL_EQUAL,
                 TT.BANG_EQUAL,
             ),
         )
 
-    def _comparison(self) -> Expr:
+    def _comparison_expr(self) -> Expr:
         return self._left_fold_binary(
-            self._term,
+            self._term_expr,
             (
                 TT.LESS,
                 TT.LESS_EQUAL,
@@ -40,33 +81,33 @@ class Parser:
             ),
         )
 
-    def _term(self) -> Expr:
+    def _term_expr(self) -> Expr:
         return self._left_fold_binary(
-            self._factor,
+            self._factor_expr,
             (
                 TT.PLUS,
                 TT.MINUS,
             ),
         )
 
-    def _factor(self) -> Expr:
+    def _factor_expr(self) -> Expr:
         return self._left_fold_binary(
-            self._unary,
+            self._unary_expr,
             (
                 TT.STAR,
                 TT.SLASH,
             ),
         )
 
-    def _unary(self) -> Expr:
+    def _unary_expr(self) -> Expr:
         if self._match(TT.BANG, TT.MINUS):
             operator = self._previous()
-            right = self._unary()
+            right = self._unary_expr()
             return Unary(operator, right)
 
-        return self._primary()
+        return self._primary_expr()
 
-    def _primary(self) -> Expr:
+    def _primary_expr(self) -> Expr:
         if self._match(TT.FALSE):
             return Literal(False)
         if self._match(TT.TRUE):
@@ -78,10 +119,12 @@ class Parser:
             return Literal(self._previous().literal)
 
         if self._match(TT.LEFT_PAREN):
-            expr = self._expression()
-            if not self._match(TT.RIGHT_PAREN):
-                self._raise("Expected ')' after expression")
-            return Grouping(expr)
+            expression = self._expression()
+            self._consume(
+                TT.RIGHT_PAREN,
+                "Expected ')' after expression",
+            )
+            return Grouping(expression)
 
         self._raise("Expected expression")
 
@@ -112,6 +155,11 @@ class Parser:
         if not self._is_at_end():
             self._current += 1
         return self._previous()
+
+    def _consume(self, type_: TT, error_msg: str) -> Token:
+        if self._check(type_):
+            return self._advance()
+        self._raise(error_msg)
 
     def _is_at_end(self) -> bool:
         return self._peek().type == TT.EOF

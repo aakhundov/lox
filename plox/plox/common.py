@@ -107,10 +107,6 @@ class LoxErrorFromToken(LoxError):
 LoxValue = bool | float | str | None
 
 
-def is_nil(val: LoxValue) -> bool:
-    return val is None
-
-
 def is_equal(a: LoxValue, b: LoxValue) -> bool:
     if type(a) is not type(b):
         # must be same type to be equal

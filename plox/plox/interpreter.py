@@ -2,7 +2,16 @@ import operator
 from collections.abc import Callable
 from typing import NoReturn
 
-from plox.ast import Expr, Grouping, Binary, Unary, Literal
+from plox.ast import (
+    Expr,
+    Grouping,
+    Binary,
+    Unary,
+    Literal,
+    Stmt,
+    Print,
+    Expression,
+)
 from plox.common import (
     LoxErrorFromToken,
     Token,
@@ -10,6 +19,7 @@ from plox.common import (
     LoxValue,
     is_equal,
     is_truthy,
+    to_str,
 )
 
 
@@ -17,7 +27,10 @@ class InterpreterError(LoxErrorFromToken):
     pass
 
 
-class Interpreter(Expr.Visitor[LoxValue]):
+class Interpreter(
+    Expr.Visitor[LoxValue],
+    Stmt.Visitor[None],
+):
     _FLOAT_BINARY_OPS: dict[
         TT,
         Callable[
@@ -44,8 +57,21 @@ class Interpreter(Expr.Visitor[LoxValue]):
         TT.LESS_EQUAL: operator.le,
     }
 
-    def interpret(self, e: Expr) -> LoxValue:
-        return self._evaluate(e)
+    def __init__(self, print_fn: Callable[[list[LoxValue]], None] | None = None):
+        if print_fn is None:
+            print_fn = self._default_print_fn
+        self._print_fn = print_fn
+
+    def interpret(self, statements: list[Stmt]) -> None:
+        for statement in statements:
+            self._execute(statement)
+
+    def visit_print(self, s: Print) -> None:
+        values = [self._evaluate(e) for e in s.expressions]
+        self._print_fn(values)
+
+    def visit_expression(self, s: Expression) -> None:
+        self._evaluate(s.expression)
 
     def visit_grouping(self, e: Grouping) -> LoxValue:
         return self._evaluate(e.expression)
@@ -99,8 +125,16 @@ class Interpreter(Expr.Visitor[LoxValue]):
     def visit_literal(self, e: Literal) -> LoxValue:
         return e.value
 
+    def _execute(self, s: Stmt) -> None:
+        return s.accept(self)
+
     def _evaluate(self, e: Expr) -> LoxValue:
         return e.accept(self)
 
     def _raise(self, msg: str, token: Token) -> NoReturn:
         raise InterpreterError(msg, token)
+
+    @staticmethod
+    def _default_print_fn(values: list[LoxValue]) -> None:
+        strs = [to_str(val) for val in values]
+        print(" ".join(strs))
