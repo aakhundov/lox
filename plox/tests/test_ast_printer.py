@@ -1,6 +1,6 @@
 import pytest
 
-from plox.ast.expr import Binary, Grouping, Literal, Unary
+from plox.ast import Binary, Grouping, Literal, Unary
 from plox.ast_printer import AstPrinter
 from plox.common import Token, TokenType as TT
 

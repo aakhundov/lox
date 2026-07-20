@@ -2,7 +2,7 @@ from collections.abc import Callable
 from typing import NoReturn
 
 from plox.common import Token, TokenType as TT, LoxErrorFromToken
-from plox.ast.expr import Expr, Grouping, Binary, Unary, Literal
+from plox.ast import Expr, Grouping, Binary, Unary, Literal
 
 
 class ParserError(LoxErrorFromToken):

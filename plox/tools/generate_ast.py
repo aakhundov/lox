@@ -10,7 +10,7 @@ _METADATA = {
         "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Unary": {"operator": "Token", "right": "Expr"},
         "Literal": {"value": "LoxValue"},
-    }
+    },
 }
 
 _HEADER = """\
@@ -24,28 +24,28 @@ from plox.common import Token, LoxValue
 """
 
 
-def _get_ast_root() -> Path:
+def _get_package_root() -> Path:
     this_path = Path(__file__).resolve()
     plox_path = this_path.parents[1]
-    ast_root = plox_path / "plox/ast"
+    package_root = plox_path / "plox"
 
-    if not (ast_root.exists() and ast_root.is_dir()):
+    if not (package_root.exists() and package_root.is_dir()):
         print(
-            f"The path {ast_root} doesn't exist or isn't a dir",
+            f"The path {package_root} doesn't exist or isn't a dir",
             file=sys.stderr,
         )
         sys.exit(66)  # EX_NOINPUT
 
-    return ast_root
+    return package_root
 
 
 def _generate_code(cls: str) -> str:
-    lines = [_HEADER]
+    lines = []
 
     def add(indent: int, line: str) -> None:
         lines.append(f"{' ' * indent * 4}{line}")
 
-    # parent class and nested visitor (abstract)
+    # parent class + visitor (abstract)
     add(0, f"class {cls}(ABC):")
     add(1, "class Visitor[R](ABC):")
     for sub in _METADATA[cls]:
@@ -66,11 +66,15 @@ def _generate_code(cls: str) -> str:
     return "\n".join(lines)
 
 
-def _make_file(cls: str, ast_root: Path) -> None:
-    code = _generate_code(cls)
+def _make_file(path: Path) -> None:
+    sections = [_HEADER]
+    for cls in _METADATA:
+        print(f"Generating {cls}... ", end="")
+        sections.append(_generate_code(cls))
+        print("DONE")
 
-    # write to file
-    path = ast_root / f"{cls.lower()}.py"
+    # write all code to the file
+    code = "\n\n".join(sections)
     path.write_text(code, encoding="utf-8")
 
     # format the file with ruff
@@ -79,11 +83,9 @@ def _make_file(cls: str, ast_root: Path) -> None:
 
 
 def main() -> None:
-    ast_root = _get_ast_root()
-    for cls in _METADATA:
-        print(f"Generating {cls}... ", end="")
-        _make_file(cls, ast_root)
-        print("DONE")
+    root = _get_package_root()
+    file = root / "ast.py"
+    _make_file(file)
 
 
 if __name__ == "__main__":

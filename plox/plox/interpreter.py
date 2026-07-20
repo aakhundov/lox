@@ -2,7 +2,7 @@ import operator
 from collections.abc import Callable
 from typing import NoReturn
 
-from plox.ast.expr import Expr, Grouping, Binary, Unary, Literal
+from plox.ast import Expr, Grouping, Binary, Unary, Literal
 from plox.common import (
     LoxErrorFromToken,
     Token,

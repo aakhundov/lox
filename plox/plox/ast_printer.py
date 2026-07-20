@@ -1,4 +1,4 @@
-from plox.ast.expr import Expr, Grouping, Binary, Unary, Literal
+from plox.ast import Expr, Grouping, Binary, Unary, Literal
 from plox.common import to_str
 
 
@@ -16,8 +16,6 @@ class AstPrinter(Expr.Visitor[str]):
         return self._parens(e.operator.lexeme, e.right)
 
     def visit_literal(self, e: Literal) -> str:
-        if isinstance(e.value, str):
-            return f'"{e.value}"'
         return to_str(e.value)
 
     def _parens(self, head: str, *es: Expr) -> str:
