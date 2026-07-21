@@ -7,33 +7,58 @@ from plox.ast import (
     Binary,
     Unary,
     Literal,
+    Variable,
+    Assign,
     Stmt,
     Print,
     Expression,
+    Var,
+    Block,
 )
-from plox.common import Token, TokenType as TT, LoxErrorFromToken
-
-
-class ParserError(LoxErrorFromToken):
-    pass
+from plox.common import Token, TokenType as TT, ParserError
 
 
 class Parser:
-    def __init__(self, tokens: list[Token]):
+    def __init__(self, tokens: list[Token]) -> None:
         self._tokens = tokens
         self._current = 0
 
     def parse(self) -> list[Stmt]:
         statements: list[Stmt] = []
         while not self._is_at_end():
-            statements.append(self._statement())
+            statements.append(self._declaration())
+
         return statements
+
+    def _declaration(self) -> Stmt:
+        if self._match(TT.VAR):
+            return self._var_decl()
+
+        return self._statement()
+
+    def _var_decl(self) -> Stmt:
+        name = self._consume(
+            TT.IDENTIFIER,
+            "Expect variable name",
+        )
+
+        initializer = None
+        if self._match(TT.EQUAL):
+            initializer = self._expression()
+
+        self._consume(
+            TT.SEMICOLON,
+            "Expect ';' after variable declaration",
+        )
+
+        return Var(name, initializer)
 
     def _statement(self) -> Stmt:
         if self._match(TT.PRINT):
             return self._print_stmt()
+        if self._match(TT.LEFT_BRACE):
+            return self._block_stmt()
 
-        # no prefix match: expression statement
         return self._expression_stmt()
 
     def _print_stmt(self) -> Stmt:
@@ -48,6 +73,10 @@ class Parser:
 
         return Print(expressions)
 
+    def _block_stmt(self) -> Stmt:
+        statements = self._parse_block()
+        return Block(statements)
+
     def _expression_stmt(self) -> Stmt:
         expression = self._expression()
 
@@ -59,7 +88,21 @@ class Parser:
         return Expression(expression)
 
     def _expression(self) -> Expr:
-        return self._equality_expr()
+        return self._assignment_expr()
+
+    def _assignment_expr(self) -> Expr:
+        expr = self._equality_expr()
+
+        if self._match(TT.EQUAL):
+            equals = self._previous()
+            value = self._assignment_expr()  # nested
+
+            if isinstance(expr, Variable):
+                return Assign(expr.name, value)
+
+            self._raise("Invalid assignment target", equals)
+
+        return expr
 
     def _equality_expr(self) -> Expr:
         return self._left_fold_binary(
@@ -117,16 +160,32 @@ class Parser:
 
         if self._match(TT.NUMBER, TT.STRING):
             return Literal(self._previous().literal)
+        if self._match(TT.IDENTIFIER):
+            return Variable(self._previous())
 
         if self._match(TT.LEFT_PAREN):
             expression = self._expression()
+
             self._consume(
                 TT.RIGHT_PAREN,
-                "Expected ')' after expression",
+                "Expect ')' after expression",
             )
+
             return Grouping(expression)
 
-        self._raise("Expected expression")
+        self._raise("Expect expression")
+
+    def _parse_block(self) -> list[Stmt]:
+        statements: list[Stmt] = []
+        while not self._check(TT.RIGHT_BRACE) and not self._is_at_end():
+            statements.append(self._declaration())  # can contain decls
+
+        self._consume(
+            TT.RIGHT_BRACE,
+            "Expect '}' after block",
+        )
+
+        return statements
 
     def _left_fold_binary(
         self,

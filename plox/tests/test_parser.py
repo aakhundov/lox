@@ -227,11 +227,42 @@ def test_nested_grouping(show_expr, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
-        ("1 + 2;", "(expr (+ 1 2))"),
-        ('"hi";', '(expr "hi")'),
-        ("nil;", "(expr nil)"),
+        ("x;", "x"),
+        ("foo;", "foo"),
+        # a variable is a primary, so it composes like any other operand
+        ("foo + bar;", "(+ foo bar)"),
+        ("-x;", "(- x)"),
+        ("x * y + z;", "(+ (* x y) z)"),
+    ],
+)
+def test_variable(show_expr, source, expected):
+    assert show_expr(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("x = 1;", "(= x 1)"),
+        ('name = "lox";', '(= name "lox")'),
+        # assignment is right-associative
+        ("x = y = 1;", "(= x (= y 1))"),
+        # assignment sits below every other expression form
+        ("x = 1 + 2;", "(= x (+ 1 2))"),
+        ("a = b == c;", "(= a (== b c))"),
+    ],
+)
+def test_assignment(show_expr, source, expected):
+    assert show_expr(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("1 + 2;", "(exp (+ 1 2))"),
+        ('"hi";', '(exp "hi")'),
+        ("nil;", "(exp nil)"),
         # the statement is transparent to the expression it wraps
-        ("(1);", "(expr (grp 1))"),
+        ("(1);", "(exp (grp 1))"),
     ],
 )
 def test_expression_statement(show_one, source, expected):
@@ -269,10 +300,10 @@ def test_print_varargs(show_one, source, expected):
     "source, expected",
     [
         # multiple statements parse in source order
-        ("1; 2;", ["(expr 1)", "(expr 2)"]),
+        ("1; 2;", ["(exp 1)", "(exp 2)"]),
         (
             "print 1; 2 + 3; print 4;",
-            ["(print 1)", "(expr (+ 2 3))", "(print 4)"],
+            ["(print 1)", "(exp (+ 2 3))", "(print 4)"],
         ),
         # empty source is legal and yields no statements
         ("", []),
@@ -280,6 +311,39 @@ def test_print_varargs(show_one, source, expected):
 )
 def test_statement_sequence(show_all, source, expected):
     assert show_all(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a declaration with no initializer
+        ("var x;", "(var x)"),
+        ("var x = 1;", "(var x 1)"),
+        ('var name = "lox";', '(var name "lox")'),
+        # the initializer is a full expression
+        ("var x = 1 + 2;", "(var x (+ 1 2))"),
+    ],
+)
+def test_var_declaration(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # an empty block has no statements
+        ("{}", "(blk)"),
+        ("{ print 1; }", "(blk (print 1))"),
+        # a block groups its statements in source order
+        ("{ 1; 2; }", "(blk (exp 1) (exp 2))"),
+        # blocks may contain declarations
+        ("{ var x = 1; print x; }", "(blk (var x 1) (print x))"),
+        # blocks nest
+        ("{ { 1; } }", "(blk (blk (exp 1)))"),
+    ],
+)
+def test_block(show_one, source, expected):
+    assert show_one(source) == expected
 
 
 @pytest.mark.parametrize(
@@ -292,10 +356,8 @@ def test_statement_sequence(show_all, source, expected):
         ("== 3", (1, 1)),
         # a stray closing paren is not the start of an expression
         (")", (1, 1)),
-        # identifiers are not yet valid primary expressions
-        ("foo", (1, 1)),
-        # keywords that do not begin an expression
-        ("var", (1, 1)),
+        # a keyword that does not begin an expression (and is not yet a
+        # statement form of its own)
         ("if", (1, 1)),
         # a binary operator with no right operand
         ("1 +", (1, 4)),
@@ -319,7 +381,7 @@ def test_statement_sequence(show_all, source, expected):
 def test_expected_expression_error(parse, source, position):
     with pytest.raises(ParserError) as excinfo:
         parse(source)
-    assert str(excinfo.value) == "Expected expression"
+    assert str(excinfo.value) == "Expect expression"
     assert excinfo.value.get_line_info() == position
 
 
@@ -337,7 +399,7 @@ def test_expected_expression_error(parse, source, position):
 def test_missing_closing_paren_error(parse, source, position):
     with pytest.raises(ParserError) as excinfo:
         parse(source)
-    assert str(excinfo.value) == "Expected ')' after expression"
+    assert str(excinfo.value) == "Expect ')' after expression"
     assert excinfo.value.get_line_info() == position
 
 
@@ -357,4 +419,55 @@ def test_missing_semicolon_error(parse, source, message, position):
     with pytest.raises(ParserError) as excinfo:
         parse(source)
     assert str(excinfo.value) == message
+    assert excinfo.value.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # `var` must be followed by a variable name
+        ("var;", "Expect variable name", (1, 4)),
+        ("var 1;", "Expect variable name", (1, 5)),
+        # a declaration needs its terminating ';'
+        ("var x", "Expect ';' after variable declaration", (1, 6)),
+        ("var x 1;", "Expect ';' after variable declaration", (1, 7)),
+    ],
+)
+def test_var_declaration_error(parse, source, message, position):
+    with pytest.raises(ParserError) as excinfo:
+        parse(source)
+    assert str(excinfo.value) == message
+    assert excinfo.value.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # the target of `=` must be assignable (a variable); the error is
+        # reported at the `=` token, not the left-hand expression
+        ("1 = 2;", (1, 3)),
+        ("(x) = 2;", (1, 5)),
+        ("a + b = c;", (1, 7)),
+    ],
+)
+def test_invalid_assignment_target_error(parse, source, position):
+    with pytest.raises(ParserError) as excinfo:
+        parse(source)
+    assert str(excinfo.value) == "Invalid assignment target"
+    assert excinfo.value.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # a block must be closed with '}'
+        ("{ 1;", (1, 5)),
+        ("{ print 1;", (1, 11)),
+        ("{ var x = 1;", (1, 13)),
+    ],
+)
+def test_missing_closing_brace_error(parse, source, position):
+    with pytest.raises(ParserError) as excinfo:
+        parse(source)
+    assert str(excinfo.value) == "Expect '}' after block"
     assert excinfo.value.get_line_info() == position

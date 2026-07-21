@@ -1,31 +1,10 @@
 from typing import NoReturn
 
 from plox.common import (
-    LoxError,
     Token,
     TokenType as TT,
+    ScannerError,
 )
-
-
-class ScannerError(LoxError):
-    def __init__(self, msg: str, source: str, offset: int):
-        line_num, col_num = self._get_position(source, offset)
-        super().__init__(msg, line_num, col_num)
-
-    @staticmethod
-    def _get_position(source: str, offset: int) -> tuple[int, int]:
-        line_num, col_num = 0, 0
-        for i, c in enumerate(source):
-            if i == offset:
-                break
-
-            if c == "\n":
-                line_num += 1
-                col_num = 0
-            else:
-                col_num += 1
-
-        return line_num + 1, col_num + 1
 
 
 class Scanner:

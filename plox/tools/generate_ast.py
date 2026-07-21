@@ -10,10 +10,14 @@ _METADATA = {
         "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Unary": {"operator": "Token", "right": "Expr"},
         "Literal": {"value": "LoxValue"},
+        "Variable": {"name": "Token"},
+        "Assign": {"name": "Token", "value": "Expr"},
     },
     "Stmt": {
         "Expression": {"expression": "Expr"},
         "Print": {"expressions": "list[Expr]"},
+        "Var": {"name": "Token", "initializer": "Expr | None"},
+        "Block": {"statements": "list[Stmt]"},
     },
 }
 

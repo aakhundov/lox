@@ -268,6 +268,58 @@ def test_precedence(value, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # a variable evaluates to its initialized value
+        ("var x = 1; print x;", 1.0),
+        ('var s = "hi"; print s;', "hi"),
+        # a declaration with no initializer defaults to nil
+        ("var x; print x;", None),
+        # a reference composes like any other operand
+        ("var a = 2; var b = 3; print a * b;", 6.0),
+    ],
+)
+def test_variable(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # assignment updates an existing variable
+        ("var x = 1; x = 2; print x;", 2.0),
+        # assignment is an expression that yields the assigned value
+        ("var a = 1; print a = 2;", 2.0),
+        # chained assignment updates every target
+        ("var a = 1; var b = 2; a = b = 9; print a;", 9.0),
+    ],
+)
+def test_assignment(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # an inner block shadows an outer variable, and the outer binding is
+        # restored once the block exits
+        (
+            "var x = 1; { var x = 2; print x; } print x;",
+            [[2.0], [1.0]],
+        ),
+        # assignment inside a block reaches out to the enclosing variable
+        ("var x = 1; { x = 2; } print x;", [[2.0]]),
+        # an inner block can read a variable from the enclosing scope
+        ("var x = 1; { var y = 2; print x + y; }", [[3.0]]),
+        # blocks nest arbitrarily deep
+        ("{ { { print 1; } } }", [[1.0]]),
+    ],
+)
+def test_scope(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # each executed print appends one group of evaluated values
         ("print 1;", [[1.0]]),
         # varargs evaluate to one group, in order
@@ -391,4 +443,22 @@ def test_unary_negation_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Operand must be a number"
+    assert excinfo.value.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # reading a variable that was never declared
+        ("print x;", (1, 7)),
+        # assigning to a variable that was never declared
+        ("x = 1;", (1, 1)),
+        # a name declared only inside a block is gone once the block exits
+        ("{ var x = 1; } print x;", (1, 22)),
+    ],
+)
+def test_undefined_variable_error(run, source, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == "Undefined variable: x"
     assert excinfo.value.get_line_info() == position

@@ -104,6 +104,35 @@ class LoxErrorFromToken(LoxError):
         super().__init__(msg, token.line_num, token.col_num)
 
 
+class ScannerError(LoxError):
+    def __init__(self, msg: str, source: str, offset: int):
+        line_num, col_num = self._get_position(source, offset)
+        super().__init__(msg, line_num, col_num)
+
+    @staticmethod
+    def _get_position(source: str, offset: int) -> tuple[int, int]:
+        line_num, col_num = 0, 0
+        for i, c in enumerate(source):
+            if i == offset:
+                break
+
+            if c == "\n":
+                line_num += 1
+                col_num = 0
+            else:
+                col_num += 1
+
+        return line_num + 1, col_num + 1
+
+
+class ParserError(LoxErrorFromToken):
+    pass
+
+
+class InterpreterError(LoxErrorFromToken):
+    pass
+
+
 LoxValue = bool | float | str | None
 
 

@@ -4,9 +4,13 @@ from plox.ast import (
     Binary,
     Unary,
     Literal,
+    Variable,
+    Assign,
     Stmt,
     Print,
     Expression,
+    Var,
+    Block,
 )
 from plox.common import to_str
 
@@ -22,7 +26,15 @@ class AstPrinter(
         return self._parens("print", *s.expressions)
 
     def visit_expression(self, s: Expression) -> str:
-        return self._parens("expr", s.expression)
+        return self._parens("exp", s.expression)
+
+    def visit_var(self, s: Var) -> str:
+        if s.initializer is None:
+            return f"(var {s.name.lexeme})"
+        return self._parens(f"var {s.name.lexeme}", s.initializer)
+
+    def visit_block(self, s: Block) -> str:
+        return self._parens("blk", *s.statements)
 
     def visit_grouping(self, e: Grouping) -> str:
         return self._parens("grp", e.expression)
@@ -36,6 +48,14 @@ class AstPrinter(
     def visit_literal(self, e: Literal) -> str:
         return f'"{e.value}"' if isinstance(e.value, str) else to_str(e.value)
 
+    def visit_variable(self, e: Variable) -> str:
+        return e.name.lexeme
+
+    def visit_assign(self, e: Assign) -> str:
+        return self._parens(f"= {e.name.lexeme}", e.value)
+
     def _parens(self, head: str, *nodes: Expr | Stmt) -> str:
+        if not nodes:
+            return f"({head})"
         formatted = " ".join(node.accept(self) for node in nodes)
         return f"({head} {formatted})"

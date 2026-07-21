@@ -8,23 +8,24 @@ from plox.ast import (
     Binary,
     Unary,
     Literal,
+    Variable,
+    Assign,
     Stmt,
     Print,
     Expression,
+    Var,
+    Block,
 )
 from plox.common import (
-    LoxErrorFromToken,
     Token,
     TokenType as TT,
+    InterpreterError,
     LoxValue,
     is_equal,
     is_truthy,
     to_str,
 )
-
-
-class InterpreterError(LoxErrorFromToken):
-    pass
+from plox.environment import Environment
 
 
 class Interpreter(
@@ -57,9 +58,18 @@ class Interpreter(
         TT.LESS_EQUAL: operator.le,
     }
 
-    def __init__(self, print_fn: Callable[[list[LoxValue]], None] | None = None):
+    def __init__(
+        self,
+        *,
+        environment: Environment | None = None,
+        print_fn: Callable[[list[LoxValue]], None] | None = None,
+    ) -> None:
+        if environment is None:
+            environment = Environment()
         if print_fn is None:
             print_fn = self._default_print_fn
+
+        self._env = environment
         self._print_fn = print_fn
 
     def interpret(self, statements: list[Stmt]) -> None:
@@ -72,6 +82,17 @@ class Interpreter(
 
     def visit_expression(self, s: Expression) -> None:
         self._evaluate(s.expression)
+
+    def visit_var(self, s: Var) -> None:
+        value = None
+        if s.initializer is not None:
+            value = self._evaluate(s.initializer)
+
+        self._env.define(s.name.lexeme, value)
+
+    def visit_block(self, s: Block) -> None:
+        child_env = Environment(parent=self._env)
+        self._execute_block(s.statements, child_env)
 
     def visit_grouping(self, e: Grouping) -> LoxValue:
         return self._evaluate(e.expression)
@@ -124,6 +145,28 @@ class Interpreter(
 
     def visit_literal(self, e: Literal) -> LoxValue:
         return e.value
+
+    def visit_variable(self, e: Variable) -> LoxValue:
+        return self._env.get(e.name)
+
+    def visit_assign(self, e: Assign) -> LoxValue:
+        value = self._evaluate(e.value)
+        self._env.assign(e.name, value)
+        return value
+
+    def _execute_block(
+        self,
+        statements: list[Stmt],
+        block_env: Environment,
+    ) -> None:
+        previous_env = self._env
+        try:
+            self._env = block_env
+            for statement in statements:
+                self._execute(statement)
+        finally:
+            # restore the previous env
+            self._env = previous_env
 
     def _execute(self, s: Stmt) -> None:
         return s.accept(self)
