@@ -1,7 +1,7 @@
 import sys
-from dataclasses import dataclass
+import dataclasses
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import HTML, FormattedText
@@ -63,10 +63,10 @@ class _FilteredHistory(FileHistory):
         super().append_string(string)
 
 
-@dataclass
+@dataclasses.dataclass
 class _RunConfig:
-    print_tokens: bool = False
-    print_ast: bool = False
+    tokens: bool = False
+    ast: bool = False
 
 
 def _run_code(
@@ -76,14 +76,14 @@ def _run_code(
 ) -> None:
     tokens = Scanner(source).scan()
 
-    if config.print_tokens:
+    if config.tokens:
         for i, token in enumerate(tokens):
             print(f"{i + 1:04}  {token}")
         print()
 
     statements = Parser(tokens).parse()
 
-    if config.print_ast:
+    if config.ast:
         for i, statement in enumerate(statements):
             s_expr = AstPrinter().print(statement)
             print(f"{i + 1:04}  {s_expr}")
@@ -128,13 +128,40 @@ def _run_file(path: str) -> int:
 
 
 def _update_repl_config(cfg: _RunConfig, command: str) -> None:
+    fields = get_type_hints(type(cfg))
+    switches = [f for f in fields if fields[f] is bool]
+    settings = {f: type_ for f, type_ in fields.items() if f not in switches}
+
+    is_match = True
+
+    def _error(msg: str) -> None:
+        _print_formatted_error_text(msg)
+        nonlocal is_match
+        is_match = False
+
     match command.split():
-        case ["tokens", "on" | "off" as toggle]:
-            cfg.print_tokens = toggle == "on"
-        case ["ast", "on" | "off" as toggle]:
-            cfg.print_ast = toggle == "on"
+        case [switch] if switch in switches:
+            setattr(cfg, switch, not getattr(cfg, switch))  # flip
+        case [switch, "on" | "off" as toggle] if switch in switches:
+            setattr(cfg, switch, toggle == "on")
+        case [setting] if setting in settings:
+            _error(f"usage: {setting} <value>")
+        case [setting, value] if setting in settings:
+            try:
+                type_ = settings[setting]
+                setattr(cfg, setting, type_(value))
+            except Exception:
+                _error(f'can\'t set {setting} to "{value}"')
         case _:
-            _print_formatted_error_text(f'unrecognized command: "{command}"')
+            _error(f'unrecognized command: "{command}"')
+
+    if is_match:
+        for key, value in dataclasses.asdict(cfg).items():
+            type_ = fields[key].__name__
+            if key in switches:
+                print(f"{key} = {('on' if value else 'off')} [{type_}]")
+            else:
+                print(f"{key} = {value!r} [{type_}]")
 
 
 def _run_repl() -> int:
