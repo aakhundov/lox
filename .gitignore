@@ -6,3 +6,5 @@ __pycache__
 *_cache
 *.class
 *.egg-info
+.venv
+build
