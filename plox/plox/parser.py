@@ -2,18 +2,18 @@ from collections.abc import Callable
 from typing import NoReturn
 
 from plox.ast import (
+    Stmt,
+    Var,
+    Print,
+    Block,
+    Expression,
     Expr,
-    Grouping,
+    Assign,
     Binary,
     Unary,
     Literal,
     Variable,
-    Assign,
-    Stmt,
-    Print,
-    Expression,
-    Var,
-    Block,
+    Grouping,
 )
 from plox.common import Token, TokenType as TT, ParserError
 
@@ -32,11 +32,11 @@ class Parser:
 
     def _declaration(self) -> Stmt:
         if self._match(TT.VAR):
-            return self._var_decl()
+            return self._var()
 
         return self._statement()
 
-    def _var_decl(self) -> Stmt:
+    def _var(self) -> Stmt:
         name = self._consume(
             TT.IDENTIFIER,
             "Expect variable name",
@@ -55,13 +55,13 @@ class Parser:
 
     def _statement(self) -> Stmt:
         if self._match(TT.PRINT):
-            return self._print_stmt()
+            return self._print()
         if self._match(TT.LEFT_BRACE):
-            return self._block_stmt()
+            return self._block()
 
-        return self._expression_stmt()
+        return self._expression_statement()
 
-    def _print_stmt(self) -> Stmt:
+    def _print(self) -> Stmt:
         expressions = [self._expression()]
         while self._match(TT.COMMA):
             expressions.append(self._expression())
@@ -73,11 +73,11 @@ class Parser:
 
         return Print(expressions)
 
-    def _block_stmt(self) -> Stmt:
+    def _block(self) -> Stmt:
         statements = self._parse_block()
         return Block(statements)
 
-    def _expression_stmt(self) -> Stmt:
+    def _expression_statement(self) -> Stmt:
         expression = self._expression()
 
         self._consume(
@@ -88,14 +88,14 @@ class Parser:
         return Expression(expression)
 
     def _expression(self) -> Expr:
-        return self._assignment_expr()
+        return self._assignment()
 
-    def _assignment_expr(self) -> Expr:
-        expr = self._equality_expr()
+    def _assignment(self) -> Expr:
+        expr = self._equality()
 
         if self._match(TT.EQUAL):
             equals = self._previous()
-            value = self._assignment_expr()  # nested
+            value = self._assignment()  # nested
 
             if isinstance(expr, Variable):
                 return Assign(expr.name, value)
@@ -104,18 +104,18 @@ class Parser:
 
         return expr
 
-    def _equality_expr(self) -> Expr:
+    def _equality(self) -> Expr:
         return self._left_fold_binary(
-            self._comparison_expr,
+            self._comparison,
             (
                 TT.EQUAL_EQUAL,
                 TT.BANG_EQUAL,
             ),
         )
 
-    def _comparison_expr(self) -> Expr:
+    def _comparison(self) -> Expr:
         return self._left_fold_binary(
-            self._term_expr,
+            self._term,
             (
                 TT.LESS,
                 TT.LESS_EQUAL,
@@ -124,33 +124,33 @@ class Parser:
             ),
         )
 
-    def _term_expr(self) -> Expr:
+    def _term(self) -> Expr:
         return self._left_fold_binary(
-            self._factor_expr,
+            self._factor,
             (
                 TT.PLUS,
                 TT.MINUS,
             ),
         )
 
-    def _factor_expr(self) -> Expr:
+    def _factor(self) -> Expr:
         return self._left_fold_binary(
-            self._unary_expr,
+            self._unary,
             (
                 TT.STAR,
                 TT.SLASH,
             ),
         )
 
-    def _unary_expr(self) -> Expr:
+    def _unary(self) -> Expr:
         if self._match(TT.BANG, TT.MINUS):
             operator = self._previous()
-            right = self._unary_expr()
+            right = self._unary()
             return Unary(operator, right)
 
-        return self._primary_expr()
+        return self._primary()
 
-    def _primary_expr(self) -> Expr:
+    def _primary(self) -> Expr:
         if self._match(TT.FALSE):
             return Literal(False)
         if self._match(TT.TRUE):

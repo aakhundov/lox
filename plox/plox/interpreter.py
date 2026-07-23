@@ -3,18 +3,18 @@ from collections.abc import Callable
 from typing import NoReturn
 
 from plox.ast import (
+    Stmt,
+    Var,
+    Print,
+    Block,
+    Expression,
     Expr,
-    Grouping,
+    Assign,
     Binary,
     Unary,
     Literal,
     Variable,
-    Assign,
-    Stmt,
-    Print,
-    Expression,
-    Var,
-    Block,
+    Grouping,
 )
 from plox.common import (
     Token,
@@ -47,7 +47,7 @@ class Interpreter(
     _FLOAT_OR_STR_BINARY_OPS: dict[
         TT,
         Callable[
-            [float | str, float | str],
+            ...,  # too flexible arg types
             float | bool | str,
         ],
     ] = {
@@ -76,13 +76,6 @@ class Interpreter(
         for statement in statements:
             self._execute(statement)
 
-    def visit_print(self, s: Print) -> None:
-        values = [self._evaluate(e) for e in s.expressions]
-        self._print_fn(values)
-
-    def visit_expression(self, s: Expression) -> None:
-        self._evaluate(s.expression)
-
     def visit_var(self, s: Var) -> None:
         value = None
         if s.initializer is not None:
@@ -90,12 +83,21 @@ class Interpreter(
 
         self._env.define(s.name.lexeme, value)
 
+    def visit_print(self, s: Print) -> None:
+        values = [self._evaluate(e) for e in s.expressions]
+        self._print_fn(values)
+
     def visit_block(self, s: Block) -> None:
         child_env = Environment(parent=self._env)
         self._execute_block(s.statements, child_env)
 
-    def visit_grouping(self, e: Grouping) -> LoxValue:
-        return self._evaluate(e.expression)
+    def visit_expression(self, s: Expression) -> None:
+        self._evaluate(s.expression)
+
+    def visit_assign(self, e: Assign) -> LoxValue:
+        value = self._evaluate(e.value)
+        self._env.assign(e.name, value)
+        return value
 
     def visit_binary(self, e: Binary) -> LoxValue:
         op = e.operator
@@ -149,10 +151,8 @@ class Interpreter(
     def visit_variable(self, e: Variable) -> LoxValue:
         return self._env.get(e.name)
 
-    def visit_assign(self, e: Assign) -> LoxValue:
-        value = self._evaluate(e.value)
-        self._env.assign(e.name, value)
-        return value
+    def visit_grouping(self, e: Grouping) -> LoxValue:
+        return self._evaluate(e.expression)
 
     def _execute_block(
         self,

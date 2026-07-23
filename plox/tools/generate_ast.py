@@ -5,19 +5,19 @@ from pathlib import Path
 
 
 _METADATA = {
+    "Stmt": {
+        "Var": {"name": "Token", "initializer": "'Expr | None'"},
+        "Print": {"expressions": "list['Expr']"},
+        "Block": {"statements": "list[Stmt]"},
+        "Expression": {"expression": "'Expr'"},
+    },
     "Expr": {
-        "Grouping": {"expression": "Expr"},
+        "Assign": {"name": "Token", "value": "Expr"},
         "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Unary": {"operator": "Token", "right": "Expr"},
         "Literal": {"value": "LoxValue"},
         "Variable": {"name": "Token"},
-        "Assign": {"name": "Token", "value": "Expr"},
-    },
-    "Stmt": {
-        "Expression": {"expression": "Expr"},
-        "Print": {"expressions": "list[Expr]"},
-        "Var": {"name": "Token", "initializer": "Expr | None"},
-        "Block": {"statements": "list[Stmt]"},
+        "Grouping": {"expression": "Expr"},
     },
 }
 
