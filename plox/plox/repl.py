@@ -1,5 +1,7 @@
 import sys
 import dataclasses
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, get_type_hints
 
@@ -24,6 +26,8 @@ MULTILINE_TRIGGER = ""
 MULTILINE_HINT = "MULTI-LINE ENTRY [\\n\\n to submit]:"
 HINT_COLOR = "ansibrightblack"
 HISTORY_PATH = Path.home() / ".lox.history"
+BORDER_CHAR = "-"
+BORDER_LEN = 30
 
 
 def _make_multiline_bindings() -> KeyBindings:
@@ -69,27 +73,53 @@ class _RunConfig:
     ast: bool = False
 
 
+@contextmanager
+def _padded_borders(
+    name: str,
+    *,
+    enabled: bool = True,
+) -> Generator[None]:
+    def _print_border(label: str) -> None:
+        if enabled:
+            text = f" {name} {label} ".upper()
+            pre_len = max(0, (BORDER_LEN - len(text)) // 2)
+            post_len = max(0, BORDER_LEN - len(text) - pre_len)
+            print(f"{BORDER_CHAR * pre_len}{text}{BORDER_CHAR * post_len}")
+
+    _print_border("start")
+    try:
+        yield
+    finally:
+        _print_border("end")
+
+
 def _run_code(
     source: str,
     interpreter: Interpreter,
     config: _RunConfig,
 ) -> None:
+    metadata_shown = False
     tokens = Scanner(source).scan()
 
     if config.tokens:
-        for i, token in enumerate(tokens):
-            print(f"{i + 1:04}  {token}")
+        metadata_shown = True
+        with _padded_borders("tokens"):
+            for i, token in enumerate(tokens):
+                print(f"{i + 1:04}  {token}")
         print()
 
     statements = Parser(tokens).parse()
 
     if config.ast:
-        for i, statement in enumerate(statements):
-            s_expr = AstPrinter().print(statement)
-            print(f"{i + 1:04}  {s_expr}")
+        metadata_shown = True
+        with _padded_borders("ast"):
+            for i, statement in enumerate(statements):
+                s_expr = AstPrinter().print(statement)
+                print(f"{i + 1:04}  {s_expr}")
         print()
 
-    interpreter.interpret(statements)
+    with _padded_borders("output", enabled=metadata_shown):
+        interpreter.interpret(statements)
 
 
 def _print_error(e: LoxError, source: str) -> None:
@@ -132,12 +162,12 @@ def _update_repl_config(cfg: _RunConfig, command: str) -> None:
     switches = [f for f in fields if fields[f] is bool]
     settings = {f: type_ for f, type_ in fields.items() if f not in switches}
 
-    is_match = True
+    print_config = True
 
     def _error(msg: str) -> None:
         _print_formatted_error_text(msg)
-        nonlocal is_match
-        is_match = False
+        nonlocal print_config
+        print_config = False
 
     match command.split():
         case [switch] if switch in switches:
@@ -152,10 +182,12 @@ def _update_repl_config(cfg: _RunConfig, command: str) -> None:
                 setattr(cfg, setting, type_(value))
             except Exception:
                 _error(f'can\'t set {setting} to "{value}"')
+        case ["help" | "h"]:
+            pass  # print the current config
         case _:
             _error(f'unrecognized command: "{command}"')
 
-    if is_match:
+    if print_config:
         for key, value in dataclasses.asdict(cfg).items():
             type_ = fields[key].__name__
             if key in switches:
