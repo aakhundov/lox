@@ -21,6 +21,28 @@ def parse():
 
 
 @pytest.fixture
+def parse_errors(parse):
+    """Return a helper that parses `source` expecting failure.
+
+    The parser recovers from each error and reports them all by raising a
+    single ExceptionGroup; this unwraps it into the flat list of
+    ParserErrors, in source order.
+    """
+
+    def _parse_errors(source):
+        with pytest.raises(ExceptionGroup) as excinfo:
+            parse(source)
+
+        errors: list[ParserError] = []
+        for error in excinfo.value.exceptions:
+            assert isinstance(error, ParserError)  # flat: no nested groups
+            errors.append(error)
+        return errors
+
+    return _parse_errors
+
+
+@pytest.fixture
 def show_expr(parse):
     """Return a helper that renders `source`'s expression as an S-expression.
 
@@ -378,11 +400,10 @@ def test_block(show_one, source, expected):
         ("print 1,;", (1, 9)),
     ],
 )
-def test_expected_expression_error(parse, source, position):
-    with pytest.raises(ParserError) as excinfo:
-        parse(source)
-    assert str(excinfo.value) == "Expect expression"
-    assert excinfo.value.get_line_info() == position
+def test_expected_expression_error(parse_errors, source, position):
+    (error,) = parse_errors(source)
+    assert str(error) == "Expect expression"
+    assert error.get_line_info() == position
 
 
 @pytest.mark.parametrize(
@@ -396,11 +417,10 @@ def test_expected_expression_error(parse, source, position):
         ("(1 2)", (1, 4)),
     ],
 )
-def test_missing_closing_paren_error(parse, source, position):
-    with pytest.raises(ParserError) as excinfo:
-        parse(source)
-    assert str(excinfo.value) == "Expect ')' after expression"
-    assert excinfo.value.get_line_info() == position
+def test_missing_closing_paren_error(parse_errors, source, position):
+    (error,) = parse_errors(source)
+    assert str(error) == "Expect ')' after expression"
+    assert error.get_line_info() == position
 
 
 @pytest.mark.parametrize(
@@ -415,11 +435,10 @@ def test_missing_closing_paren_error(parse, source, position):
         ("print 1 2", "Expect ';' after values", (1, 9)),
     ],
 )
-def test_missing_semicolon_error(parse, source, message, position):
-    with pytest.raises(ParserError) as excinfo:
-        parse(source)
-    assert str(excinfo.value) == message
-    assert excinfo.value.get_line_info() == position
+def test_missing_semicolon_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
 
 
 @pytest.mark.parametrize(
@@ -433,11 +452,10 @@ def test_missing_semicolon_error(parse, source, message, position):
         ("var x 1;", "Expect ';' after variable declaration", (1, 7)),
     ],
 )
-def test_var_declaration_error(parse, source, message, position):
-    with pytest.raises(ParserError) as excinfo:
-        parse(source)
-    assert str(excinfo.value) == message
-    assert excinfo.value.get_line_info() == position
+def test_var_declaration_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
 
 
 @pytest.mark.parametrize(
@@ -450,11 +468,10 @@ def test_var_declaration_error(parse, source, message, position):
         ("a + b = c;", (1, 7)),
     ],
 )
-def test_invalid_assignment_target_error(parse, source, position):
-    with pytest.raises(ParserError) as excinfo:
-        parse(source)
-    assert str(excinfo.value) == "Invalid assignment target"
-    assert excinfo.value.get_line_info() == position
+def test_invalid_assignment_target_error(parse_errors, source, position):
+    (error,) = parse_errors(source)
+    assert str(error) == "Invalid assignment target"
+    assert error.get_line_info() == position
 
 
 @pytest.mark.parametrize(
@@ -466,8 +483,43 @@ def test_invalid_assignment_target_error(parse, source, position):
         ("{ var x = 1;", (1, 13)),
     ],
 )
-def test_missing_closing_brace_error(parse, source, position):
-    with pytest.raises(ParserError) as excinfo:
-        parse(source)
-    assert str(excinfo.value) == "Expect '}' after block"
-    assert excinfo.value.get_line_info() == position
+def test_missing_closing_brace_error(parse_errors, source, position):
+    (error,) = parse_errors(source)
+    assert str(error) == "Expect '}' after block"
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # each bad declaration is synchronized past, so all are reported
+        (
+            "var 1; var 2; print;",
+            [
+                ("Expect variable name", (1, 5)),
+                ("Expect variable name", (1, 12)),
+                ("Expect expression", (1, 20)),
+            ],
+        ),
+        # an invalid assignment target does not desync the parser, so the
+        # next statement's error is still collected
+        (
+            "1 = 2; 3 = 4;",
+            [
+                ("Invalid assignment target", (1, 3)),
+                ("Invalid assignment target", (1, 10)),
+            ],
+        ),
+        # a raised error recovers at the next ';' and keeps parsing
+        (
+            "1 +; 2 +;",
+            [
+                ("Expect expression", (1, 4)),
+                ("Expect expression", (1, 9)),
+            ],
+        ),
+    ],
+)
+def test_multiple_errors(parse_errors, source, expected):
+    errors = parse_errors(source)
+    assert [(str(e), e.get_line_info()) for e in errors] == expected

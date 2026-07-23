@@ -8,6 +8,23 @@ from plox.scanner import Scanner, ScannerError
 EOF = (TT.EOF, "", None)
 
 
+def scan_errors(source):
+    """Scan `source`, expecting failure, and return the collected errors.
+
+    The scanner reports every error it finds by raising a single
+    ExceptionGroup at the end; this unwraps it into the flat list of
+    ScannerErrors, in source order.
+    """
+    with pytest.raises(ExceptionGroup) as excinfo:
+        Scanner(source).scan()
+
+    errors: list[ScannerError] = []
+    for error in excinfo.value.exceptions:
+        assert isinstance(error, ScannerError)  # flat: no nested groups
+        errors.append(error)
+    return errors
+
+
 @pytest.fixture
 def scan():
     """Return a helper that scans source into (type, lexeme, literal) triples.
@@ -437,10 +454,9 @@ def test_eof_position(source, position):
     ],
 )
 def test_unexpected_character(source, char, position):
-    with pytest.raises(ScannerError) as excinfo:
-        Scanner(source).scan()
-    assert str(excinfo.value) == f"Unexpected character: '{char}'"
-    assert excinfo.value.get_line_info() == position
+    (error,) = scan_errors(source)
+    assert str(error) == f"Unexpected character: '{char}'"
+    assert error.get_line_info() == position
 
 
 @pytest.mark.parametrize(
@@ -451,10 +467,9 @@ def test_unexpected_character(source, char, position):
     ],
 )
 def test_unterminated_string(source, position):
-    with pytest.raises(ScannerError) as excinfo:
-        Scanner(source).scan()
-    assert str(excinfo.value) == "Unterminated string"
-    assert excinfo.value.get_line_info() == position
+    (error,) = scan_errors(source)
+    assert str(error) == "Unterminated string"
+    assert error.get_line_info() == position
 
 
 @pytest.mark.parametrize(
@@ -468,7 +483,41 @@ def test_unterminated_string(source, position):
     ],
 )
 def test_unterminated_block_comment(source, position):
-    with pytest.raises(ScannerError) as excinfo:
-        Scanner(source).scan()
-    assert str(excinfo.value) == "Unterminated comment"
-    assert excinfo.value.get_line_info() == position
+    (error,) = scan_errors(source)
+    assert str(error) == "Unterminated comment"
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # two bad characters: scanning continues past the first
+        (
+            "@#",
+            [
+                ("Unexpected character: '@'", (1, 1)),
+                ("Unexpected character: '#'", (1, 2)),
+            ],
+        ),
+        # errors on different lines are reported in source order
+        (
+            "@\n#",
+            [
+                ("Unexpected character: '@'", (1, 1)),
+                ("Unexpected character: '#'", (2, 1)),
+            ],
+        ),
+        # different error kinds coexist; the unterminated string, which
+        # runs to end-of-input, is necessarily the last one reported
+        (
+            '@ "abc',
+            [
+                ("Unexpected character: '@'", (1, 1)),
+                ("Unterminated string", (1, 3)),
+            ],
+        ),
+    ],
+)
+def test_multiple_errors(source, expected):
+    errors = scan_errors(source)
+    assert [(str(e), e.get_line_info()) for e in errors] == expected

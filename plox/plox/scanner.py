@@ -1,5 +1,3 @@
-from typing import NoReturn
-
 from plox.common import (
     Token,
     TokenType as TT,
@@ -32,10 +30,12 @@ class Scanner:
         self._tokens: list[Token] = []
         self._start: int = 0
         self._current: int = 0
+        self._errors: list[ScannerError] = []
 
     def scan(self) -> list[Token]:
         self._current = 0
         self._tokens.clear()
+        self._errors.clear()
 
         while not self._is_at_end():
             self._start = self._current
@@ -44,6 +44,9 @@ class Scanner:
         self._start = self._current
         self._add_token(TT.EOF)
         self._add_line_metadata()
+
+        if self._errors:
+            raise ExceptionGroup("Scanner errors", self._errors)
 
         return list(self._tokens)
 
@@ -92,7 +95,7 @@ class Scanner:
                     self._advance()
                 else:
                     # the loop finished without breaking
-                    self._raise("Unterminated comment")
+                    self._error("Unterminated comment")
             else:
                 self._add_token(TT.SLASH)
         elif c in (" ", "\t", "\n", "\r"):
@@ -105,14 +108,15 @@ class Scanner:
         elif self._is_alpha(c):
             self._identifier()
         else:
-            self._raise(f"Unexpected character: '{c}'")
+            self._error(f"Unexpected character: '{c}'")
 
     def _string(self) -> None:
         while not self._is_at_end() and self._peek() != '"':
             self._advance()
 
         if self._is_at_end():
-            self._raise("Unterminated string")
+            self._error("Unterminated string")
+            return
 
         self._advance()  # eat the closing '"'
 
@@ -184,10 +188,10 @@ class Scanner:
     def _is_alnum(self, c: str) -> bool:
         return self._is_alpha(c) or self._is_digit(c)
 
-    def _raise(self, msg: str, offset: int | None = None) -> NoReturn:
+    def _error(self, msg: str, offset: int | None = None) -> None:
         if offset is None:
             offset = self._start
-        raise ScannerError(msg, self._source, offset)
+        self._errors.append(ScannerError(msg, self._source, offset))
 
     def _add_line_metadata(self) -> None:
         token_offsets = {t.offset for t in self._tokens}

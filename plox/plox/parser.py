@@ -22,11 +22,22 @@ class Parser:
     def __init__(self, tokens: list[Token]) -> None:
         self._tokens = tokens
         self._current = 0
+        self._errors: list[ParserError] = []
 
     def parse(self) -> list[Stmt]:
+        self._current = 0
+        self._errors.clear()
+
         statements: list[Stmt] = []
         while not self._is_at_end():
-            statements.append(self._declaration())
+            try:
+                statements.append(self._declaration())
+            except ParserError:
+                # skip to the next stmt
+                self._synchronize()
+
+        if self._errors:
+            raise ExceptionGroup("Parser errors", self._errors)
 
         return statements
 
@@ -100,7 +111,8 @@ class Parser:
             if isinstance(expr, Variable):
                 return Assign(expr.name, value)
 
-            self._raise("Invalid assignment target", equals)
+            # don't raise, as already in a consistent state
+            self._error("Invalid assignment target", equals)
 
         return expr
 
@@ -230,6 +242,36 @@ class Parser:
         return self._tokens[self._current - 1]
 
     def _raise(self, msg: str, token: Token | None = None) -> NoReturn:
+        raise self._error(msg, token)
+
+    def _error(self, msg: str, token: Token | None = None) -> ParserError:
+        # all errors must be reproted through this method
+        # either by calling it directly or via _raise
         if token is None:
             token = self._peek()
-        raise ParserError(msg, token)
+
+        error = ParserError(msg, token)
+        self._errors.append(error)
+        return error
+
+    def _synchronize(self) -> None:
+        self._advance()  # skip the bad token
+
+        while not self._is_at_end():
+            if self._previous().type == TT.SEMICOLON:
+                # new stmt after ;
+                return
+            if self._peek().type in (
+                TT.CLASS,
+                TT.FUN,
+                TT.VAR,
+                TT.FOR,
+                TT.IF,
+                TT.WHILE,
+                TT.PRINT,
+                TT.RETURN,
+            ):
+                # new decl / stmt by keyword
+                return
+
+            self._advance()

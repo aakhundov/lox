@@ -10,7 +10,7 @@ from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
-from plox.common import LoxError
+from plox.common import InterpreterError, LoxError
 from plox.ast_printer import AstPrinter
 from plox.interpreter import Interpreter
 from plox.parser import Parser
@@ -28,6 +28,7 @@ HINT_COLOR = "ansibrightblack"
 HISTORY_PATH = Path.home() / ".lox.history"
 BORDER_CHAR = "-"
 BORDER_LEN = 30
+PRINTED_ERROR_CAP = 10
 
 
 def _make_multiline_bindings() -> KeyBindings:
@@ -133,8 +134,30 @@ def _print_error(e: LoxError, source: str) -> None:
     padding = "".join(c if c == "\t" else " " for c in prefix)
     caret = padding + "^"
 
-    error = f"{msg}\n{'=' * len(msg)}\n{source_line}\n{caret}"
+    error = f"{msg}\n{'=' * len(msg)}\n{source_line}\n{caret}\n"
     _print_formatted_error_text(error)
+
+
+def _print_errors(
+    e: LoxError | ExceptionGroup[LoxError],
+    source: str,
+    num_errors: int = 0,
+    first_call: bool = True,
+) -> int:
+    if isinstance(e, ExceptionGroup):
+        for nested_e in e.exceptions:
+            num_errors = _print_errors(nested_e, source, num_errors, first_call=False)
+    else:
+        if num_errors < PRINTED_ERROR_CAP:
+            _print_error(e, source)
+        num_errors += 1
+
+    if first_call and num_errors > PRINTED_ERROR_CAP:
+        skipped = num_errors - PRINTED_ERROR_CAP
+        suffix = "s" if skipped > 1 else ""
+        _print_formatted_error_text(f"{skipped} error{suffix} skipped")
+
+    return num_errors
 
 
 def _run_file(path: str) -> int:
@@ -144,17 +167,21 @@ def _run_file(path: str) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 66  # EX_NOINPUT
 
+    exit_code = 0  # EX_OK
     try:
         _run_code(
             source=source,
             interpreter=Interpreter(),  # fresh interpreter
             config=_RunConfig(),  # default config
         )
-    except LoxError as e:
-        _print_error(e, source)
-        return 65  # EX_DATAERR
+    except* InterpreterError as eg:
+        _print_errors(eg, source)
+        exit_code = 70  # EX_SOFTWARE (runtime error)
+    except* LoxError as eg:
+        _print_errors(eg, source)
+        exit_code = 65  # EX_DATAERR (scan/parse error)
 
-    return 0  # EX_OK
+    return exit_code
 
 
 def _update_repl_config(cfg: _RunConfig, command: str) -> None:
@@ -243,8 +270,8 @@ def _run_repl() -> int:
                 interpreter=interpreter,
                 config=repl_cfg,
             )
-        except LoxError as e:
-            _print_error(e, text)
+        except* LoxError as eg:
+            _print_errors(eg, text)
 
     return 0  # EX_OK
 

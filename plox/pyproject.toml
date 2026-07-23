@@ -20,5 +20,7 @@ packages = ["plox"]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
 
+[tool.ruff]
+
 [tool.mypy]
 exclude = ["^tests/"]
