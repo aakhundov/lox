@@ -382,6 +382,44 @@ def test_logical_short_circuit(run, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # the body runs once per iteration while the condition holds
+        ("var i = 0; while (i < 3) { print i; i = i + 1; }", [[0.0], [1.0], [2.0]]),
+        # a condition false at entry runs the body zero times
+        ("while (false) print 1;", []),
+    ],
+)
+def test_while_statement(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # counts up via the three header clauses
+        ("for (var i = 0; i < 3; i = i + 1) print i;", [[0.0], [1.0], [2.0]]),
+        # a condition false at entry runs the body zero times
+        ("for (var i = 0; i > 3; i = i + 1) print i;", []),
+        # omitted init/increment: the loop drives itself from the body
+        ("var i = 0; for (; i < 2;) { print i; i = i + 1; }", [[0.0], [1.0]]),
+        # a non-var initializer assigns to an existing outer variable
+        ("var i = 9; for (i = 0; i < 2; i = i + 1) print i;", [[0.0], [1.0]]),
+    ],
+)
+def test_for_statement(run, source, expected):
+    assert run(source) == expected
+
+
+def test_for_initializer_scope(run):
+    # a `var` initializer is scoped to the loop and does not leak past it
+    with pytest.raises(InterpreterError) as excinfo:
+        run("for (var i = 0; i < 1; i = i + 1) print i; print i;")
+    assert str(excinfo.value) == "Undefined variable: i"
+    assert excinfo.value.get_line_info() == (1, 50)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # each executed print appends one group of evaluated values
         ("print 1;", [[1.0]]),
         # varargs evaluate to one group, in order

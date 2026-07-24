@@ -1,8 +1,10 @@
 from plox.ast import (
     Stmt,
     Var,
+    For,
     If,
     Print,
+    While,
     Block,
     Expression,
     Expr,
@@ -29,6 +31,15 @@ class AstPrinter(
             return f"(var {s.name.lexeme})"
         return self._parens(f"var {s.name.lexeme}", s.initializer)
 
+    def visit_for(self, s: For) -> str:
+        return self._parens(
+            "for",
+            s.initializer or Literal(None),
+            s.condition or Literal(None),
+            s.increment or Literal(None),
+            s.body,
+        )
+
     def visit_if(self, s: If) -> str:
         if s.else_branch is None:
             return self._parens("if", s.condition, s.then_branch)
@@ -36,6 +47,9 @@ class AstPrinter(
 
     def visit_print(self, s: Print) -> str:
         return self._parens("print", *s.expressions)
+
+    def visit_while(self, s: While) -> str:
+        return self._parens("while", s.condition, s.body)
 
     def visit_block(self, s: Block) -> str:
         return self._parens("blk", *s.statements)

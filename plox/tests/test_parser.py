@@ -430,6 +430,87 @@ def test_if_error(parse_errors, source, message, position):
 
 
 @pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("while (i < 3) print i;", "(while (< i 3) (print i))"),
+        # the body may be a block
+        ("while (true) { print 1; }", "(while true (blk (print 1)))"),
+    ],
+)
+def test_while_statement(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # the condition must be parenthesized
+        ("while true) print 1;", "Expect '(' after while", (1, 7)),
+        ("while", "Expect '(' after while", (1, 6)),
+        # the condition's closing paren must be present
+        ("while (true print 1;", "Expect ')' after while condition", (1, 13)),
+    ],
+)
+def test_while_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # all three clauses present
+        (
+            "for (var i = 0; i < 3; i = i + 1) print i;",
+            "(for (var i 0) (< i 3) (= i (+ i 1)) (print i))",
+        ),
+        # a non-var initializer is an expression statement
+        (
+            "for (i = 0; i < 3; i = i + 1) print i;",
+            "(for (exp (= i 0)) (< i 3) (= i (+ i 1)) (print i))",
+        ),
+        # every clause is optional; an omitted one renders as nil
+        ("for (;;) print 1;", "(for nil nil nil (print 1))"),
+        ("for (; i < 3;) print i;", "(for nil (< i 3) nil (print i))"),
+        (
+            "for (var i = 0;; i = i + 1) print i;",
+            "(for (var i 0) nil (= i (+ i 1)) (print i))",
+        ),
+        ("for (var i = 0; i < 3;) print i;", "(for (var i 0) (< i 3) nil (print i))"),
+    ],
+)
+def test_for_statement(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # the clauses must be parenthesized
+        ("for", "Expect '(' after for", (1, 4)),
+        # the condition clause is terminated by ';'
+        ("for (;true", "Expect ';' after for condition", (1, 11)),
+        (
+            "for (var i = 0; i < 3 i = i + 1) print i;",
+            "Expect ';' after for condition",
+            (1, 23),
+        ),
+        # the clause list is closed by ')'
+        (
+            "for (var i = 0; i < 3; i = i + 1 print i;",
+            "Expect ')' after for clauses",
+            (1, 34),
+        ),
+    ],
+)
+def test_for_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
     "source, position",
     [
         # a binary operator with no left operand
@@ -577,6 +658,24 @@ def test_missing_closing_brace_error(parse_errors, source, position):
             [
                 ("Expect expression", (1, 4)),
                 ("Expect expression", (1, 9)),
+            ],
+        ),
+        # with no ';' to recover on, synchronization instead resumes at the
+        # next declaration/statement keyword -- here the second `var`
+        (
+            "var 1 var 2;",
+            [
+                ("Expect variable name", (1, 5)),
+                ("Expect variable name", (1, 11)),
+            ],
+        ),
+        # a control-flow keyword is a sync point too, so recovery lands on
+        # `while` and the loop body's own error is still collected
+        (
+            "1 + while (true) print 2 +;",
+            [
+                ("Expect expression", (1, 5)),
+                ("Expect expression", (1, 27)),
             ],
         ),
     ],

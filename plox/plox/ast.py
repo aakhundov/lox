@@ -12,9 +12,13 @@ class Stmt(ABC):
         @abstractmethod
         def visit_var(self, s: "Var") -> R: ...
         @abstractmethod
+        def visit_for(self, s: "For") -> R: ...
+        @abstractmethod
         def visit_if(self, s: "If") -> R: ...
         @abstractmethod
         def visit_print(self, s: "Print") -> R: ...
+        @abstractmethod
+        def visit_while(self, s: "While") -> R: ...
         @abstractmethod
         def visit_block(self, s: "Block") -> R: ...
         @abstractmethod
@@ -34,6 +38,17 @@ class Var(Stmt):
 
 
 @dataclass(frozen=True)
+class For(Stmt):
+    initializer: Stmt | None
+    condition: "Expr | None"
+    increment: "Expr | None"
+    body: Stmt
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_for(self)
+
+
+@dataclass(frozen=True)
 class If(Stmt):
     condition: "Expr"
     then_branch: Stmt
@@ -49,6 +64,15 @@ class Print(Stmt):
 
     def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
         return visitor.visit_print(self)
+
+
+@dataclass(frozen=True)
+class While(Stmt):
+    condition: "Expr"
+    body: Stmt
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_while(self)
 
 
 @dataclass(frozen=True)

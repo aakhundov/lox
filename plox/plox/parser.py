@@ -4,8 +4,10 @@ from typing import NoReturn
 from plox.ast import (
     Stmt,
     Var,
+    For,
     If,
     Print,
+    While,
     Block,
     Expression,
     Expr,
@@ -67,14 +69,53 @@ class Parser:
         return Var(name, initializer)
 
     def _statement(self) -> Stmt:
+        if self._match(TT.FOR):
+            return self._for()
         if self._match(TT.IF):
             return self._if()
         if self._match(TT.PRINT):
             return self._print()
+        if self._match(TT.WHILE):
+            return self._while()
         if self._match(TT.LEFT_BRACE):
             return self._block()
 
         return self._expression_statement()
+
+    def _for(self) -> Stmt:
+        self._consume(
+            TT.LEFT_PAREN,
+            "Expect '(' after for",
+        )
+
+        initializer = None
+        if not self._match(TT.SEMICOLON):
+            if self._match(TT.VAR):
+                initializer = self._var()
+            else:
+                initializer = self._expression_statement()
+
+        condition = None
+        if not self._check(TT.SEMICOLON):
+            condition = self._expression()
+
+        self._consume(
+            TT.SEMICOLON,
+            "Expect ';' after for condition",
+        )
+
+        increment = None
+        if not self._check(TT.RIGHT_PAREN):
+            increment = self._expression()
+
+        self._consume(
+            TT.RIGHT_PAREN,
+            "Expect ')' after for clauses",
+        )
+
+        body = self._statement()
+
+        return For(initializer, condition, increment, body)
 
     def _if(self) -> Stmt:
         self._consume(
@@ -105,6 +146,23 @@ class Parser:
         )
 
         return Print(expressions)
+
+    def _while(self) -> Stmt:
+        self._consume(
+            TT.LEFT_PAREN,
+            "Expect '(' after while",
+        )
+
+        condition = self._expression()
+
+        self._consume(
+            TT.RIGHT_PAREN,
+            "Expect ')' after while condition",
+        )
+
+        body = self._statement()
+
+        return While(condition, body)
 
     def _block(self) -> Stmt:
         statements = self._parse_block()

@@ -1,12 +1,15 @@
 import operator
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from typing import NoReturn
 
 from plox.ast import (
     Stmt,
     Var,
+    For,
     If,
     Print,
+    While,
     Block,
     Expression,
     Expr,
@@ -85,6 +88,22 @@ class Interpreter(
 
         self._env.define(s.name.lexeme, value)
 
+    def visit_for(self, s: For) -> None:
+        def _cond() -> bool:
+            if s.condition is not None:
+                return is_truthy(self._evaluate(s.condition))
+            return True
+
+        # execute the loop in a sub-env if init is a variable decl
+        with self._nested_env(enabled=isinstance(s.initializer, Var)):
+            if s.initializer is not None:
+                self._execute(s.initializer)
+
+            while _cond():
+                self._execute(s.body)
+                if s.increment is not None:
+                    self._evaluate(s.increment)
+
     def visit_if(self, s: If) -> None:
         if is_truthy(self._evaluate(s.condition)):
             self._execute(s.then_branch)
@@ -95,9 +114,12 @@ class Interpreter(
         values = [self._evaluate(e) for e in s.expressions]
         self._print_fn(values)
 
+    def visit_while(self, s: While) -> None:
+        while is_truthy(self._evaluate(s.condition)):
+            self._execute(s.body)
+
     def visit_block(self, s: Block) -> None:
-        child_env = Environment(parent=self._env)
-        self._execute_block(s.statements, child_env)
+        self._execute_block(s.statements)
 
     def visit_expression(self, s: Expression) -> None:
         self._evaluate(s.expression)
@@ -183,16 +205,11 @@ class Interpreter(
     def _execute_block(
         self,
         statements: list[Stmt],
-        block_env: Environment,
+        block_env: Environment | None = None,
     ) -> None:
-        previous_env = self._env
-        try:
-            self._env = block_env
+        with self._nested_env(block_env):
             for statement in statements:
                 self._execute(statement)
-        finally:
-            # restore the previous env
-            self._env = previous_env
 
     def _execute(self, s: Stmt) -> None:
         return s.accept(self)
@@ -207,3 +224,27 @@ class Interpreter(
     def _default_print_fn(values: list[LoxValue]) -> None:
         strs = [to_str(val) for val in values]
         print(" ".join(strs))
+
+    @contextmanager
+    def _nested_env(
+        self,
+        new_env: Environment | None = None,
+        *,
+        enabled: bool = True,
+    ) -> Generator[Environment]:
+        if not enabled:
+            # when not enabled, this is a no op
+            yield self._env
+            return
+
+        # keep the previous env
+        previous_env = self._env
+        if new_env is None:
+            # make a child env of the previous env
+            new_env = Environment(parent=previous_env)
+        try:
+            self._env = new_env
+            yield new_env
+        finally:
+            # restore the previous env
+            self._env = previous_env

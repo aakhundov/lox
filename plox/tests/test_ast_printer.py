@@ -8,7 +8,9 @@ from plox.ast import (
     Unary,
     Variable,
     Assign,
+    For,
     If,
+    While,
     Print,
     Var,
     Block,
@@ -111,4 +113,27 @@ def test_if_statement(show):
     assert (
         show(If(Literal(True), then_branch, Print([Literal(2.0)])))
         == "(if true (print 1) (print 2))"
+    )
+
+
+def test_while_statement(show):
+    assert show(While(Literal(True), Print([Literal(1.0)]))) == "(while true (print 1))"
+
+
+def test_for_statement(show):
+    # a fully-specified loop renders initializer, condition, increment, body
+    node = For(
+        Var(ident("i"), Literal(0.0)),
+        Binary(Variable(ident("i")), op("<", TT.LESS), Literal(3.0)),
+        Assign(
+            ident("i"),
+            Binary(Variable(ident("i")), op("+", TT.PLUS), Literal(1.0)),
+        ),
+        Print([Variable(ident("i"))]),
+    )
+    assert show(node) == "(for (var i 0) (< i 3) (= i (+ i 1)) (print i))"
+    # omitted clauses render as nil placeholders
+    assert (
+        show(For(None, None, None, Print([Literal(1.0)])))
+        == "(for nil nil nil (print 1))"
     )
