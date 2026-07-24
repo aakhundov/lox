@@ -60,6 +60,8 @@ def scan():
         ("=", TT.EQUAL),
         ("<", TT.LESS),
         (">", TT.GREATER),
+        ("?", TT.QUESTION),
+        (":", TT.COLON),
     ],
 )
 def test_single_character_tokens(scan, source, token_type):
@@ -318,6 +320,17 @@ def test_keyword_lookalikes_are_identifiers(scan, source):
         (
             "123abc",
             [(TT.NUMBER, "123", 123.0), (TT.IDENTIFIER, "abc", None)],
+        ),
+        # a conditional's '?' and ':' scan apart with no surrounding whitespace
+        (
+            "a?b:c",
+            [
+                (TT.IDENTIFIER, "a", None),
+                (TT.QUESTION, "?", None),
+                (TT.IDENTIFIER, "b", None),
+                (TT.COLON, ":", None),
+                (TT.IDENTIFIER, "c", None),
+            ],
         ),
     ],
 )

@@ -12,6 +12,7 @@ from plox.ast import (
     Expression,
     Expr,
     Assign,
+    Conditional,
     Logical,
     Binary,
     Unary,
@@ -182,11 +183,11 @@ class Parser:
         return self._assignment()
 
     def _assignment(self) -> Expr:
-        expr = self._or()
+        expr = self._conditional()
 
         if self._match(TT.EQUAL):
             equals = self._previous()
-            value = self._assignment()  # nested
+            value = self._assignment()  # right-associative
 
             if isinstance(expr, Variable):
                 return Assign(expr.name, value)
@@ -195,6 +196,27 @@ class Parser:
             self._error("Invalid assignment target", equals)
 
         return expr
+
+    def _conditional(self) -> Expr:
+        condition = self._or()
+
+        if self._match(TT.QUESTION):
+            then_expression = self._expression()
+
+            self._consume(
+                TT.COLON,
+                "Expect ':' to match ?",
+            )
+
+            else_expression = self._conditional()  # right-associative
+
+            return Conditional(
+                condition,
+                then_expression,
+                else_expression,
+            )
+
+        return condition
 
     def _or(self) -> Expr:
         return self._left_fold(

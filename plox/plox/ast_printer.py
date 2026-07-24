@@ -9,6 +9,7 @@ from plox.ast import (
     Expression,
     Expr,
     Assign,
+    Conditional,
     Logical,
     Binary,
     Unary,
@@ -43,7 +44,12 @@ class AstPrinter(
     def visit_if(self, s: If) -> str:
         if s.else_branch is None:
             return self._parens("if", s.condition, s.then_branch)
-        return self._parens("if", s.condition, s.then_branch, s.else_branch)
+        return self._parens(
+            "if",
+            s.condition,
+            s.then_branch,
+            s.else_branch,
+        )
 
     def visit_print(self, s: Print) -> str:
         return self._parens("print", *s.expressions)
@@ -59,6 +65,14 @@ class AstPrinter(
 
     def visit_assign(self, e: Assign) -> str:
         return self._parens(f"= {e.name.lexeme}", e.value)
+
+    def visit_conditional(self, e: Conditional) -> str:
+        return self._parens(
+            "?:",
+            e.condition,
+            e.then_expression,
+            e.else_expression,
+        )
 
     def visit_logical(self, e: Logical) -> str:
         return self._parens(e.operator.lexeme, e.left, e.right)

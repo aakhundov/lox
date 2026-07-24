@@ -26,6 +26,10 @@ class TokenType(Enum):
     LESS = auto()
     LESS_EQUAL = auto()
 
+    # ternary
+    QUESTION = auto()
+    COLON = auto()
+
     # literals
     IDENTIFIER = auto()
     STRING = auto()

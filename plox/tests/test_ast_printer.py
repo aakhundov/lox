@@ -1,6 +1,7 @@
 import pytest
 
 from plox.ast import (
+    Conditional,
     Logical,
     Binary,
     Grouping,
@@ -90,6 +91,18 @@ def test_assign(show):
     assert show(Assign(ident("x"), Literal(1.0))) == "(= x 1)"
     expr = Assign(ident("x"), Binary(Literal(1.0), op("+", TT.PLUS), Literal(2.0)))
     assert show(expr) == "(= x (+ 1 2))"
+
+
+def test_conditional(show):
+    node = Conditional(Variable(ident("a")), Literal(1.0), Literal(2.0))
+    assert show(node) == "(?: a 1 2)"
+    # the condition and branches are arbitrary expressions
+    nested = Conditional(
+        Binary(Literal(1.0), op("<", TT.LESS), Literal(2.0)),
+        Literal("y"),
+        Literal("n"),
+    )
+    assert show(nested) == '(?: (< 1 2) "y" "n")'
 
 
 def test_var_statement(show):

@@ -14,6 +14,7 @@ from plox.ast import (
     Expression,
     Expr,
     Assign,
+    Conditional,
     Logical,
     Binary,
     Unary,
@@ -128,6 +129,12 @@ class Interpreter(
         value = self._evaluate(e.value)
         self._env.assign(e.name, value)
         return value
+
+    def visit_conditional(self, e: Conditional) -> LoxValue:
+        if is_truthy(self._evaluate(e.condition)):
+            return self._evaluate(e.then_expression)
+        else:
+            return self._evaluate(e.else_expression)
 
     def visit_logical(self, e: Logical) -> LoxValue:
         op = e.operator

@@ -382,6 +382,49 @@ def test_logical_short_circuit(run, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # the condition selects which branch's value is returned
+        ("print true ? 1 : 2;", 1.0),
+        ("print false ? 1 : 2;", 2.0),
+        # plox truthiness: nil, false, 0, and "" all take the else-branch
+        ("print nil ? 1 : 2;", 2.0),
+        ("print 0 ? 1 : 2;", 2.0),
+        ('print "" ? 1 : 2;', 2.0),
+        # a nonzero number and nonempty string are truthy
+        ("print 3 ? 1 : 2;", 1.0),
+        ('print "x" ? 1 : 2;', 1.0),
+        # the branch value keeps its runtime type
+        ("print true ? nil : 1;", None),
+        ('print 1 < 2 ? "y" : "n";', "y"),
+        # the else-branch is right-associative, so this chains as a lookup
+        ("print false ? 1 : true ? 2 : 3;", 2.0),
+        ("print false ? 1 : false ? 2 : 3;", 3.0),
+        # only the selected branch is evaluated, so the other's error is unseen
+        ("print true ? 1 : 2 / 0;", 1.0),
+        ("print false ? 1 / 0 : 2;", 2.0),
+    ],
+)
+def test_conditional(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # the untaken branch's side effect never runs
+        ("var a = 1; true ? nil : (a = 2); print a;", [[1.0]]),
+        ("var a = 1; false ? (a = 2) : nil; print a;", [[1.0]]),
+        # the taken branch IS evaluated
+        ("var a = 1; true ? (a = 2) : nil; print a;", [[2.0]]),
+        ("var a = 1; false ? nil : (a = 2); print a;", [[2.0]]),
+    ],
+)
+def test_conditional_short_circuit(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # the body runs once per iteration while the condition holds
         ("var i = 0; while (i < 3) { print i; i = i + 1; }", [[0.0], [1.0], [2.0]]),
         # a condition false at entry runs the body zero times

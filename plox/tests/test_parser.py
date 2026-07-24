@@ -285,6 +285,43 @@ def test_variable(show_expr, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        ("a ? b : c;", "(?: a b c)"),
+        # the else-branch is right-associative
+        ("a ? b : c ? d : e;", "(?: a b (?: c d e))"),
+        # the middle branch is a full expression, delimited by ':', so a
+        # nested conditional may sit there too
+        ("a ? b ? c : d : e;", "(?: a (?: b c d) e)"),
+        # `or` binds tighter than `?:`, so it forms the operands
+        ("a or b ? c : d;", "(?: (or a b) c d)"),
+        ("a ? b : c or d;", "(?: a b (or c d))"),
+        # `?:` sits above assignment: it is an assignment's value
+        ("x = a ? b : c;", "(= x (?: a b c))"),
+        # every branch is a full expression
+        ("a ? b + c : d * e;", "(?: a (+ b c) (* d e))"),
+    ],
+)
+def test_conditional(show_expr, source, expected):
+    assert show_expr(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # a '?' with no ':' to match it
+        ("a ? b;", (1, 6)),
+        # a stray token where the ':' was expected
+        ("a ? b c;", (1, 7)),
+    ],
+)
+def test_conditional_error(parse_errors, source, position):
+    (error,) = parse_errors(source)
+    assert str(error) == "Expect ':' to match ?"
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         ("x = 1;", "(= x 1)"),
         ('name = "lox";', '(= name "lox")'),
         # assignment is right-associative
@@ -540,6 +577,9 @@ def test_for_error(parse_errors, source, message, position):
         ("print;", (1, 6)),
         # a trailing comma leaves print without its next value
         ("print 1,;", (1, 9)),
+        # a conditional missing its middle or else branch
+        ("a ? : c;", (1, 5)),
+        ("a ? b : ;", (1, 9)),
     ],
 )
 def test_expected_expression_error(parse_errors, source, position):

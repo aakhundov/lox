@@ -96,6 +96,8 @@ class Expr(ABC):
         @abstractmethod
         def visit_assign(self, e: "Assign") -> R: ...
         @abstractmethod
+        def visit_conditional(self, e: "Conditional") -> R: ...
+        @abstractmethod
         def visit_logical(self, e: "Logical") -> R: ...
         @abstractmethod
         def visit_binary(self, e: "Binary") -> R: ...
@@ -119,6 +121,16 @@ class Assign(Expr):
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_assign(self)
+
+
+@dataclass(frozen=True)
+class Conditional(Expr):
+    condition: Expr
+    then_expression: Expr
+    else_expression: Expr
+
+    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
+        return visitor.visit_conditional(self)
 
 
 @dataclass(frozen=True)

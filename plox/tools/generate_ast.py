@@ -25,6 +25,11 @@ _METADATA = {
     },
     "Expr": {
         "Assign": {"name": "Token", "value": "Expr"},
+        "Conditional": {
+            "condition": "Expr",
+            "then_expression": "Expr",
+            "else_expression": "Expr",
+        },
         "Logical": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Unary": {"operator": "Token", "right": "Expr"},
