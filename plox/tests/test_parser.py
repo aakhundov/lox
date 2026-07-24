@@ -209,6 +209,27 @@ def test_equality(show_expr, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        ("a and b;", "(and a b)"),
+        ("a or b;", "(or a b)"),
+        # each is left-associative
+        ("a and b and c;", "(and (and a b) c)"),
+        ("a or b or c;", "(or (or a b) c)"),
+        # `and` binds tighter than `or`
+        ("a or b and c;", "(or a (and b c))"),
+        ("a and b or c;", "(or (and a b) c)"),
+        # equality binds tighter than `and`/`or`
+        ("1 == 2 and 3;", "(and (== 1 2) 3)"),
+        # `and`/`or` sit above assignment
+        ("a = b or c;", "(= a (or b c))"),
+    ],
+)
+def test_logical(show_expr, source, expected):
+    assert show_expr(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # the full precedence ladder in one expression
         ("!true == 1 + 2 * 3 < 4;", "(== (! true) (< (+ 1 (* 2 3)) 4))"),
         # grouping overrides the default precedence
@@ -369,6 +390,46 @@ def test_block(show_one, source, expected):
 
 
 @pytest.mark.parametrize(
+    "source, expected",
+    [
+        # an `if` with no `else` omits the third child
+        ("if (true) print 1;", "(if true (print 1))"),
+        ("if (x) print 1; else print 2;", "(if x (print 1) (print 2))"),
+        # the condition is a full expression
+        ("if (1 < 2) print 1;", "(if (< 1 2) (print 1))"),
+        # either branch may be a block
+        (
+            "if (a) { print 1; } else { print 2; }",
+            "(if a (blk (print 1)) (blk (print 2)))",
+        ),
+        # a dangling `else` binds to the nearest `if`
+        (
+            "if (a) if (b) print 1; else print 2;",
+            "(if a (if b (print 1) (print 2)))",
+        ),
+    ],
+)
+def test_if_statement(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # the condition must be parenthesized
+        ("if true) print 1;", "Expect '(' after if", (1, 4)),
+        ("if", "Expect '(' after if", (1, 3)),
+        # the condition's closing paren must be present
+        ("if (true print 1;", "Expect ')' after if condition", (1, 10)),
+    ],
+)
+def test_if_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
     "source, position",
     [
         # a binary operator with no left operand
@@ -378,9 +439,9 @@ def test_block(show_one, source, expected):
         ("== 3", (1, 1)),
         # a stray closing paren is not the start of an expression
         (")", (1, 1)),
-        # a keyword that does not begin an expression (and is not yet a
-        # statement form of its own)
-        ("if", (1, 1)),
+        # a keyword that does not begin an expression and is not a statement
+        # form of its own
+        ("else", (1, 1)),
         # a binary operator with no right operand
         ("1 +", (1, 4)),
         ("1 -", (1, 4)),

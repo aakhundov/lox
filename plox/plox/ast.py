@@ -12,6 +12,8 @@ class Stmt(ABC):
         @abstractmethod
         def visit_var(self, s: "Var") -> R: ...
         @abstractmethod
+        def visit_if(self, s: "If") -> R: ...
+        @abstractmethod
         def visit_print(self, s: "Print") -> R: ...
         @abstractmethod
         def visit_block(self, s: "Block") -> R: ...
@@ -29,6 +31,16 @@ class Var(Stmt):
 
     def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
         return visitor.visit_var(self)
+
+
+@dataclass(frozen=True)
+class If(Stmt):
+    condition: "Expr"
+    then_branch: Stmt
+    else_branch: Stmt | None
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_if(self)
 
 
 @dataclass(frozen=True)
@@ -60,6 +72,8 @@ class Expr(ABC):
         @abstractmethod
         def visit_assign(self, e: "Assign") -> R: ...
         @abstractmethod
+        def visit_logical(self, e: "Logical") -> R: ...
+        @abstractmethod
         def visit_binary(self, e: "Binary") -> R: ...
         @abstractmethod
         def visit_unary(self, e: "Unary") -> R: ...
@@ -81,6 +95,16 @@ class Assign(Expr):
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_assign(self)
+
+
+@dataclass(frozen=True)
+class Logical(Expr):
+    left: Expr
+    operator: Token
+    right: Expr
+
+    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
+        return visitor.visit_logical(self)
 
 
 @dataclass(frozen=True)

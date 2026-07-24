@@ -1,11 +1,13 @@
 from plox.ast import (
     Stmt,
     Var,
+    If,
     Print,
     Block,
     Expression,
     Expr,
     Assign,
+    Logical,
     Binary,
     Unary,
     Literal,
@@ -27,6 +29,11 @@ class AstPrinter(
             return f"(var {s.name.lexeme})"
         return self._parens(f"var {s.name.lexeme}", s.initializer)
 
+    def visit_if(self, s: If) -> str:
+        if s.else_branch is None:
+            return self._parens("if", s.condition, s.then_branch)
+        return self._parens("if", s.condition, s.then_branch, s.else_branch)
+
     def visit_print(self, s: Print) -> str:
         return self._parens("print", *s.expressions)
 
@@ -38,6 +45,9 @@ class AstPrinter(
 
     def visit_assign(self, e: Assign) -> str:
         return self._parens(f"= {e.name.lexeme}", e.value)
+
+    def visit_logical(self, e: Logical) -> str:
+        return self._parens(e.operator.lexeme, e.left, e.right)
 
     def visit_binary(self, e: Binary) -> str:
         return self._parens(e.operator.lexeme, e.left, e.right)

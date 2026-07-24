@@ -4,11 +4,13 @@ from typing import NoReturn
 from plox.ast import (
     Stmt,
     Var,
+    If,
     Print,
     Block,
     Expression,
     Expr,
     Assign,
+    Logical,
     Binary,
     Unary,
     Literal,
@@ -65,12 +67,32 @@ class Parser:
         return Var(name, initializer)
 
     def _statement(self) -> Stmt:
+        if self._match(TT.IF):
+            return self._if()
         if self._match(TT.PRINT):
             return self._print()
         if self._match(TT.LEFT_BRACE):
             return self._block()
 
         return self._expression_statement()
+
+    def _if(self) -> Stmt:
+        self._consume(
+            TT.LEFT_PAREN,
+            "Expect '(' after if",
+        )
+
+        condition = self._expression()
+
+        self._consume(
+            TT.RIGHT_PAREN,
+            "Expect ')' after if condition",
+        )
+
+        then_branch = self._statement()
+        else_branch = self._statement() if self._match(TT.ELSE) else None
+
+        return If(condition, then_branch, else_branch)
 
     def _print(self) -> Stmt:
         expressions = [self._expression()]
@@ -102,7 +124,7 @@ class Parser:
         return self._assignment()
 
     def _assignment(self) -> Expr:
-        expr = self._equality()
+        expr = self._or()
 
         if self._match(TT.EQUAL):
             equals = self._previous()
@@ -116,8 +138,22 @@ class Parser:
 
         return expr
 
+    def _or(self) -> Expr:
+        return self._left_fold(
+            self._and,
+            (TT.OR,),
+            type_=Logical,
+        )
+
+    def _and(self) -> Expr:
+        return self._left_fold(
+            self._equality,
+            (TT.AND,),
+            type_=Logical,
+        )
+
     def _equality(self) -> Expr:
-        return self._left_fold_binary(
+        return self._left_fold(
             self._comparison,
             (
                 TT.EQUAL_EQUAL,
@@ -126,7 +162,7 @@ class Parser:
         )
 
     def _comparison(self) -> Expr:
-        return self._left_fold_binary(
+        return self._left_fold(
             self._term,
             (
                 TT.LESS,
@@ -137,7 +173,7 @@ class Parser:
         )
 
     def _term(self) -> Expr:
-        return self._left_fold_binary(
+        return self._left_fold(
             self._factor,
             (
                 TT.PLUS,
@@ -146,7 +182,7 @@ class Parser:
         )
 
     def _factor(self) -> Expr:
-        return self._left_fold_binary(
+        return self._left_fold(
             self._unary,
             (
                 TT.STAR,
@@ -199,16 +235,18 @@ class Parser:
 
         return statements
 
-    def _left_fold_binary(
+    def _left_fold(
         self,
         sub_expr: Callable[[], Expr],
         operators: tuple[TT, ...],
+        *,
+        type_: type[Binary] | type[Logical] = Binary,
     ) -> Expr:
         left = sub_expr()
         while self._match(*operators):
             operator = self._previous()
             right = sub_expr()
-            left = Binary(left, operator, right)
+            left = type_(left, operator, right)
 
         return left
 

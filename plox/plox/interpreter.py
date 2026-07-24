@@ -5,11 +5,13 @@ from typing import NoReturn
 from plox.ast import (
     Stmt,
     Var,
+    If,
     Print,
     Block,
     Expression,
     Expr,
     Assign,
+    Logical,
     Binary,
     Unary,
     Literal,
@@ -83,6 +85,12 @@ class Interpreter(
 
         self._env.define(s.name.lexeme, value)
 
+    def visit_if(self, s: If) -> None:
+        if is_truthy(self._evaluate(s.condition)):
+            self._execute(s.then_branch)
+        elif s.else_branch is not None:
+            self._execute(s.else_branch)
+
     def visit_print(self, s: Print) -> None:
         values = [self._evaluate(e) for e in s.expressions]
         self._print_fn(values)
@@ -98,6 +106,24 @@ class Interpreter(
         value = self._evaluate(e.value)
         self._env.assign(e.name, value)
         return value
+
+    def visit_logical(self, e: Logical) -> LoxValue:
+        op = e.operator
+        left = self._evaluate(e.left)
+
+        if op.type == TT.AND:
+            if not is_truthy(left):
+                return left  # short-circuit
+            else:
+                return self._evaluate(e.right)
+        elif op.type == TT.OR:
+            if is_truthy(left):
+                return left  # short-circuit
+            else:
+                return self._evaluate(e.right)
+
+        # this line must be unreachable
+        self._raise("Unknown logical op", op)
 
     def visit_binary(self, e: Binary) -> LoxValue:
         op = e.operator

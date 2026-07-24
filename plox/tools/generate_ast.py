@@ -7,12 +7,18 @@ from pathlib import Path
 _METADATA = {
     "Stmt": {
         "Var": {"name": "Token", "initializer": "'Expr | None'"},
+        "If": {
+            "condition": "'Expr'",
+            "then_branch": "Stmt",
+            "else_branch": "Stmt | None",
+        },
         "Print": {"expressions": "list['Expr']"},
         "Block": {"statements": "list[Stmt]"},
         "Expression": {"expression": "'Expr'"},
     },
     "Expr": {
         "Assign": {"name": "Token", "value": "Expr"},
+        "Logical": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Unary": {"operator": "Token", "right": "Expr"},
         "Literal": {"value": "LoxValue"},

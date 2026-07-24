@@ -320,6 +320,68 @@ def test_scope(run, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # a truthy condition runs the then-branch
+        ("if (true) print 1;", [[1.0]]),
+        ("if (true) print 1; else print 2;", [[1.0]]),
+        # a falsey condition skips the then-branch (and runs any else)
+        ("if (false) print 1;", []),
+        ("if (false) print 1; else print 2;", [[2.0]]),
+        # only the taken branch executes its side effects
+        ("if (true) print 1; else print 2 / 0;", [[1.0]]),
+        # plox truthiness: nil, false, 0, and "" are all falsey (see is_truthy)
+        ("if (nil) print 1; else print 2;", [[2.0]]),
+        ("if (0) print 1; else print 2;", [[2.0]]),
+        ('if ("") print 1; else print 2;', [[2.0]]),
+        # a nonzero number and nonempty string are truthy
+        ("if (2) print 1;", [[1.0]]),
+        # the condition is a full expression
+        ("var x = 3; if (x > 2) print x;", [[3.0]]),
+    ],
+)
+def test_if_statement(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # `and` returns the left operand when it is falsey, else the right
+        ("print true and 2;", 2.0),
+        ("print false and 2;", False),
+        ("print nil and 2;", None),
+        # `or` returns the left operand when it is truthy, else the right
+        ("print 1 or 2;", 1.0),
+        ("print false or 2;", 2.0),
+        ("print nil or 2;", 2.0),
+        # operands are values, not coerced to booleans
+        ('print "a" and "b";', "b"),
+        ("print false or nil;", None),
+    ],
+)
+def test_logical(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a falsey left operand short-circuits `and`: the assignment side
+        # effect on the right never happens, so `a` keeps its value
+        ("var a = 1; false and (a = 2); print a;", [[1.0]]),
+        # a truthy left operand short-circuits `or`
+        ("var a = 1; true or (a = 2); print a;", [[1.0]]),
+        # the non-short-circuiting side IS evaluated
+        ("var a = 1; true and (a = 2); print a;", [[2.0]]),
+        ("var a = 1; false or (a = 2); print a;", [[2.0]]),
+    ],
+)
+def test_logical_short_circuit(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # each executed print appends one group of evaluated values
         ("print 1;", [[1.0]]),
         # varargs evaluate to one group, in order

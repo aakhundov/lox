@@ -1,12 +1,14 @@
 import pytest
 
 from plox.ast import (
+    Logical,
     Binary,
     Grouping,
     Literal,
     Unary,
     Variable,
     Assign,
+    If,
     Print,
     Var,
     Block,
@@ -56,6 +58,12 @@ def test_binary(show):
     assert show(Binary(Literal(6.3), op("*", TT.STAR), Literal(7.0))) == "(* 6.3 7)"
 
 
+def test_logical(show):
+    left, right = Variable(ident("a")), Variable(ident("b"))
+    assert show(Logical(left, op("and", TT.AND), right)) == "(and a b)"
+    assert show(Logical(left, op("or", TT.OR), right)) == "(or a b)"
+
+
 def test_grouping(show):
     assert show(Grouping(Literal(45.67))) == "(grp 45.67)"
     assert show(Grouping(Literal("hi"))) == '(grp "hi")'
@@ -94,3 +102,13 @@ def test_block(show):
     assert show(Block([Print([Literal(1.0)])])) == "(blk (print 1))"
     # blocks nest
     assert show(Block([Block([])])) == "(blk (blk))"
+
+
+def test_if_statement(show):
+    then_branch = Print([Literal(1.0)])
+    # an `if` with no `else` omits the third child
+    assert show(If(Literal(True), then_branch, None)) == "(if true (print 1))"
+    assert (
+        show(If(Literal(True), then_branch, Print([Literal(2.0)])))
+        == "(if true (print 1) (print 2))"
+    )
