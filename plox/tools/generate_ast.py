@@ -20,6 +20,7 @@ _METADATA = {
         },
         "Print": {"expressions": "list['Expr']"},
         "While": {"condition": "'Expr'", "body": "Stmt"},
+        "LoopJump": {"statement": "Token"},
         "Block": {"statements": "list[Stmt]"},
         "Expression": {"expression": "'Expr'"},
     },

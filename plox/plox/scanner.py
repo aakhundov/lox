@@ -8,7 +8,9 @@ from plox.common import (
 class Scanner:
     _KEYWORDS = {
         "and": TT.AND,
+        "break": TT.BREAK,
         "class": TT.CLASS,
+        "continue": TT.CONTINUE,
         "else": TT.ELSE,
         "false": TT.FALSE,
         "for": TT.FOR,

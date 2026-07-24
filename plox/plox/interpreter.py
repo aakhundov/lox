@@ -10,6 +10,7 @@ from plox.ast import (
     If,
     Print,
     While,
+    LoopJump,
     Block,
     Expression,
     Expr,
@@ -32,6 +33,14 @@ from plox.common import (
     to_str,
 )
 from plox.environment import Environment
+
+
+class _LoopBreak(Exception):
+    pass
+
+
+class _LoopContinue(Exception):
+    pass
 
 
 class Interpreter(
@@ -101,7 +110,14 @@ class Interpreter(
                 self._execute(s.initializer)
 
             while _cond():
-                self._execute(s.body)
+                try:
+                    self._execute(s.body)
+                except _LoopContinue:
+                    # still need to increment
+                    pass
+                except _LoopBreak:
+                    break
+
                 if s.increment is not None:
                     self._evaluate(s.increment)
 
@@ -117,7 +133,21 @@ class Interpreter(
 
     def visit_while(self, s: While) -> None:
         while is_truthy(self._evaluate(s.condition)):
-            self._execute(s.body)
+            try:
+                self._execute(s.body)
+            except _LoopContinue:
+                continue
+            except _LoopBreak:
+                break
+
+    def visit_loopjump(self, s: LoopJump) -> None:
+        if s.statement.type == TT.CONTINUE:
+            raise _LoopContinue()
+        if s.statement.type == TT.BREAK:
+            raise _LoopBreak()
+
+        # this line must be unreachable
+        self._raise("Unknown loop jump statement", s.statement)
 
     def visit_block(self, s: Block) -> None:
         self._execute_block(s.statements)
@@ -145,7 +175,7 @@ class Interpreter(
                 return left  # short-circuit
             else:
                 return self._evaluate(e.right)
-        elif op.type == TT.OR:
+        if op.type == TT.OR:
             if is_truthy(left):
                 return left  # short-circuit
             else:

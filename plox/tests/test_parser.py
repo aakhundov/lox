@@ -548,6 +548,50 @@ def test_for_error(parse_errors, source, message, position):
 
 
 @pytest.mark.parametrize(
+    "source, expected",
+    [
+        # break/continue are statements in a loop body
+        ("while (true) break;", "(while true (break))"),
+        ("while (true) continue;", "(while true (continue))"),
+        ("for (;;) break;", "(for nil nil nil (break))"),
+        ("for (;;) continue;", "(for nil nil nil (continue))"),
+        # they may sit inside a block body
+        ("while (true) { break; }", "(while true (blk (break)))"),
+        # ...or nested in another statement, as long as a loop encloses them
+        ("while (true) if (x) continue;", "(while true (if x (continue)))"),
+        # a jump binds to its lexically enclosing loop; loops nest
+        (
+            "while (a) { while (b) break; }",
+            "(while a (blk (while b (break))))",
+        ),
+    ],
+)
+def test_loop_jump_statement(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # a jump outside any loop body is rejected, at the keyword itself
+        ("break;", "break allowed only inside loop body", (1, 1)),
+        ("continue;", "continue allowed only inside loop body", (1, 1)),
+        # an enclosing `if` is not a loop
+        ("if (true) break;", "break allowed only inside loop body", (1, 11)),
+        # the loop has already ended by the time the jump is reached
+        ("while (true) {} break;", "break allowed only inside loop body", (1, 17)),
+        # the jump must be terminated by ';'
+        ("while (true) break", "Expect ';' after break", (1, 19)),
+        ("while (true) continue", "Expect ';' after continue", (1, 22)),
+    ],
+)
+def test_loop_jump_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
     "source, position",
     [
         # a binary operator with no left operand

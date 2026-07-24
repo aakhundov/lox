@@ -228,7 +228,9 @@ def test_number_dot_boundaries(scan, source, expected):
     "source, token_type",
     [
         ("and", TT.AND),
+        ("break", TT.BREAK),
         ("class", TT.CLASS),
+        ("continue", TT.CONTINUE),
         ("else", TT.ELSE),
         ("false", TT.FALSE),
         ("for", TT.FOR),
@@ -259,7 +261,19 @@ def test_identifiers(scan, source):
 
 @pytest.mark.parametrize(
     "source",
-    ["orchid", "classy", "ifx", "forlorn", "variable", "VAR", "Var", "True", "NIL"],
+    [
+        "orchid",
+        "classy",
+        "ifx",
+        "forlorn",
+        "variable",
+        "breaks",
+        "continued",
+        "VAR",
+        "Var",
+        "True",
+        "NIL",
+    ],
 )
 def test_keyword_lookalikes_are_identifiers(scan, source):
     assert scan(source) == [(TT.IDENTIFIER, source, None), EOF]

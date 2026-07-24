@@ -5,6 +5,7 @@ from plox.ast import (
     If,
     Print,
     While,
+    LoopJump,
     Block,
     Expression,
     Expr,
@@ -56,6 +57,9 @@ class AstPrinter(
 
     def visit_while(self, s: While) -> str:
         return self._parens("while", s.condition, s.body)
+
+    def visit_loopjump(self, s: LoopJump) -> str:
+        return f"({s.statement.type.name.lower()})"
 
     def visit_block(self, s: Block) -> str:
         return self._parens("blk", *s.statements)

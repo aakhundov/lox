@@ -20,6 +20,8 @@ class Stmt(ABC):
         @abstractmethod
         def visit_while(self, s: "While") -> R: ...
         @abstractmethod
+        def visit_loopjump(self, s: "LoopJump") -> R: ...
+        @abstractmethod
         def visit_block(self, s: "Block") -> R: ...
         @abstractmethod
         def visit_expression(self, s: "Expression") -> R: ...
@@ -73,6 +75,14 @@ class While(Stmt):
 
     def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
         return visitor.visit_while(self)
+
+
+@dataclass(frozen=True)
+class LoopJump(Stmt):
+    statement: Token
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_loopjump(self)
 
 
 @dataclass(frozen=True)

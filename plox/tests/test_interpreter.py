@@ -463,6 +463,65 @@ def test_for_initializer_scope(run):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # `break` exits the loop immediately, skipping the rest of the body
+        # and every remaining iteration
+        (
+            "var i = 0; while (i < 5) { i = i + 1; if (i == 3) break; print i; }",
+            [[1.0], [2.0]],
+        ),
+        # it behaves the same inside a `for` loop
+        (
+            "for (var i = 0; i < 5; i = i + 1) { if (i == 3) break; print i; }",
+            [[0.0], [1.0], [2.0]],
+        ),
+        # a `break` nested inside a block still exits the loop (and does not
+        # spin forever)
+        ("while (true) { { break; } }", []),
+        # `break` exits only the innermost loop; the outer one keeps iterating
+        (
+            "for (var i = 0; i < 2; i = i + 1) {"
+            " for (var j = 0; j < 5; j = j + 1) { if (j == 1) break; print j; }"
+            " print i; }",
+            [[0.0], [0.0], [0.0], [1.0]],
+        ),
+    ],
+)
+def test_break(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # `continue` skips the rest of the body and re-tests the condition
+        (
+            "var i = 0; while (i < 5) { i = i + 1; if (i == 3) continue; print i; }",
+            [[1.0], [2.0], [4.0], [5.0]],
+        ),
+        # in a `for` loop, `continue` still runs the increment clause, so the
+        # loop keeps making progress
+        (
+            "for (var i = 0; i < 5; i = i + 1) { if (i == 2) continue; print i; }",
+            [[0.0], [1.0], [3.0], [4.0]],
+        ),
+        # `continue` re-tests the condition rather than looping forever
+        ("var i = 0; while (i < 3) { i = i + 1; continue; print 9; }", []),
+        # a block on the skipped path is unwound cleanly: its scope is restored
+        # so the next iteration's declaration starts fresh
+        (
+            "for (var i = 0; i < 3; i = i + 1)"
+            " { var x = i; if (x == 1) continue; print x; }",
+            [[0.0], [2.0]],
+        ),
+    ],
+)
+def test_continue(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # each executed print appends one group of evaluated values
         ("print 1;", [[1.0]]),
         # varargs evaluate to one group, in order

@@ -8,6 +8,7 @@ from plox.ast import (
     If,
     Print,
     While,
+    LoopJump,
     Block,
     Expression,
     Expr,
@@ -27,10 +28,12 @@ class Parser:
     def __init__(self, tokens: list[Token]) -> None:
         self._tokens = tokens
         self._current = 0
+        self._loop_depth = 0
         self._errors: list[ParserError] = []
 
     def parse(self) -> list[Stmt]:
         self._current = 0
+        self._loop_depth = 0
         self._errors.clear()
 
         statements: list[Stmt] = []
@@ -78,45 +81,52 @@ class Parser:
             return self._print()
         if self._match(TT.WHILE):
             return self._while()
+        if self._match(TT.BREAK, TT.CONTINUE):
+            return self._loop_jump()
         if self._match(TT.LEFT_BRACE):
             return self._block()
 
         return self._expression_statement()
 
     def _for(self) -> Stmt:
-        self._consume(
-            TT.LEFT_PAREN,
-            "Expect '(' after for",
-        )
+        try:
+            self._loop_depth += 1
 
-        initializer = None
-        if not self._match(TT.SEMICOLON):
-            if self._match(TT.VAR):
-                initializer = self._var()
-            else:
-                initializer = self._expression_statement()
+            self._consume(
+                TT.LEFT_PAREN,
+                "Expect '(' after for",
+            )
 
-        condition = None
-        if not self._check(TT.SEMICOLON):
-            condition = self._expression()
+            initializer = None
+            if not self._match(TT.SEMICOLON):
+                if self._match(TT.VAR):
+                    initializer = self._var()
+                else:
+                    initializer = self._expression_statement()
 
-        self._consume(
-            TT.SEMICOLON,
-            "Expect ';' after for condition",
-        )
+            condition = None
+            if not self._check(TT.SEMICOLON):
+                condition = self._expression()
 
-        increment = None
-        if not self._check(TT.RIGHT_PAREN):
-            increment = self._expression()
+            self._consume(
+                TT.SEMICOLON,
+                "Expect ';' after for condition",
+            )
 
-        self._consume(
-            TT.RIGHT_PAREN,
-            "Expect ')' after for clauses",
-        )
+            increment = None
+            if not self._check(TT.RIGHT_PAREN):
+                increment = self._expression()
 
-        body = self._statement()
+            self._consume(
+                TT.RIGHT_PAREN,
+                "Expect ')' after for clauses",
+            )
 
-        return For(initializer, condition, increment, body)
+            body = self._statement()
+
+            return For(initializer, condition, increment, body)
+        finally:
+            self._loop_depth -= 1
 
     def _if(self) -> Stmt:
         self._consume(
@@ -149,21 +159,40 @@ class Parser:
         return Print(expressions)
 
     def _while(self) -> Stmt:
+        try:
+            self._loop_depth += 1
+
+            self._consume(
+                TT.LEFT_PAREN,
+                "Expect '(' after while",
+            )
+
+            condition = self._expression()
+
+            self._consume(
+                TT.RIGHT_PAREN,
+                "Expect ')' after while condition",
+            )
+
+            body = self._statement()
+
+            return While(condition, body)
+        finally:
+            self._loop_depth -= 1
+
+    def _loop_jump(self) -> Stmt:
+        statement = self._previous()
+        kw = statement.type.name.lower()
+
+        if self._loop_depth < 1:
+            self._raise(f"{kw} allowed only inside loop body", statement)
+
         self._consume(
-            TT.LEFT_PAREN,
-            "Expect '(' after while",
+            TT.SEMICOLON,
+            f"Expect ';' after {kw}",
         )
 
-        condition = self._expression()
-
-        self._consume(
-            TT.RIGHT_PAREN,
-            "Expect ')' after while condition",
-        )
-
-        body = self._statement()
-
-        return While(condition, body)
+        return LoopJump(statement)
 
     def _block(self) -> Stmt:
         statements = self._parse_block()

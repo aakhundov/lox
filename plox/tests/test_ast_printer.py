@@ -12,6 +12,7 @@ from plox.ast import (
     For,
     If,
     While,
+    LoopJump,
     Print,
     Var,
     Block,
@@ -150,3 +151,9 @@ def test_for_statement(show):
         show(For(None, None, None, Print([Literal(1.0)])))
         == "(for nil nil nil (print 1))"
     )
+
+
+def test_loop_jump_statement(show):
+    # a loop jump renders as its bare keyword
+    assert show(LoopJump(Token(TT.BREAK, "break", None, 0))) == "(break)"
+    assert show(LoopJump(Token(TT.CONTINUE, "continue", None, 0))) == "(continue)"
