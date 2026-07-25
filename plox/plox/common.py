@@ -140,6 +140,10 @@ class ParserError(LoxErrorFromToken):
     pass
 
 
+class ResolverError(LoxErrorFromToken):
+    pass
+
+
 class InterpreterError(LoxErrorFromToken):
     pass
 

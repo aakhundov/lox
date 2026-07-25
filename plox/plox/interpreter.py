@@ -195,7 +195,13 @@ class Interpreter(
 
     def visit_assign(self, e: Assign) -> LoxValue:
         value = self._evaluate(e.value)
-        self._env.assign(e.name, value)
+
+        if (distance := e.get_distance()) is not None:
+            # the env distance has been resolved
+            self._env.assign_at(distance, e.name, value)
+        else:
+            self._globals.assign(e.name, value)
+
         return value
 
     def visit_conditional(self, e: Conditional) -> LoxValue:
@@ -292,7 +298,11 @@ class Interpreter(
         return e.value
 
     def visit_variable(self, e: Variable) -> LoxValue:
-        return self._env.get(e.name)
+        if (distance := e.get_distance()) is not None:
+            # the env distance has been resolved
+            return self._env.get_at(distance, e.name)
+        else:
+            return self._globals.get(e.name)
 
     def visit_grouping(self, e: Grouping) -> LoxValue:
         return self._evaluate(e.expression)

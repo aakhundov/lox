@@ -2,7 +2,8 @@
 # to-regenerate: `python plox/tools/generate_ast.py`
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, cast
 
 from plox.common import Token, LoxValue
 
@@ -154,6 +155,18 @@ class Assign(Expr):
     name: Token
     value: Expr
 
+    _meta: dict[str, Any] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
+
+    def get_distance(self) -> int | None:
+        return cast(int | None, self._meta.get("distance"))
+
+    def set_distance(self, value: int | None) -> None:
+        self._meta["distance"] = value
+
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_assign(self)
 
@@ -218,6 +231,18 @@ class Literal(Expr):
 @dataclass(frozen=True)
 class Variable(Expr):
     name: Token
+
+    _meta: dict[str, Any] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
+
+    def get_distance(self) -> int | None:
+        return cast(int | None, self._meta.get("distance"))
+
+    def set_distance(self, value: int | None) -> None:
+        self._meta["distance"] = value
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_variable(self)

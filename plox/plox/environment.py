@@ -22,6 +22,11 @@ class Environment:
 
         raise InterpreterError(f"Undefined variable: {name}", token)
 
+    def get_at(self, distance: int, token: Token) -> LoxValue:
+        vars = self._ancestor(distance)._vars
+        assert token.lexeme in vars
+        return vars[token.lexeme]
+
     def assign(self, token: Token, value: LoxValue) -> None:
         name = token.lexeme
         if name in self._vars:
@@ -34,7 +39,19 @@ class Environment:
 
         raise InterpreterError(f"Undefined variable: {name}", token)
 
+    def assign_at(self, distance: int, token: Token, value: LoxValue) -> None:
+        vars = self._ancestor(distance)._vars
+        assert token.lexeme in vars
+        vars[token.lexeme] = value
+
     def items(self) -> Iterable[tuple[str, LoxValue]]:
         if self._parent is not None:
             return chain(self._vars.items(), self._parent.items())
         return self._vars.items()
+
+    def _ancestor(self, distance: int) -> "Environment":
+        env = self
+        for _ in range(distance):
+            assert env._parent is not None
+            env = env._parent
+        return env

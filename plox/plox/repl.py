@@ -14,6 +14,7 @@ from plox.common import InterpreterError, LoxError, to_str
 from plox.ast_printer import AstPrinter
 from plox.interpreter import Interpreter
 from plox.parser import Parser
+from plox.resolver import Resolver
 from plox.scanner import Scanner
 
 
@@ -118,6 +119,8 @@ def _run_code(
                 s_expr = AstPrinter().print(statement)
                 print(f"{i + 1:04}  {s_expr}")
         print()
+
+    Resolver().resolve(statements)
 
     with _padded_borders("output", enabled=metadata_shown):
         interpreter.interpret(statements)

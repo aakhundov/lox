@@ -4,7 +4,20 @@ from plox.common import LoxCallable, LoxValue
 from plox.interpreter import Interpreter, InterpreterError
 from plox.library import get_library
 from plox.parser import Parser
+from plox.resolver import Resolver
 from plox.scanner import Scanner
+
+
+def _resolved(source):
+    """Scan, parse and resolve `source` into statements ready to interpret.
+
+    The interpreter only ever runs resolved ASTs: an unresolved `Variable` or
+    `Assign` carries no distance, which the interpreter reads as "this is a
+    global". Driving the real Resolver here mirrors the actual pipeline.
+    """
+    statements = Parser(Scanner(source).scan()).parse()
+    Resolver().resolve(statements)
+    return statements
 
 
 @pytest.fixture
@@ -20,9 +33,7 @@ def run():
 
     def _run(source):
         collected: list[list[LoxValue]] = []
-        Interpreter(print_fn=collected.append).interpret(
-            Parser(Scanner(source).scan()).parse()
-        )
+        Interpreter(print_fn=collected.append).interpret(_resolved(source))
         return collected
 
     return _run
@@ -602,6 +613,46 @@ def test_closure(run, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # a name binds to the declaration in scope where the code was written,
+        # not to whatever the name happens to mean when the code runs: both
+        # calls print the global, even though the second one runs after a local
+        # `a` has been declared in the same block
+        (
+            """
+            var a = "global";
+            {
+                fun showA() { print a; }
+                showA();
+                var a = "block";
+                showA();
+            }
+            """,
+            [["global"], ["global"]],
+        ),
+        # the same for a block that is entered twice: the later declaration
+        # never captures the earlier call
+        (
+            """
+            var a = "global";
+            fun showA() { print a; }
+            { showA(); var a = 1; showA(); }
+            """,
+            [["global"], ["global"]],
+        ),
+        # a local declared after a nested block does not become visible to it
+        (
+            'var a = "global"; { { print a; } var a = "block"; }',
+            [["global"]],
+        ),
+    ],
+)
+def test_static_scope(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # functions are first-class values: passable as arguments...
         (
             "fun ap(g, x) { return g(x); } fun d(v) { return v * 2; } print ap(d, 21);",
@@ -807,7 +858,7 @@ def test_print_grouping(run, source, expected):
     ],
 )
 def test_default_print_output(capsys, source, expected):
-    Interpreter().interpret(Parser(Scanner(source).scan()).parse())
+    Interpreter().interpret(_resolved(source))
     assert capsys.readouterr().out == expected
 
 

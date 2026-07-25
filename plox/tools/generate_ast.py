@@ -4,14 +4,26 @@ import sys
 from pathlib import Path
 
 
-_METADATA = {
+_METADATA: dict[
+    str,
+    dict[
+        str,
+        dict[
+            str,
+            str | dict[str, str],
+        ],
+    ],
+] = {
     "Stmt": {
         "Function": {
             "name": "Token",
             "parameters": "list[Token]",
             "body": "list[Stmt]",
         },
-        "Var": {"name": "Token", "initializer": "'Expr | None'"},
+        "Var": {
+            "name": "Token",
+            "initializer": "'Expr | None'",
+        },
         "For": {
             "initializer": "Stmt | None",
             "condition": "'Expr | None'",
@@ -23,31 +35,71 @@ _METADATA = {
             "then_branch": "Stmt",
             "else_branch": "Stmt | None",
         },
-        "Print": {"expressions": "list['Expr']"},
-        "Return": {"keyword": "Token", "value": "'Expr | None'"},
-        "While": {"condition": "'Expr'", "body": "Stmt"},
-        "LoopJump": {"keyword": "Token"},
-        "Block": {"statements": "list[Stmt]"},
-        "Expression": {"expression": "'Expr'"},
+        "Print": {
+            "expressions": "list['Expr']",
+        },
+        "Return": {
+            "keyword": "Token",
+            "value": "'Expr | None'",
+        },
+        "While": {
+            "condition": "'Expr'",
+            "body": "Stmt",
+        },
+        "LoopJump": {
+            "keyword": "Token",
+        },
+        "Block": {
+            "statements": "list[Stmt]",
+        },
+        "Expression": {
+            "expression": "'Expr'",
+        },
     },
     "Expr": {
-        "Assign": {"name": "Token", "value": "Expr"},
+        "Assign": {
+            "name": "Token",
+            "value": "Expr",
+            "_meta": {
+                "distance": "int",
+            },
+        },
         "Conditional": {
             "condition": "Expr",
             "then_expression": "Expr",
             "else_expression": "Expr",
         },
-        "Logical": {"left": "Expr", "operator": "Token", "right": "Expr"},
-        "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
-        "Unary": {"operator": "Token", "right": "Expr"},
+        "Logical": {
+            "left": "Expr",
+            "operator": "Token",
+            "right": "Expr",
+        },
+        "Binary": {
+            "left": "Expr",
+            "operator": "Token",
+            "right": "Expr",
+        },
+        "Unary": {
+            "operator": "Token",
+            "right": "Expr",
+        },
         "Call": {
             "callee": "Expr",
             "paren": "Token",
             "arguments": "list[Expr]",
         },
-        "Literal": {"value": "LoxValue"},
-        "Variable": {"name": "Token"},
-        "Grouping": {"expression": "Expr"},
+        "Literal": {
+            "value": "LoxValue",
+        },
+        "Variable": {
+            "name": "Token",
+            "_meta": {
+                "distance": "int",
+            },
+        },
+        "Grouping": {
+            "expression": "Expr",
+        },
     },
 }
 
@@ -56,7 +108,8 @@ _HEADER = """\
 # to-regenerate: `python plox/tools/generate_ast.py`
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, cast
 
 from plox.common import Token, LoxValue
 """
@@ -94,10 +147,32 @@ def _generate_code(cls: str) -> str:
 
     # subclasses (concrete)
     for sub, fields in _METADATA[cls].items():
+        meta = None
+        if "_meta" in fields:
+            fields = fields.copy()
+            meta = fields.pop("_meta")
+
         add(0, "@dataclass(frozen=True)")
         add(0, f"class {sub}({cls}):")
         for name, type_ in fields.items():
             add(1, f"{name}: {type_}")
+
+        if meta:
+            assert isinstance(meta, dict)
+            add(1, "")  # blank line
+            add(
+                1,
+                (
+                    "_meta: dict[str, Any] = "
+                    "field(default_factory=dict, compare=False, repr=False,)"
+                ),
+            )
+            for m_name, m_type in meta.items():
+                add(1, f"def get_{m_name}(self) -> {m_type} | None:")
+                add(2, f'return cast({m_type} | None, self._meta.get("{m_name}"))')
+                add(1, f"def set_{m_name}(self, value: {m_type} | None) -> None:")
+                add(2, f'self._meta["{m_name}"] = value')
+
         add(1, f"def accept[R](self, visitor: {cls}.Visitor[R]) -> R:")
         add(2, f"return visitor.visit_{sub.lower()}(self)")
 

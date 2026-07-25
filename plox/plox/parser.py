@@ -492,7 +492,7 @@ class Parser:
         raise self._error(msg, token)
 
     def _error(self, msg: str, token: Token | None = None) -> ParserError:
-        # all errors must be reproted through this method
+        # all errors must be reported through this method
         # either by calling it directly or via _raise
         if token is None:
             token = self._peek()
