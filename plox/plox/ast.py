@@ -102,7 +102,7 @@ class While(Stmt):
 
 @dataclass(frozen=True)
 class LoopJump(Stmt):
-    statement: Token
+    keyword: Token
 
     def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
         return visitor.visit_loopjump(self)

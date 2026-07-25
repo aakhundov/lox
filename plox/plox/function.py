@@ -8,17 +8,17 @@ class LoxFunction(LoxCallable):
     def __init__(
         self,
         decl: Function,
-        decl_env: Environment,
+        closure: Environment,
     ):
         self._decl = decl
-        self._decl_env = decl_env
+        self._closure = closure
 
     def call(
         self,
         arguments: list[LoxValue],
         interpreter: Interpreter,
     ) -> LoxValue:
-        call_env = Environment(parent=self._decl_env)
+        call_env = Environment(parent=self._closure)
         for param, arg in zip(self._decl.parameters, arguments, strict=True):
             call_env.define(param.lexeme, arg)
 

@@ -25,8 +25,8 @@ from plox.common import to_str
 
 
 class AstPrinter(
-    Expr.Visitor[str],
     Stmt.Visitor[str],
+    Expr.Visitor[str],
 ):
     def print(self, node: Expr | Stmt) -> str:
         return node.accept(self)
@@ -72,7 +72,7 @@ class AstPrinter(
         return self._parens("while", s.condition, s.body)
 
     def visit_loopjump(self, s: LoopJump) -> str:
-        return f"({s.statement.type.name.lower()})"
+        return f"({s.keyword.type.name.lower()})"
 
     def visit_block(self, s: Block) -> str:
         return self._parens("blk", *s.statements)

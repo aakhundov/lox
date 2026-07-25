@@ -149,44 +149,43 @@ class Parser:
         return self._expression_statement()
 
     def _for(self) -> Stmt:
+        self._consume(
+            TT.LEFT_PAREN,
+            "Expect '(' after for",
+        )
+
+        initializer = None
+        if not self._match(TT.SEMICOLON):
+            if self._match(TT.VAR):
+                initializer = self._var()
+            else:
+                initializer = self._expression_statement()
+
+        condition = None
+        if not self._check(TT.SEMICOLON):
+            condition = self._expression()
+
+        self._consume(
+            TT.SEMICOLON,
+            "Expect ';' after for condition",
+        )
+
+        increment = None
+        if not self._check(TT.RIGHT_PAREN):
+            increment = self._expression()
+
+        self._consume(
+            TT.RIGHT_PAREN,
+            "Expect ')' after for clauses",
+        )
+
         try:
             self._loop_depth += 1
-
-            self._consume(
-                TT.LEFT_PAREN,
-                "Expect '(' after for",
-            )
-
-            initializer = None
-            if not self._match(TT.SEMICOLON):
-                if self._match(TT.VAR):
-                    initializer = self._var()
-                else:
-                    initializer = self._expression_statement()
-
-            condition = None
-            if not self._check(TT.SEMICOLON):
-                condition = self._expression()
-
-            self._consume(
-                TT.SEMICOLON,
-                "Expect ';' after for condition",
-            )
-
-            increment = None
-            if not self._check(TT.RIGHT_PAREN):
-                increment = self._expression()
-
-            self._consume(
-                TT.RIGHT_PAREN,
-                "Expect ')' after for clauses",
-            )
-
             body = self._statement()
-
-            return For(initializer, condition, increment, body)
         finally:
             self._loop_depth -= 1
+
+        return For(initializer, condition, increment, body)
 
     def _if(self) -> Stmt:
         self._consume(
@@ -236,40 +235,39 @@ class Parser:
         return Return(keyword, value)
 
     def _while(self) -> Stmt:
+        self._consume(
+            TT.LEFT_PAREN,
+            "Expect '(' after while",
+        )
+
+        condition = self._expression()
+
+        self._consume(
+            TT.RIGHT_PAREN,
+            "Expect ')' after while condition",
+        )
+
         try:
             self._loop_depth += 1
-
-            self._consume(
-                TT.LEFT_PAREN,
-                "Expect '(' after while",
-            )
-
-            condition = self._expression()
-
-            self._consume(
-                TT.RIGHT_PAREN,
-                "Expect ')' after while condition",
-            )
-
             body = self._statement()
-
-            return While(condition, body)
         finally:
             self._loop_depth -= 1
 
+        return While(condition, body)
+
     def _loop_jump(self) -> Stmt:
-        statement = self._previous()
-        kw = statement.type.name.lower()
+        keyword = self._previous()
+        kw = keyword.type.name.lower()
 
         if self._loop_depth < 1:
-            self._raise(f"{kw} allowed only inside loop body", statement)
+            self._raise(f"{kw} allowed only inside loop body", keyword)
 
         self._consume(
             TT.SEMICOLON,
             f"Expect ';' after {kw}",
         )
 
-        return LoopJump(statement)
+        return LoopJump(keyword)
 
     def _block(self) -> Stmt:
         statements = self._parse_block()

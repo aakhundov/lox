@@ -61,8 +61,8 @@ class _NativeFnError(Exception):
 
 
 class Interpreter(
-    Expr.Visitor[LoxValue],
     Stmt.Visitor[None],
+    Expr.Visitor[LoxValue],
 ):
     _FLOAT_BINARY_OPS: dict[
         TT,
@@ -175,13 +175,13 @@ class Interpreter(
                 break
 
     def visit_loopjump(self, s: LoopJump) -> None:
-        if s.statement.type == TT.CONTINUE:
+        if s.keyword.type == TT.CONTINUE:
             raise _LoopContinue()
-        if s.statement.type == TT.BREAK:
+        if s.keyword.type == TT.BREAK:
             raise _LoopBreak()
 
         # this line must be unreachable
-        self._raise("Unknown loop jump statement", s.statement)
+        self._raise("Unknown loop jump statement", s.keyword)
 
     def visit_block(self, s: Block) -> None:
         self._execute_block(s.statements)
