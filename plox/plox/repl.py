@@ -10,7 +10,7 @@ from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
-from plox.common import InterpreterError, LoxError
+from plox.common import InterpreterError, LoxError, to_str
 from plox.ast_printer import AstPrinter
 from plox.interpreter import Interpreter
 from plox.parser import Parser
@@ -184,45 +184,6 @@ def _run_file(path: str) -> int:
     return exit_code
 
 
-def _update_repl_config(cfg: _RunConfig, command: str) -> None:
-    fields = get_type_hints(type(cfg))
-    switches = [f for f in fields if fields[f] is bool]
-    settings = {f: type_ for f, type_ in fields.items() if f not in switches}
-
-    print_config = True
-
-    def _error(msg: str) -> None:
-        _print_formatted_error_text(msg)
-        nonlocal print_config
-        print_config = False
-
-    match command.split():
-        case [switch] if switch in switches:
-            setattr(cfg, switch, not getattr(cfg, switch))  # flip
-        case [switch, "on" | "off" as toggle] if switch in switches:
-            setattr(cfg, switch, toggle == "on")
-        case [setting] if setting in settings:
-            _error(f"usage: {setting} <value>")
-        case [setting, value] if setting in settings:
-            try:
-                type_ = settings[setting]
-                setattr(cfg, setting, type_(value))
-            except Exception:
-                _error(f'can\'t set {setting} to "{value}"')
-        case ["help" | "h"]:
-            pass  # print the current config
-        case _:
-            _error(f'unrecognized command: "{command}"')
-
-    if print_config:
-        for key, value in dataclasses.asdict(cfg).items():
-            type_ = fields[key].__name__
-            if key in switches:
-                print(f"{key} = {('on' if value else 'off')} [{type_}]")
-            else:
-                print(f"{key} = {value!r} [{type_}]")
-
-
 def _run_repl() -> int:
     prompt = f"<b><{PROMPT_COLOR}>{PROMPT_TEXT}</{PROMPT_COLOR}></b>"
     multiline_hint = HTML(f"{prompt}<{HINT_COLOR}>{MULTILINE_HINT}</{HINT_COLOR}>")
@@ -240,7 +201,70 @@ def _run_repl() -> int:
     # the interpreter instance and REPL config
     # persist for the whole session duration
     interpreter = Interpreter()
-    repl_cfg = _RunConfig()
+    cfg = _RunConfig()
+
+    def _handle_command(command: str) -> None:
+        fields = get_type_hints(type(cfg))
+        switches = [f for f in fields if fields[f] is bool]
+        settings = {f: type_ for f, type_ in fields.items() if f not in switches}
+
+        print_config = True
+
+        def _error(msg: str) -> None:
+            _print_formatted_error_text(msg)
+            nonlocal print_config
+            print_config = False
+
+        match command.split():
+            case [switch] if switch in switches:
+                # flip the switch
+                setattr(cfg, switch, not getattr(cfg, switch))
+            case [switch, "on" | "off" as toggle] if switch in switches:
+                # set the switch
+                setattr(cfg, switch, toggle == "on")
+            case [setting] if setting in settings:
+                # flip the setting (error)
+                _error(f"usage: {setting} <value>")
+            case [setting, value] if setting in settings:
+                # set the setting value
+                try:
+                    type_ = settings[setting]
+                    setattr(cfg, setting, type_(value))
+                except Exception:
+                    _error(f'can\'t set {setting} to "{value}"')
+            case ["cfg" | "config"]:
+                # print the current config
+                pass
+            case ["env" | "globals"]:
+                # print the interpreter's globals
+                for name, val in interpreter.globals.items():
+                    s = f'"{val}"' if isinstance(val, str) else to_str(val)
+                    print(f"{name} = {s}")
+                print_config = False
+            case ["help" | "h"]:
+                # print the recognized commands
+                rows = [
+                    (":env | :globals", "print the global variables"),
+                    (":cfg | :config", "print the current config"),
+                    *((f":{s} [on | off]", f"toggle/set {s} output") for s in switches),
+                    *((f":{s} <value>", f"set {s}") for s in settings),
+                    (":help | :h", "print this message"),
+                    (":exit | :quit | :q", "quit the REPL"),
+                ]
+                width = max(len(usage) for usage, _ in rows)
+                for usage, description in rows:
+                    print(f"{usage:<{width}}    {description}")
+                print_config = False
+            case _:
+                _error(f'unrecognized command: "{command}"')
+
+        if print_config:
+            for key, value in dataclasses.asdict(cfg).items():
+                type_ = fields[key].__name__
+                if key in switches:
+                    print(f"{key} = {('on' if value else 'off')} [{type_}]")
+                else:
+                    print(f"{key} = {value!r} [{type_}]")
 
     while True:
         try:
@@ -255,7 +279,7 @@ def _run_repl() -> int:
                 command = command[1:].strip()  # drop the ':'
                 if command in ("exit", "quit", "q"):
                     break  # quit the REPL
-                _update_repl_config(repl_cfg, command)
+                _handle_command(command)
                 continue
         except KeyboardInterrupt:
             # Ctrl-C: discard current line, keep going
@@ -268,7 +292,7 @@ def _run_repl() -> int:
             _run_code(
                 source=text,
                 interpreter=interpreter,
-                config=repl_cfg,
+                config=cfg,
             )
         except* LoxError as eg:
             _print_errors(eg, text)

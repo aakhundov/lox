@@ -1,3 +1,6 @@
+from collections.abc import Iterable
+from itertools import chain
+
 from plox.common import Token, InterpreterError, LoxValue
 
 
@@ -30,3 +33,8 @@ class Environment:
             return
 
         raise InterpreterError(f"Undefined variable: {name}", token)
+
+    def items(self) -> Iterable[tuple[str, LoxValue]]:
+        if self._parent is not None:
+            return chain(self._vars.items(), self._parent.items())
+        return self._vars.items()

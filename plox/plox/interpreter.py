@@ -107,6 +107,10 @@ class Interpreter(
 
         self._register_library()
 
+    @property
+    def globals(self) -> Environment:
+        return self._globals
+
     def interpret(self, statements: list[Stmt]) -> None:
         for statement in statements:
             self._execute(statement)
