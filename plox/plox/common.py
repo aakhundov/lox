@@ -1,5 +1,10 @@
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from plox.interpreter import Interpreter
 
 
 class TokenType(Enum):
@@ -139,7 +144,27 @@ class InterpreterError(LoxErrorFromToken):
     pass
 
 
-LoxValue = bool | float | str | None
+class LoxCallable(ABC):
+    @abstractmethod
+    def call(
+        self,
+        arguments: list["LoxValue"],
+        interpreter: "Interpreter",
+    ) -> "LoxValue": ...
+
+    @property
+    @abstractmethod
+    def name(self) -> str: ...
+
+    @property
+    @abstractmethod
+    def arity(self) -> int: ...
+
+    @abstractmethod
+    def __str__(self) -> str: ...
+
+
+LoxValue = bool | float | str | LoxCallable | None
 
 
 def is_equal(a: LoxValue, b: LoxValue) -> bool:

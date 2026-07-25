@@ -10,6 +10,8 @@ from plox.common import Token, LoxValue
 class Stmt(ABC):
     class Visitor[R](ABC):
         @abstractmethod
+        def visit_function(self, s: "Function") -> R: ...
+        @abstractmethod
         def visit_var(self, s: "Var") -> R: ...
         @abstractmethod
         def visit_for(self, s: "For") -> R: ...
@@ -17,6 +19,8 @@ class Stmt(ABC):
         def visit_if(self, s: "If") -> R: ...
         @abstractmethod
         def visit_print(self, s: "Print") -> R: ...
+        @abstractmethod
+        def visit_return(self, s: "Return") -> R: ...
         @abstractmethod
         def visit_while(self, s: "While") -> R: ...
         @abstractmethod
@@ -28,6 +32,16 @@ class Stmt(ABC):
 
     @abstractmethod
     def accept[R](self, visitor: Visitor[R]) -> R: ...
+
+
+@dataclass(frozen=True)
+class Function(Stmt):
+    name: Token
+    parameters: list[Token]
+    body: list[Stmt]
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_function(self)
 
 
 @dataclass(frozen=True)
@@ -66,6 +80,15 @@ class Print(Stmt):
 
     def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
         return visitor.visit_print(self)
+
+
+@dataclass(frozen=True)
+class Return(Stmt):
+    keyword: Token
+    value: "Expr | None"
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_return(self)
 
 
 @dataclass(frozen=True)
@@ -113,6 +136,8 @@ class Expr(ABC):
         def visit_binary(self, e: "Binary") -> R: ...
         @abstractmethod
         def visit_unary(self, e: "Unary") -> R: ...
+        @abstractmethod
+        def visit_call(self, e: "Call") -> R: ...
         @abstractmethod
         def visit_literal(self, e: "Literal") -> R: ...
         @abstractmethod
@@ -170,6 +195,16 @@ class Unary(Expr):
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_unary(self)
+
+
+@dataclass(frozen=True)
+class Call(Expr):
+    callee: Expr
+    paren: Token
+    arguments: list[Expr]
+
+    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
+        return visitor.visit_call(self)
 
 
 @dataclass(frozen=True)

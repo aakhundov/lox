@@ -7,13 +7,16 @@ from plox.ast import (
     Grouping,
     Literal,
     Unary,
+    Call,
     Variable,
     Assign,
+    Function,
     For,
     If,
     While,
     LoopJump,
     Print,
+    Return,
     Var,
     Block,
 )
@@ -157,3 +160,40 @@ def test_loop_jump_statement(show):
     # a loop jump renders as its bare keyword
     assert show(LoopJump(Token(TT.BREAK, "break", None, 0))) == "(break)"
     assert show(LoopJump(Token(TT.CONTINUE, "continue", None, 0))) == "(continue)"
+
+
+def test_call(show):
+    callee = Variable(ident("f"))
+    paren = op(")", TT.RIGHT_PAREN)
+    # a call with no arguments has the callee as its only child
+    assert show(Call(callee, paren, [])) == "(call f)"
+    assert show(Call(callee, paren, [Literal(1.0)])) == "(call f 1)"
+    assert show(Call(callee, paren, [Literal(1.0), Literal("x")])) == '(call f 1 "x")'
+    # the callee is an arbitrary expression, so calls nest
+    inner = Call(callee, paren, [Literal(1.0)])
+    assert show(Call(inner, paren, [Literal(2.0)])) == "(call (call f 1) 2)"
+
+
+def test_function_statement(show):
+    # the parameter list renders inside the head, so a body-less function
+    # still shows its (empty) signature
+    assert show(Function(ident("f"), [], [])) == "(fun f ())"
+    assert show(Function(ident("f"), [ident("a")], [])) == "(fun f (a))"
+    # multiple parameters are comma-separated
+    node = Function(
+        ident("f"), [ident("a"), ident("b")], [Print([Variable(ident("a"))])]
+    )
+    assert show(node) == "(fun f (a, b) (print a))"
+    # body statements render as successive children
+    node = Function(ident("f"), [], [Print([Literal(1.0)]), Print([Literal(2.0)])])
+    assert show(node) == "(fun f () (print 1) (print 2))"
+
+
+def test_return_statement(show):
+    keyword = Token(TT.RETURN, "return", None, 0)
+    # a bare `return` omits the value; the keyword token is carried for error
+    # reporting but does not affect the rendering
+    assert show(Return(keyword, None)) == "(return)"
+    assert show(Return(keyword, Literal(1.0))) == "(return 1)"
+    expr = Binary(Variable(ident("a")), op("+", TT.PLUS), Literal(1.0))
+    assert show(Return(keyword, expr)) == "(return (+ a 1))"

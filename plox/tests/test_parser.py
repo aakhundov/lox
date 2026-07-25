@@ -592,6 +592,213 @@ def test_loop_jump_error(parse_errors, source, message, position):
 
 
 @pytest.mark.parametrize(
+    "source, expected",
+    [
+        # the signature renders in the head, the body as children
+        ("fun f() {}", "(fun f ())"),
+        ("fun f(a) { print a; }", "(fun f (a) (print a))"),
+        ("fun f(a, b) { return a + b; }", "(fun f (a, b) (return (+ a b)))"),
+        # a multi-statement body keeps source order
+        ("fun f() { print 1; print 2; }", "(fun f () (print 1) (print 2))"),
+        # declarations nest: a function may be declared inside another
+        (
+            "fun outer() { fun inner() { return 1; } }",
+            "(fun outer () (fun inner () (return 1)))",
+        ),
+        # a function body is a block, so it may declare and loop freely
+        (
+            "fun f() { while (true) { break; } }",
+            "(fun f () (while true (blk (break))))",
+        ),
+    ],
+)
+def test_function_declaration(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        ("fun () {}", "Expect function name", (1, 5)),
+        ("fun f {}", "Expect '(' after function name", (1, 7)),
+        # a parameter list holds identifiers only...
+        ("fun f(1) {}", "Expect parameter name", (1, 7)),
+        # ...and has no trailing comma
+        ("fun f(a,) {}", "Expect parameter name", (1, 9)),
+        ("fun f(a {}", "Expect ')' after function parameters", (1, 9)),
+        # the body must be a braced block, not an arbitrary statement
+        ("fun f() ;", "Expect '{' before function body", (1, 9)),
+    ],
+)
+def test_function_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("fun f() { return 1; }", "(fun f () (return 1))"),
+        # the value is optional
+        ("fun f() { return; }", "(fun f () (return))"),
+        # it is a full expression
+        ("fun f() { return a + b * c; }", "(fun f () (return (+ a (* b c))))"),
+        # `return` may sit anywhere a statement may, as long as a function
+        # body encloses it
+        (
+            "fun f() { if (a) return 1; return 2; }",
+            "(fun f () (if a (return 1)) (return 2))",
+        ),
+        (
+            "fun f() { while (true) { return 1; } }",
+            "(fun f () (while true (blk (return 1))))",
+        ),
+    ],
+)
+def test_return_statement(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # `return` outside any function body is rejected, at the keyword itself
+        ("return;", "return allowed only inside function body", (1, 1)),
+        ("return 1;", "return allowed only inside function body", (1, 1)),
+        # a loop is not a function body
+        (
+            "while (true) return 1;",
+            "return allowed only inside function body",
+            (1, 14),
+        ),
+        # the value must be terminated by ';'
+        ("fun f() { return 1 }", "Expect ';' after return value", (1, 20)),
+    ],
+)
+def test_return_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("f();", "(call f)"),
+        ("f(1);", "(call f 1)"),
+        ("f(1, 2, 3);", "(call f 1 2 3)"),
+        # arguments are full expressions, evaluated as sub-trees
+        ("f(1 + 2, a and b);", "(call f (+ 1 2) (and a b))"),
+        # a call result is itself callable, so calls chain left-to-right
+        ("f(1)(2);", "(call (call f 1) 2)"),
+        ("f()();", "(call (call f))"),
+        # calls nest as arguments
+        ("f(g(1));", "(call f (call g 1))"),
+        # call binds tighter than unary...
+        ("-f(1);", "(- (call f 1))"),
+        ("!f();", "(! (call f))"),
+        # ...and tighter than any binary operator
+        ("f(1) + g(2);", "(+ (call f 1) (call g 2))"),
+        ("a * f(1);", "(* a (call f 1))"),
+        # a parenthesized callee is a grouping, then called
+        ("(f)();", "(call (grp f))"),
+    ],
+)
+def test_call_expression(show_expr, source, expected):
+    assert show_expr(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        ("f(1;", "Expect ')' after call arguments", (1, 4)),
+        ("f(1, 2;", "Expect ')' after call arguments", (1, 7)),
+        # an argument list has no trailing comma: the parser expects another
+        # expression after it
+        ("f(1,);", "Expect expression", (1, 5)),
+    ],
+)
+def test_call_error(parse_errors, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # a function body starts a fresh loop scope: an enclosing loop does
+        # not license a jump inside a function declared within it, because at
+        # runtime the jump would unwind out of the call into the caller's loop
+        (
+            "while (true) { fun f() { break; } }",
+            "break allowed only inside loop body",
+            (1, 26),
+        ),
+        (
+            "for (;;) { fun f() { continue; } }",
+            "continue allowed only inside loop body",
+            (1, 22),
+        ),
+        # the same holds without any enclosing loop at all
+        ("fun f() { break; }", "break allowed only inside loop body", (1, 11)),
+    ],
+)
+def test_function_resets_loop_scope(parse_errors, source, message, position):
+    # recovery resumes mid-block and trips over the closing brace, so a
+    # trailing cascade error follows; only the first one is the real report
+    error = parse_errors(source)[0]
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # the enclosing loop scope is restored after the function body, so a
+        # jump following the declaration is still valid
+        (
+            "while (true) { fun f() { var x = 1; } break; }",
+            "(while true (blk (fun f () (var x 1)) (break)))",
+        ),
+        # a loop inside a function body licenses jumps normally
+        (
+            "fun f() { for (;;) continue; }",
+            "(fun f () (for nil nil nil (continue)))",
+        ),
+    ],
+)
+def test_function_restores_loop_scope(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize("count", [Parser._MAX_ARITY, Parser._MAX_ARITY + 1])
+def test_max_parameters(parse, parse_errors, count):
+    # the limit is on the count itself, so exactly _MAX_ARITY is still legal
+    params = ", ".join(f"p{i}" for i in range(count))
+    source = f"fun f({params}) {{}}"
+    if count <= Parser._MAX_ARITY:
+        assert parse(source)
+        return
+    # over the limit reports once per function, not once per excess parameter
+    (error,) = parse_errors(source)
+    assert str(error) == f"Max {Parser._MAX_ARITY} parameters allowed"
+
+
+@pytest.mark.parametrize("count", [Parser._MAX_ARITY, Parser._MAX_ARITY + 1])
+def test_max_arguments(parse, parse_errors, count):
+    args = ", ".join(str(i) for i in range(count))
+    source = f"f({args});"
+    if count <= Parser._MAX_ARITY:
+        assert parse(source)
+        return
+    # likewise reported once per call site
+    (error,) = parse_errors(source)
+    assert str(error) == f"Max {Parser._MAX_ARITY} arguments allowed"
+
+
+@pytest.mark.parametrize(
     "source, position",
     [
         # a binary operator with no left operand

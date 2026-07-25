@@ -6,6 +6,11 @@ from pathlib import Path
 
 _METADATA = {
     "Stmt": {
+        "Function": {
+            "name": "Token",
+            "parameters": "list[Token]",
+            "body": "list[Stmt]",
+        },
         "Var": {"name": "Token", "initializer": "'Expr | None'"},
         "For": {
             "initializer": "Stmt | None",
@@ -19,6 +24,7 @@ _METADATA = {
             "else_branch": "Stmt | None",
         },
         "Print": {"expressions": "list['Expr']"},
+        "Return": {"keyword": "Token", "value": "'Expr | None'"},
         "While": {"condition": "'Expr'", "body": "Stmt"},
         "LoopJump": {"statement": "Token"},
         "Block": {"statements": "list[Stmt]"},
@@ -34,6 +40,11 @@ _METADATA = {
         "Logical": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Binary": {"left": "Expr", "operator": "Token", "right": "Expr"},
         "Unary": {"operator": "Token", "right": "Expr"},
+        "Call": {
+            "callee": "Expr",
+            "paren": "Token",
+            "arguments": "list[Expr]",
+        },
         "Literal": {"value": "LoxValue"},
         "Variable": {"name": "Token"},
         "Grouping": {"expression": "Expr"},

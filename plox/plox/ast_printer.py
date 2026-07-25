@@ -1,9 +1,11 @@
 from plox.ast import (
     Stmt,
+    Function,
     Var,
     For,
     If,
     Print,
+    Return,
     While,
     LoopJump,
     Block,
@@ -14,6 +16,7 @@ from plox.ast import (
     Logical,
     Binary,
     Unary,
+    Call,
     Literal,
     Variable,
     Grouping,
@@ -27,6 +30,11 @@ class AstPrinter(
 ):
     def print(self, node: Expr | Stmt) -> str:
         return node.accept(self)
+
+    def visit_function(self, s: Function) -> str:
+        name = s.name.lexeme
+        params = ", ".join(a.lexeme for a in s.parameters)
+        return self._parens(f"fun {name} ({params})", *s.body)
 
     def visit_var(self, s: Var) -> str:
         if s.initializer is None:
@@ -54,6 +62,11 @@ class AstPrinter(
 
     def visit_print(self, s: Print) -> str:
         return self._parens("print", *s.expressions)
+
+    def visit_return(self, s: Return) -> str:
+        if s.value is None:
+            return "(return)"
+        return self._parens("return", s.value)
 
     def visit_while(self, s: While) -> str:
         return self._parens("while", s.condition, s.body)
@@ -86,6 +99,9 @@ class AstPrinter(
 
     def visit_unary(self, e: Unary) -> str:
         return self._parens(e.operator.lexeme, e.right)
+
+    def visit_call(self, e: Call) -> str:
+        return self._parens("call", e.callee, *e.arguments)
 
     def visit_literal(self, e: Literal) -> str:
         return f'"{e.value}"' if isinstance(e.value, str) else to_str(e.value)

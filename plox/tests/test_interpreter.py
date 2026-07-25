@@ -1,7 +1,8 @@
 import pytest
 
-from plox.common import LoxValue
+from plox.common import LoxCallable, LoxValue
 from plox.interpreter import Interpreter, InterpreterError
+from plox.library import get_library
 from plox.parser import Parser
 from plox.scanner import Scanner
 
@@ -517,6 +518,258 @@ def test_break(run, source, expected):
 )
 def test_continue(run, source, expected):
     assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a call runs the body; a parameterless function takes no arguments
+        ("fun f() { print 1; } f();", [[1.0]]),
+        # arguments bind to parameters positionally
+        ("fun f(a) { print a; } f(1);", [[1.0]]),
+        ("fun f(a, b, c) { print a, b, c; } f(1, 2, 3);", [[1.0, 2.0, 3.0]]),
+        # arguments are evaluated before the call
+        ("fun f(a) { print a; } f(1 + 2);", [[3.0]]),
+        # each call re-binds the parameters, so calls do not interfere
+        ("fun f(a) { print a; } f(1); f(2);", [[1.0], [2.0]]),
+        # a declaration alone runs nothing
+        ("fun f() { print 1; }", []),
+    ],
+)
+def test_function_call(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # `return` hands the value back to the call site
+        ("fun f() { return 1; } print f();", 1.0),
+        ("fun f(a, b) { return a + b; } print f(1, 2);", 3.0),
+        # a bare `return` and falling off the end both produce nil
+        ("fun f() { return; } print f();", None),
+        ("fun f() { } print f();", None),
+        # the first `return` wins; later statements never run
+        ("fun f() { return 1; return 2; } print f();", 1.0),
+        # `return` unwinds out of nested blocks...
+        ("fun f() { { { return 3; } } } print f();", 3.0),
+        # ...and out of a loop, without the loop swallowing it
+        ("fun f() { while (true) { return 4; } } print f();", 4.0),
+        (
+            "fun f() { for (var i = 0; i < 5; i = i + 1) { if (i == 2) return i; } }"
+            " print f();",
+            2.0,
+        ),
+    ],
+)
+def test_return_value(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+def test_return_skips_remaining_statements(run):
+    # statements after the taken `return` do not execute
+    assert run("fun f() { print 1; return; print 2; } f();") == [[1.0]]
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a function captures the environment it was declared in, not the one
+        # it is called from
+        (
+            "fun mk() { var c = 1; fun get() { return c; } return get; }"
+            " var g = mk(); print g();",
+            [[1.0]],
+        ),
+        # the captured environment is live: closing over a variable shares it
+        (
+            "fun mk() { var c = 0; fun inc() { c = c + 1; return c; } return inc; }"
+            " var i = mk(); print i(); print i(); print i();",
+            [[1.0], [2.0], [3.0]],
+        ),
+        # each call to the maker gets its own captured environment
+        (
+            "fun mk() { var c = 0; fun inc() { c = c + 1; return c; } return inc; }"
+            " var a = mk(); var b = mk(); print a(); print a(); print b();",
+            [[1.0], [2.0], [1.0]],
+        ),
+    ],
+)
+def test_closure(run, source, expected):
+    assert run(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # functions are first-class values: passable as arguments...
+        (
+            "fun ap(g, x) { return g(x); } fun d(v) { return v * 2; } print ap(d, 21);",
+            42.0,
+        ),
+        # ...and callable directly off the returning call
+        ("fun mk() { fun n() { return 7; } return n; } print mk()();", 7.0),
+        # recursion resolves the function through the enclosing scope
+        (
+            "fun fact(n) { if (n <= 1) return 1; return n * fact(n - 1); } print fact(5);",
+            120.0,
+        ),
+        (
+            "fun fib(n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); }"
+            " print fib(10);",
+            55.0,
+        ),
+        # mutual recursion works because both names are defined before the call
+        (
+            "fun even(n) { if (n == 0) return true; return odd(n - 1); }"
+            " fun odd(n) { if (n == 0) return false; return even(n - 1); }"
+            " print even(4);",
+            True,
+        ),
+    ],
+)
+def test_higher_order_and_recursion(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a function body has its own scope: locals do not leak to the caller
+        ("fun f() { var y = 1; } f(); print y;", "Undefined variable: y"),
+        # nor do parameters
+        ("fun f(a) { } f(1); print a;", "Undefined variable: a"),
+    ],
+)
+def test_function_body_scope(run, source, expected):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a parameter shadows an outer variable of the same name...
+        ("var x = 1; fun f(x) { return x; } print f(9);", 9.0),
+        # ...without disturbing it
+        ("var x = 1; fun f(x) { return x; } f(9); print x;", 1.0),
+        # arguments pass by value: reassigning a parameter is local to the call
+        ("fun f(a) { a = a + 1; return a; } var v = 1; f(v); print v;", 1.0),
+    ],
+)
+def test_parameter_scope(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a function value renders with its declared name
+        ("fun f() {} print f;", "<fn f>"),
+        ("fun some_name(a, b) {} print some_name;", "<fn some_name>"),
+        # native functions are marked as such
+        ("print clock;", "<fn clock (native)>"),
+    ],
+)
+def test_function_value_display(value, source, expected):
+    result = value(source)
+    assert isinstance(result, LoxCallable)
+    assert str(result) == expected
+
+
+# A representative call for each native, by name. The test below asserts
+# this covers the library exactly, so adding a native fails here until it is
+# given a meaningful call rather than being silently skipped.
+_NATIVE_CALLS = {
+    "clock": "clock()",
+    "sleep": "sleep(0)",
+}
+
+
+def test_native_functions_are_callable(run, value):
+    # every library native is registered in the global scope under its own
+    # name and invocable from source. Calling one reaches LoxCallable.call by
+    # a different path than a LoxFunction does, so it is worth exercising
+    # here; what each native actually returns is checked in test_library.
+    natives = {fn.name: fn for fn in get_library()}
+    assert natives.keys() == _NATIVE_CALLS.keys()
+
+    for name, call in _NATIVE_CALLS.items():
+        result = value(f"print {name};")
+        assert isinstance(result, LoxCallable)
+        assert str(result) == str(natives[name])
+        # the call completing is the assertion; the returned value belongs to
+        # the native and is checked in test_library
+        assert run(f"{call};") == []
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # a call must supply exactly as many arguments as the function declares
+        ("fun f() {} f(1);", "Expected 0 arguments but got 1", (1, 15)),
+        ("fun f(a) {} f();", "Expected 1 argument but got 0", (1, 15)),
+        ("fun f(a, b) {} f(1);", "Expected 2 arguments but got 1", (1, 19)),
+        ("fun f(a) {} f(1, 2);", "Expected 1 argument but got 2", (1, 19)),
+        # natives are checked the same way
+        ("clock(1);", "Expected 0 arguments but got 1", (1, 8)),
+    ],
+)
+def test_call_arity_error(run, source, message, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == message
+    assert excinfo.value.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # a native rejecting its arguments surfaces as an ordinary runtime
+        # error rather than escaping as a Python one: the interpreter names
+        # the callee and positions it at the call, and the native supplies
+        # only the reason
+        (
+            'sleep("a");',
+            "Error calling 'sleep': Argument must be a number",
+            (1, 10),
+        ),
+        (
+            "sleep(nil);",
+            "Error calling 'sleep': Argument must be a number",
+            (1, 10),
+        ),
+        (
+            "sleep(-1);",
+            "Error calling 'sleep': Argument must be a non-negative number",
+            (1, 9),
+        ),
+    ],
+)
+def test_native_argument_error(run, source, message, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == message
+    assert excinfo.value.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # only callables may be called; the error points at the closing paren
+        ("var x = 1; x();", (1, 14)),
+        ('"s"();', (1, 5)),
+        ("true();", (1, 6)),
+        ("nil();", (1, 5)),
+        ("(1 + 2)();", (1, 9)),
+    ],
+)
+def test_not_callable_error(run, source, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == "Can only call functions and methods"
+    assert excinfo.value.get_line_info() == position
 
 
 @pytest.mark.parametrize(

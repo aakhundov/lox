@@ -3,10 +3,12 @@ from typing import NoReturn
 
 from plox.ast import (
     Stmt,
+    Function,
     Var,
     For,
     If,
     Print,
+    Return,
     While,
     LoopJump,
     Block,
@@ -17,6 +19,7 @@ from plox.ast import (
     Logical,
     Binary,
     Unary,
+    Call,
     Literal,
     Variable,
     Grouping,
@@ -25,15 +28,19 @@ from plox.common import Token, TokenType as TT, ParserError
 
 
 class Parser:
+    _MAX_ARITY = 255
+
     def __init__(self, tokens: list[Token]) -> None:
         self._tokens = tokens
         self._current = 0
         self._loop_depth = 0
+        self._fn_depth = 0
         self._errors: list[ParserError] = []
 
     def parse(self) -> list[Stmt]:
         self._current = 0
         self._loop_depth = 0
+        self._fn_depth = 0
         self._errors.clear()
 
         statements: list[Stmt] = []
@@ -50,10 +57,61 @@ class Parser:
         return statements
 
     def _declaration(self) -> Stmt:
+        if self._match(TT.FUN):
+            return self._function("function")
         if self._match(TT.VAR):
             return self._var()
 
         return self._statement()
+
+    def _function(self, kind: str) -> Stmt:
+        name = self._consume(
+            TT.IDENTIFIER,
+            f"Expect {kind} name",
+        )
+        self._consume(
+            TT.LEFT_PAREN,
+            f"Expect '(' after {kind} name",
+        )
+
+        parameters: list[Token] = []
+        if not self._check(TT.RIGHT_PAREN):
+            parameters.append(
+                self._consume(
+                    TT.IDENTIFIER,
+                    "Expect parameter name",
+                )
+            )
+            while self._match(TT.COMMA):
+                # check == to report one error per function
+                if len(parameters) == self._MAX_ARITY:
+                    self._error(f"Max {self._MAX_ARITY} parameters allowed")
+                parameters.append(
+                    self._consume(
+                        TT.IDENTIFIER,
+                        "Expect parameter name",
+                    )
+                )
+
+        self._consume(
+            TT.RIGHT_PAREN,
+            f"Expect ')' after {kind} parameters",
+        )
+        self._consume(
+            TT.LEFT_BRACE,
+            f"Expect '{{' before {kind} body",
+        )
+
+        prev_loop_depth = self._loop_depth
+        try:
+            self._fn_depth += 1
+            self._loop_depth = 0  # reset inside a function
+            body = self._parse_block()
+        finally:
+            self._fn_depth -= 1
+            self._loop_depth = prev_loop_depth  # restore
+
+        return Function(name, parameters, body)
 
     def _var(self) -> Stmt:
         name = self._consume(
@@ -79,6 +137,8 @@ class Parser:
             return self._if()
         if self._match(TT.PRINT):
             return self._print()
+        if self._match(TT.RETURN):
+            return self._return()
         if self._match(TT.WHILE):
             return self._while()
         if self._match(TT.BREAK, TT.CONTINUE):
@@ -157,6 +217,23 @@ class Parser:
         )
 
         return Print(expressions)
+
+    def _return(self) -> Stmt:
+        keyword = self._previous()
+
+        if self._fn_depth < 1:
+            self._raise("return allowed only inside function body", keyword)
+
+        value = None
+        if not self._check(TT.SEMICOLON):
+            value = self._expression()
+
+        self._consume(
+            TT.SEMICOLON,
+            "Expect ';' after return value",
+        )
+
+        return Return(keyword, value)
 
     def _while(self) -> Stmt:
         try:
@@ -305,7 +382,15 @@ class Parser:
             right = self._unary()
             return Unary(operator, right)
 
-        return self._primary()
+        return self._call()
+
+    def _call(self) -> Expr:
+        expr = self._primary()
+
+        while self._match(TT.LEFT_PAREN):
+            expr = self._finish_call(expr)
+
+        return expr
 
     def _primary(self) -> Expr:
         if self._match(TT.FALSE):
@@ -331,6 +416,23 @@ class Parser:
             return Grouping(expression)
 
         self._raise("Expect expression")
+
+    def _finish_call(self, callee: Expr) -> Call:
+        arguments: list[Expr] = []
+        if not self._check(TT.RIGHT_PAREN):
+            arguments.append(self._expression())  # first arg
+            while self._match(TT.COMMA):
+                # check == to report one error per call
+                if len(arguments) == self._MAX_ARITY:
+                    self._error(f"Max {self._MAX_ARITY} arguments allowed")
+                arguments.append(self._expression())  # more args
+
+        paren = self._consume(
+            TT.RIGHT_PAREN,
+            "Expect ')' after call arguments",
+        )
+
+        return Call(callee, paren, arguments)
 
     def _parse_block(self) -> list[Stmt]:
         statements: list[Stmt] = []

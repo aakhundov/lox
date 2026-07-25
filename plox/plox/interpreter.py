@@ -5,10 +5,12 @@ from typing import NoReturn
 
 from plox.ast import (
     Stmt,
+    Function,
     Var,
     For,
     If,
     Print,
+    Return,
     While,
     LoopJump,
     Block,
@@ -19,6 +21,7 @@ from plox.ast import (
     Logical,
     Binary,
     Unary,
+    Call,
     Literal,
     Variable,
     Grouping,
@@ -27,6 +30,7 @@ from plox.common import (
     Token,
     TokenType as TT,
     InterpreterError,
+    LoxCallable,
     LoxValue,
     is_equal,
     is_truthy,
@@ -40,6 +44,19 @@ class _LoopBreak(Exception):
 
 
 class _LoopContinue(Exception):
+    pass
+
+
+class _CallableReturn(Exception):
+    def __init__(self, value: LoxValue):
+        self._value = value
+
+    @property
+    def value(self) -> LoxValue:
+        return self._value
+
+
+class _NativeFnError(Exception):
     pass
 
 
@@ -85,11 +102,21 @@ class Interpreter(
             print_fn = self._default_print_fn
 
         self._env = environment
+        self._globals = environment
         self._print_fn = print_fn
+
+        self._register_library()
 
     def interpret(self, statements: list[Stmt]) -> None:
         for statement in statements:
             self._execute(statement)
+
+    def visit_function(self, s: Function) -> None:
+        # local to avoid circular import
+        from plox.function import LoxFunction
+
+        fn = LoxFunction(s, self._env)
+        self._env.define(fn.name, fn)
 
     def visit_var(self, s: Var) -> None:
         value = None
@@ -130,6 +157,13 @@ class Interpreter(
     def visit_print(self, s: Print) -> None:
         values = [self._evaluate(e) for e in s.expressions]
         self._print_fn(values)
+
+    def visit_return(self, s: Return) -> None:
+        value = None
+        if s.value is not None:
+            value = self._evaluate(s.value)
+
+        raise _CallableReturn(value)
 
     def visit_while(self, s: While) -> None:
         while is_truthy(self._evaluate(s.condition)):
@@ -230,6 +264,26 @@ class Interpreter(
         # this line must be unreachable
         self._raise("Unknown unary op", op)
 
+    def visit_call(self, e: Call) -> LoxValue:
+        callee = self._evaluate(e.callee)
+        arguments = [self._evaluate(arg) for arg in e.arguments]
+
+        if not isinstance(callee, LoxCallable):
+            self._raise("Can only call functions and methods", e.paren)
+
+        if callee.arity != len(arguments):
+            suffix = "s" if callee.arity != 1 else ""
+            self._raise(
+                f"Expected {callee.arity} argument{suffix} but got {len(arguments)}",
+                e.paren,
+            )
+
+        try:
+            return callee.call(arguments, self)
+        except _NativeFnError as error:
+            # calling a native function raised an error
+            self._raise(f"Error calling '{callee.name}': {error}", e.paren)
+
     def visit_literal(self, e: Literal) -> LoxValue:
         return e.value
 
@@ -285,3 +339,10 @@ class Interpreter(
         finally:
             # restore the previous env
             self._env = previous_env
+
+    def _register_library(self) -> None:
+        from plox.library import get_library
+
+        # register library
+        for fn in get_library():
+            self._globals.define(fn.name, fn)
