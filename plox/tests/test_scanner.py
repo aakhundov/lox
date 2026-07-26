@@ -25,6 +25,17 @@ def scan_errors(source):
     return errors
 
 
+def error_position(error):
+    """Return the single source position `error` points at.
+
+    `get_line_info` yields one (line, col) pair per reported position -- the
+    interpreter reports a whole call stack that way. A scanner error has no
+    stack behind it, so the unpack doubles as a check that there is exactly one.
+    """
+    (line_pos,) = error.get_line_info()
+    return line_pos
+
+
 @pytest.fixture
 def scan():
     """Return a helper that scans source into (type, lexeme, literal) triples.
@@ -483,7 +494,7 @@ def test_eof_position(source, position):
 def test_unexpected_character(source, char, position):
     (error,) = scan_errors(source)
     assert str(error) == f"Unexpected character: '{char}'"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -496,7 +507,7 @@ def test_unexpected_character(source, char, position):
 def test_unterminated_string(source, position):
     (error,) = scan_errors(source)
     assert str(error) == "Unterminated string"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -512,7 +523,7 @@ def test_unterminated_string(source, position):
 def test_unterminated_block_comment(source, position):
     (error,) = scan_errors(source)
     assert str(error) == "Unterminated comment"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -547,4 +558,4 @@ def test_unterminated_block_comment(source, position):
 )
 def test_multiple_errors(source, expected):
     errors = scan_errors(source)
-    assert [(str(e), e.get_line_info()) for e in errors] == expected
+    assert [(str(e), error_position(e)) for e in errors] == expected

@@ -20,6 +20,23 @@ def _resolved(source):
     return program
 
 
+def error_position(error):
+    """Return the single source position `error` points at.
+
+    `get_line_info` yields one (line, col) pair per stack frame, outermost
+    first. Every error here is raised outside any call, so the unpack doubles
+    as a check that there is exactly one frame; `error_stack` covers the cases
+    that do unwind through calls.
+    """
+    (position,) = error.get_line_info()
+    return position
+
+
+def error_stack(error):
+    """Return every source position `error` points at, outermost call first."""
+    return list(error.get_line_info())
+
+
 @pytest.fixture
 def run():
     """Return a helper that runs `source`, collecting the values it prints.
@@ -469,7 +486,7 @@ def test_for_initializer_scope(run):
     with pytest.raises(InterpreterError) as excinfo:
         run("for (var i = 0; i < 1; i = i + 1) print i; print i;")
     assert str(excinfo.value) == "Undefined variable: i"
-    assert excinfo.value.get_line_info() == (1, 50)
+    assert error_position(excinfo.value) == (1, 50)
 
 
 @pytest.mark.parametrize(
@@ -758,20 +775,21 @@ def test_native_functions_are_callable(run, value):
 @pytest.mark.parametrize(
     "source, message, position",
     [
-        # a call must supply exactly as many arguments as the function declares
-        ("fun f() {} f(1);", "Expected 0 arguments but got 1", (1, 15)),
-        ("fun f(a) {} f();", "Expected 1 argument but got 0", (1, 15)),
-        ("fun f(a, b) {} f(1);", "Expected 2 arguments but got 1", (1, 19)),
-        ("fun f(a) {} f(1, 2);", "Expected 1 argument but got 2", (1, 19)),
+        # a call must supply exactly as many arguments as the function
+        # declares; the error sits at the call's opening paren
+        ("fun f() {} f(1);", "Expected 0 arguments but got 1", (1, 13)),
+        ("fun f(a) {} f();", "Expected 1 argument but got 0", (1, 14)),
+        ("fun f(a, b) {} f(1);", "Expected 2 arguments but got 1", (1, 17)),
+        ("fun f(a) {} f(1, 2);", "Expected 1 argument but got 2", (1, 14)),
         # natives are checked the same way
-        ("clock(1);", "Expected 0 arguments but got 1", (1, 8)),
+        ("clock(1);", "Expected 0 arguments but got 1", (1, 6)),
     ],
 )
 def test_call_arity_error(run, source, message, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == message
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position
 
 
 @pytest.mark.parametrize(
@@ -784,17 +802,17 @@ def test_call_arity_error(run, source, message, position):
         (
             'sleep("a");',
             "Error calling 'sleep': Argument must be a number",
-            (1, 10),
+            (1, 6),
         ),
         (
             "sleep(nil);",
             "Error calling 'sleep': Argument must be a number",
-            (1, 10),
+            (1, 6),
         ),
         (
             "sleep(-1);",
             "Error calling 'sleep': Argument must be a non-negative number",
-            (1, 9),
+            (1, 6),
         ),
     ],
 )
@@ -802,25 +820,65 @@ def test_native_argument_error(run, source, message, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == message
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position
 
 
 @pytest.mark.parametrize(
     "source, position",
     [
-        # only callables may be called; the error points at the closing paren
-        ("var x = 1; x();", (1, 14)),
-        ('"s"();', (1, 5)),
-        ("true();", (1, 6)),
-        ("nil();", (1, 5)),
-        ("(1 + 2)();", (1, 9)),
+        # only callables may be called; the error points at the opening paren
+        ("var x = 1; x();", (1, 13)),
+        ('"s"();', (1, 4)),
+        ("true();", (1, 5)),
+        ("nil();", (1, 4)),
+        ("(1 + 2)();", (1, 8)),
     ],
 )
 def test_not_callable_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Can only call functions and methods"
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a runtime error carries the calls it unwound through: the outermost
+        # call site first, the position that actually failed last
+        (
+            'fun a() {\n  return 1 + "x";\n}\nfun b() {\n  return a();\n}\nb();',
+            [(7, 2), (5, 11), (2, 12)],
+        ),
+        # an error raised by the environment rather than by the interpreter
+        # collects frames the same way
+        (
+            "fun a() {\n  print undefined;\n}\na();",
+            [(4, 2), (2, 9)],
+        ),
+        # a native's error is positioned at the call that raised it, and the
+        # enclosing calls still contribute their frames
+        (
+            'fun a() {\n  sleep("x");\n}\na();',
+            [(4, 2), (2, 8)],
+        ),
+        # every activation of a recursive function contributes its own frame
+        (
+            'fun a(n) {\n  if (n > 0) return a(n - 1);\n  return 1 + "x";\n}\na(2);',
+            [(5, 2), (2, 22), (2, 22), (3, 12)],
+        ),
+        # arguments are evaluated before the callee is entered, so a failure
+        # there reports no frame for the call being built
+        (
+            'fun a(x) { return x; }\na(1 + "s");',
+            [(2, 5)],
+        ),
+    ],
+)
+def test_error_stack(run, source, expected):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert error_stack(excinfo.value) == expected
 
 
 @pytest.mark.parametrize(
@@ -877,7 +935,7 @@ def test_plus_operand_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Operands must both be number or string"
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position
 
 
 @pytest.mark.parametrize(
@@ -895,7 +953,7 @@ def test_arithmetic_operand_error(run, source, message, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == message
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position
 
 
 @pytest.mark.parametrize(
@@ -916,7 +974,7 @@ def test_comparison_operand_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Operands must both be number or string"
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position
 
 
 @pytest.mark.parametrize(
@@ -932,7 +990,7 @@ def test_division_by_zero_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Division by zero"
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position
 
 
 @pytest.mark.parametrize(
@@ -949,7 +1007,7 @@ def test_unary_negation_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Operand must be a number"
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position
 
 
 @pytest.mark.parametrize(
@@ -967,4 +1025,4 @@ def test_undefined_variable_error(run, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Undefined variable: x"
-    assert excinfo.value.get_line_info() == position
+    assert error_position(excinfo.value) == position

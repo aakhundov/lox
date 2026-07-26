@@ -1,8 +1,5 @@
-from plox.common import (
-    Token,
-    TokenType as TT,
-    ScannerError,
-)
+from plox.common import Token, TokenType as TT
+from plox.errors import ScannerError
 
 
 class Scanner:

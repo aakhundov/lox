@@ -98,56 +98,6 @@ class Token:
         return f"{self.type.name} {desc}({self.line_num}:{self.col_num})"
 
 
-class LoxError(Exception):
-    def __init__(self, msg: str, line_num: int, col_num: int):
-        super().__init__(msg)
-        self._line_num = line_num
-        self._col_num = col_num
-
-    def get_line_info(self) -> tuple[int, int]:
-        return self._line_num, self._col_num
-
-
-class LoxErrorFromToken(LoxError):
-    def __init__(self, msg: str, token: Token):
-        assert token.line_num is not None
-        assert token.col_num is not None
-        super().__init__(msg, token.line_num, token.col_num)
-
-
-class ScannerError(LoxError):
-    def __init__(self, msg: str, source: str, offset: int):
-        line_num, col_num = self._get_position(source, offset)
-        super().__init__(msg, line_num, col_num)
-
-    @staticmethod
-    def _get_position(source: str, offset: int) -> tuple[int, int]:
-        line_num, col_num = 0, 0
-        for i, c in enumerate(source):
-            if i == offset:
-                break
-
-            if c == "\n":
-                line_num += 1
-                col_num = 0
-            else:
-                col_num += 1
-
-        return line_num + 1, col_num + 1
-
-
-class ParserError(LoxErrorFromToken):
-    pass
-
-
-class ResolverError(LoxErrorFromToken):
-    pass
-
-
-class InterpreterError(LoxErrorFromToken):
-    pass
-
-
 class LoxCallable(ABC):
     @abstractmethod
     def call(

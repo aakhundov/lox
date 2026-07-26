@@ -1,7 +1,20 @@
 import pytest
 
-from plox.common import Token, TokenType as TT, InterpreterError
+from plox.common import Token, TokenType as TT
 from plox.environment import Environment
+from plox.errors import InterpreterError
+
+
+def error_position(error):
+    """Return the single source position `error` points at.
+
+    `get_line_info` yields one (line, col) pair per reported position -- the
+    interpreter reports a whole call stack that way. An environment lookup
+    knows only the token it was handed, so the unpack doubles as a check that
+    there is exactly one; the call frames are appended as the error propagates.
+    """
+    (position,) = error.get_line_info()
+    return position
 
 
 def name(lexeme, line=1, col=1):
@@ -39,7 +52,7 @@ def test_get_undefined_raises_at_token():
     with pytest.raises(InterpreterError) as excinfo:
         env.get(name("x", line=3, col=7))
     assert str(excinfo.value) == "Undefined variable: x"
-    assert excinfo.value.get_line_info() == (3, 7)
+    assert error_position(excinfo.value) == (3, 7)
 
 
 def test_assign_updates_existing():
@@ -54,7 +67,7 @@ def test_assign_undefined_raises_at_token():
     with pytest.raises(InterpreterError) as excinfo:
         env.assign(name("x", line=4, col=2), 1.0)
     assert str(excinfo.value) == "Undefined variable: x"
-    assert excinfo.value.get_line_info() == (4, 2)
+    assert error_position(excinfo.value) == (4, 2)
 
 
 def test_get_walks_up_to_enclosing_scope():

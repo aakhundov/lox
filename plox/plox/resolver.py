@@ -26,7 +26,8 @@ from plox.ast import (
     Variable,
     Grouping,
 )
-from plox.common import Token, ResolverError
+from plox.common import Token
+from plox.errors import ResolverError
 
 
 class LoopType(Enum):

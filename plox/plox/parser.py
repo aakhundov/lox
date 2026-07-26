@@ -25,7 +25,8 @@ from plox.ast import (
     Variable,
     Grouping,
 )
-from plox.common import Token, TokenType as TT, ParserError
+from plox.common import Token, TokenType as TT
+from plox.errors import ParserError
 
 
 class Parser:
@@ -356,7 +357,7 @@ class Parser:
     def _call(self) -> Expr:
         expr = self._primary()
 
-        while self._match(TT.LEFT_PAREN):
+        while self._check(TT.LEFT_PAREN):
             expr = self._finish_call(expr)
 
         return expr
@@ -387,13 +388,15 @@ class Parser:
         self._raise("Expect expression")
 
     def _finish_call(self, callee: Expr) -> Call:
+        paren = self._advance()
+
         arguments: list[Expr] = []
         if not self._check(TT.RIGHT_PAREN):
             arguments.append(self._expression())  # first arg
             while self._match(TT.COMMA):
                 arguments.append(self._expression())  # more args
 
-        paren = self._consume(
+        self._consume(
             TT.RIGHT_PAREN,
             "Expect ')' after call arguments",
         )

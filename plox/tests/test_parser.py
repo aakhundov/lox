@@ -22,6 +22,17 @@ def parse():
     return _parse
 
 
+def error_position(error):
+    """Return the single source position `error` points at.
+
+    `get_line_info` yields one (line, col) pair per reported position -- the
+    interpreter reports a whole call stack that way. A parser error has no
+    stack behind it, so the unpack doubles as a check that there is exactly one.
+    """
+    (position,) = error.get_line_info()
+    return position
+
+
 @pytest.fixture
 def parse_errors(parse):
     """Return a helper that parses `source` expecting failure.
@@ -318,7 +329,7 @@ def test_conditional(show_expr, source, expected):
 def test_conditional_error(parse_errors, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Expect ':' to match ?"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -465,7 +476,7 @@ def test_if_statement(show_one, source, expected):
 def test_if_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -493,7 +504,7 @@ def test_while_statement(show_one, source, expected):
 def test_while_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -546,7 +557,7 @@ def test_for_statement(show_one, source, expected):
 def test_for_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -583,7 +594,7 @@ def test_loop_jump_statement(show_one, source, expected):
 def test_loop_jump_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -628,7 +639,7 @@ def test_function_declaration(show_one, source, expected):
 def test_function_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -665,7 +676,7 @@ def test_return_statement(show_one, source, expected):
 def test_return_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -708,7 +719,7 @@ def test_call_expression(show_expr, source, expected):
 def test_call_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -749,7 +760,7 @@ def test_call_error(parse_errors, source, message, position):
 def test_expected_expression_error(parse_errors, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Expect expression"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -766,7 +777,7 @@ def test_expected_expression_error(parse_errors, source, position):
 def test_missing_closing_paren_error(parse_errors, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Expect ')' after expression"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -784,7 +795,7 @@ def test_missing_closing_paren_error(parse_errors, source, position):
 def test_missing_semicolon_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -801,7 +812,7 @@ def test_missing_semicolon_error(parse_errors, source, message, position):
 def test_var_declaration_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -817,7 +828,7 @@ def test_var_declaration_error(parse_errors, source, message, position):
 def test_invalid_assignment_target_error(parse_errors, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Invalid assignment target"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -832,7 +843,7 @@ def test_invalid_assignment_target_error(parse_errors, source, position):
 def test_missing_closing_brace_error(parse_errors, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Expect '}' after block"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -886,4 +897,4 @@ def test_missing_closing_brace_error(parse_errors, source, position):
 )
 def test_multiple_errors(parse_errors, source, expected):
     errors = parse_errors(source)
-    assert [(str(e), e.get_line_info()) for e in errors] == expected
+    assert [(str(e), error_position(e)) for e in errors] == expected

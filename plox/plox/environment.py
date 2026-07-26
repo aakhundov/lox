@@ -1,7 +1,8 @@
 from collections.abc import Iterable
 from itertools import chain
 
-from plox.common import Token, InterpreterError, LoxValue
+from plox.common import Token, LoxValue
+from plox.errors import InterpreterError
 
 
 class Environment:

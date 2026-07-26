@@ -30,7 +30,6 @@ from plox.ast import (
 from plox.common import (
     Token,
     TokenType as TT,
-    InterpreterError,
     LoxCallable,
     LoxValue,
     is_equal,
@@ -38,6 +37,7 @@ from plox.common import (
     to_str,
 )
 from plox.environment import Environment
+from plox.errors import InterpreterError
 
 
 class _LoopBreak(Exception):
@@ -113,8 +113,13 @@ class Interpreter(
         return self._globals
 
     def interpret(self, program: Program) -> None:
-        for statement in program.statements:
-            self._execute(statement)
+        try:
+            for statement in program.statements:
+                self._execute(statement)
+        except InterpreterError as e:
+            # reverse the stack trace: from shallow to deep
+            e.tokens.reverse()
+            raise
 
     def visit_function(self, s: Function) -> None:
         # local to avoid circular import
@@ -294,6 +299,9 @@ class Interpreter(
         except _NativeFnError as error:
             # calling a native function raised an error
             self._raise(f"Error calling '{callee.name}': {error}", e.paren)
+        except InterpreterError as error:
+            error.tokens.append(e.paren)
+            raise
 
     def visit_literal(self, e: Literal) -> LoxValue:
         return e.value

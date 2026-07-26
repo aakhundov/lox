@@ -62,6 +62,17 @@ def distances(resolve):
     return _distances
 
 
+def error_position(error):
+    """Return the single source position `error` points at.
+
+    `get_line_info` yields one (line, col) pair per reported position -- the
+    interpreter reports a whole call stack that way. A resolver error has no
+    stack behind it, so the unpack doubles as a check that there is exactly one.
+    """
+    (position,) = error.get_line_info()
+    return position
+
+
 @pytest.fixture
 def resolve_errors(resolve):
     """Return a helper that resolves `source` expecting failure.
@@ -208,7 +219,7 @@ def test_for_loop_distance(distances, source, expected):
 def test_self_reference_in_initializer_error(resolve_errors, source, position):
     (error,) = resolve_errors(source)
     assert str(error) == "Can't read local variable in its own initializer"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -245,7 +256,7 @@ def test_self_reference_allowed(resolve, source):
 def test_duplicate_declaration_error(resolve_errors, source, position):
     (error,) = resolve_errors(source)
     assert str(error) == "Already a variable with this name in this scope"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -284,7 +295,7 @@ def test_redeclaration_allowed(resolve, source):
 def test_return_outside_function_error(resolve_errors, source, position):
     (error,) = resolve_errors(source)
     assert str(error) == "return allowed only inside function body"
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -331,7 +342,7 @@ def test_return_allowed(resolve, source):
 def test_loop_jump_outside_loop_error(resolve_errors, source, message, position):
     (error,) = resolve_errors(source)
     assert str(error) == message
-    assert error.get_line_info() == position
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(
@@ -383,7 +394,7 @@ def test_multiple_errors(resolve_errors):
         "Already a variable with this name in this scope",
         "Can't read local variable in its own initializer",
     ]
-    assert [e.get_line_info() for e in errors] == [(1, 18), (1, 33)]
+    assert [error_position(e) for e in errors] == [(1, 18), (1, 33)]
 
 
 def test_resolver_can_be_reused(resolve):
