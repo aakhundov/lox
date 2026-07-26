@@ -8,6 +8,11 @@ from typing import Any, cast
 from plox.common import Token, LoxValue
 
 
+@dataclass(frozen=True)
+class Program:
+    statements: tuple["Stmt", ...]
+
+
 class Stmt(ABC):
     class Visitor[R](ABC):
         @abstractmethod

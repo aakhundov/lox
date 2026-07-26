@@ -32,9 +32,9 @@ def resolve():
     """
 
     def _resolve(source):
-        statements = Parser(Scanner(source).scan()).parse()
-        Resolver().resolve(statements)
-        return statements
+        program = Parser(Scanner(source).scan()).parse()
+        Resolver().resolve(program)
+        return program.statements
 
     return _resolve
 
@@ -393,11 +393,11 @@ def test_resolver_can_be_reused(resolve):
     with pytest.raises(ExceptionGroup):
         resolver.resolve(Parser(Scanner("{ var a = 1; var a = 2; }").scan()).parse())
 
-    statements = Parser(Scanner("{ var b = 1; print b; }").scan()).parse()
-    resolver.resolve(statements)  # must not raise
+    program = Parser(Scanner("{ var b = 1; print b; }").scan()).parse()
+    resolver.resolve(program)  # must not raise
     assert [
         node.get_distance()
-        for statement in statements
+        for statement in program.statements
         for node in _walk(statement)
         if isinstance(node, Variable)
     ] == [0]

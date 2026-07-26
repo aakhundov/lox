@@ -9,15 +9,15 @@ from plox.scanner import Scanner
 
 
 def _resolved(source):
-    """Scan, parse and resolve `source` into statements ready to interpret.
+    """Scan, parse and resolve `source` into a Program ready to interpret.
 
     The interpreter only ever runs resolved ASTs: an unresolved `Variable` or
     `Assign` carries no distance, which the interpreter reads as "this is a
     global". Driving the real Resolver here mirrors the actual pipeline.
     """
-    statements = Parser(Scanner(source).scan()).parse()
-    Resolver().resolve(statements)
-    return statements
+    program = Parser(Scanner(source).scan()).parse()
+    Resolver().resolve(program)
+    return program
 
 
 @pytest.fixture

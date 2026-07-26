@@ -8,14 +8,16 @@ from plox.scanner import Scanner
 
 @pytest.fixture
 def parse():
-    """Return a helper that scans then parses `source` into a list of Stmt.
+    """Return a helper that scans then parses `source` into a tuple of Stmt.
 
     Driving the parser through the real Scanner mirrors how it is used in
-    practice and keeps expectations free of token-construction details.
+    practice and keeps expectations free of token-construction details. The
+    parser hands back a `Program`; the tests are about the statements in it,
+    so the helper unwraps it.
     """
 
     def _parse(source):
-        return Parser(Scanner(source).scan()).parse()
+        return Parser(Scanner(source).scan()).parse().statements
 
     return _parse
 

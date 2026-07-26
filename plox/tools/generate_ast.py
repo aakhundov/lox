@@ -112,6 +112,10 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from plox.common import Token, LoxValue
+
+@dataclass(frozen=True)
+class Program:
+    statements: tuple["Stmt", ...]
 """
 
 

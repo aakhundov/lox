@@ -110,20 +110,20 @@ def _run_code(
                 print(f"{i + 1:04}  {token}")
         print()
 
-    statements = Parser(tokens).parse()
+    program = Parser(tokens).parse()
 
     if config.ast:
         metadata_shown = True
         with _padded_borders("ast"):
-            for i, statement in enumerate(statements):
+            for i, statement in enumerate(program.statements):
                 s_expr = AstPrinter().print(statement)
                 print(f"{i + 1:04}  {s_expr}")
         print()
 
-    Resolver().resolve(statements)
+    Resolver().resolve(program)
 
     with _padded_borders("output", enabled=metadata_shown):
-        interpreter.interpret(statements)
+        interpreter.interpret(program)
 
 
 def _print_error(e: LoxError, source: str) -> None:

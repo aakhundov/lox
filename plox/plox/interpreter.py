@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from typing import NoReturn
 
 from plox.ast import (
+    Program,
     Stmt,
     Function,
     Var,
@@ -111,8 +112,8 @@ class Interpreter(
     def globals(self) -> Environment:
         return self._globals
 
-    def interpret(self, statements: list[Stmt]) -> None:
-        for statement in statements:
+    def interpret(self, program: Program) -> None:
+        for statement in program.statements:
             self._execute(statement)
 
     def visit_function(self, s: Function) -> None:

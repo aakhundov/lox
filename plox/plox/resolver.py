@@ -1,8 +1,9 @@
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from enum import Enum, auto
 
 from plox.ast import (
+    Program,
     Stmt,
     Function,
     Var,
@@ -50,11 +51,11 @@ class Resolver(
         self._in_loop: list[LoopType] = []
         self._in_function: list[FunctionType] = []
 
-    def resolve(self, statements: list[Stmt]) -> None:
+    def resolve(self, program: Program) -> None:
         self._errors.clear()
 
         # global, hence no _scope call
-        self._resolve_block(statements)
+        self._resolve_block(program.statements)
 
         assert not self._scopes
         assert not self._in_loop
@@ -184,7 +185,7 @@ class Resolver(
             # assume global scope
             e.set_distance(None)
 
-    def _resolve_block(self, block: list[Stmt]) -> None:
+    def _resolve_block(self, block: Iterable[Stmt]) -> None:
         for statement in block:
             self._resolve(statement)
 

@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import NoReturn
 
 from plox.ast import (
+    Program,
     Stmt,
     Function,
     Var,
@@ -33,7 +34,7 @@ class Parser:
         self._current = 0
         self._errors: list[ParserError] = []
 
-    def parse(self) -> list[Stmt]:
+    def parse(self) -> Program:
         self._current = 0
         self._errors.clear()
 
@@ -48,7 +49,7 @@ class Parser:
         if self._errors:
             raise ExceptionGroup("Parser errors", self._errors)
 
-        return statements
+        return Program(tuple(statements))
 
     def _declaration(self) -> Stmt:
         if self._match(TT.FUN):
