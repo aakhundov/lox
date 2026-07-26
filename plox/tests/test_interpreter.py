@@ -1,6 +1,8 @@
 import pytest
 
+from plox.class_ import LoxClass
 from plox.common import LoxCallable, LoxValue
+from plox.instance import LoxInstance
 from plox.interpreter import Interpreter, InterpreterError
 from plox.library import get_library
 
@@ -718,6 +720,209 @@ def test_function_value_display(value, source, expected):
     assert str(result) == expected
 
 
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a class value renders with its declared name
+        ("class A {} print A;", "<class A>"),
+        ("class SomeName {} print SomeName;", "<class SomeName>"),
+    ],
+)
+def test_class_value_display(value, source, expected):
+    result = value(source)
+    # a class is callable: calling it is how an instance is made
+    assert isinstance(result, LoxCallable)
+    assert str(result) == expected
+
+
+def test_instance_value_display(value):
+    result = value("class A {} print A();")
+    assert isinstance(result, LoxInstance)
+    assert str(result) == "<instance of <class A>>"
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a field springs into being when it is first assigned
+        ("class A {} var a = A(); a.x = 1; print a.x;", 1.0),
+        ('class A {} var a = A(); a.x = "s"; print a.x;', "s"),
+        ("class A {} var a = A(); a.x = true; print a.x;", True),
+        ("class A {} var a = A(); a.x = nil; print a.x;", None),
+        # assigning again replaces the value
+        ("class A {} var a = A(); a.x = 1; a.x = 2; print a.x;", 2.0),
+        # a set is an expression, evaluating to the assigned value
+        ("class A {} var a = A(); print a.x = 1;", 1.0),
+        # fields hold arbitrary expressions, evaluated before the store
+        ("class A {} var a = A(); a.x = 1 + 2; print a.x;", 3.0),
+        # ...including other instances, so structures nest
+        ("class A {} var a = A(); a.x = A(); a.x.y = 1; print a.x.y;", 1.0),
+    ],
+)
+def test_instance_fields(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+def test_fields_are_per_instance(run):
+    # each instance carries its own field table, so writing one leaves the
+    # other alone -- they share only the class
+    assert run("""
+        class A {}
+        var a = A();
+        var b = A();
+        a.x = 1;
+        b.x = 2;
+        print a.x, b.x;
+    """) == [[1.0, 2.0]]
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a method is reached through the instance and called like a function
+        ("class A { m() { return 1; } } print A().m();", 1.0),
+        ("class A { m(a, b) { return a + b; } } print A().m(1, 2);", 3.0),
+        # a method with no explicit return yields nil, as any function does
+        ("class A { m() {} } print A().m();", None),
+        # `this` inside a method is the instance it was reached through
+        (
+            "class A { get_() { return this.x; } } var a = A(); a.x = 1; print a.get_();",
+            1.0,
+        ),
+        # a method may write fields through `this`
+        (
+            "class A { set_(v) { this.x = v; } get_() { return this.x; } }"
+            " var a = A(); a.set_(2); print a.get_();",
+            2.0,
+        ),
+        # one method may call another on the same instance
+        (
+            "class A { one() { return 1; } two() { return this.one() + 1; } }"
+            " print A().two();",
+            2.0,
+        ),
+    ],
+)
+def test_method_call(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+def test_method_returning_an_instance_chains(value):
+    # a method may name its own class and build more of them, and the result
+    # is an ordinary instance, so calls chain off it
+    result = value("class A { copy() { return A(); } } print A().copy().copy();")
+    assert isinstance(result, LoxInstance)
+
+
+def test_method_sees_its_own_instance(run):
+    # the same method reached through two instances resolves `this` to
+    # whichever one it was reached through
+    assert run("""
+        class A {
+            init(v) { this.v = v; }
+            get_() { return this.v; }
+        }
+        var a = A(1);
+        var b = A(2);
+        print a.get_(), b.get_();
+    """) == [[1.0, 2.0]]
+
+
+def test_bound_method_keeps_its_instance(run):
+    # reading a method off an instance binds it there and then, so it stays
+    # attached to that instance however it is later passed around and called
+    assert run("""
+        class A {
+            init(v) { this.v = v; }
+            get_() { return this.v; }
+        }
+        var a = A(1);
+        var m = a.get_();
+        var f = A(2).get_;
+        print m, f();
+    """) == [[1.0, 2.0]]
+
+
+def test_field_shadows_method(value):
+    # a property lookup checks fields before methods, so a field of the same
+    # name hides the method rather than colliding with it
+    _assert_value(
+        value("class A { m() { return 1; } } var a = A(); a.m = 2; print a.m;"), 2.0
+    )
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # `init` runs when the class is called, with the arguments given
+        ("class A { init() { this.x = 1; } } print A().x;", 1.0),
+        ("class A { init(v) { this.x = v; } } print A(2).x;", 2.0),
+        ("class A { init(a, b) { this.x = a + b; } } print A(1, 2).x;", 3.0),
+        # calling `init` again re-runs it on the existing instance
+        (
+            "class A { init(v) { this.x = v; } } var a = A(1); a.init(2); print a.x;",
+            2.0,
+        ),
+    ],
+)
+def test_initializer(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+def test_initializer_bare_return_exits_early(run):
+    # a bare `return` leaves the initializer without running the rest of it,
+    # and without preventing the instance from being handed back
+    collected = run("""
+        class A { init() { return; this.x = 1; } }
+        print A();
+    """)
+    ((instance,),) = collected
+    assert isinstance(instance, LoxInstance)
+    # the statement after the `return` never ran, so there is no field
+    with pytest.raises(InterpreterError) as excinfo:
+        run("class A { init() { return; this.x = 1; } } print A().x;")
+    assert str(excinfo.value) == "Undefined property 'x'"
+
+
+def test_initializer_returns_the_instance(run):
+    # a class call evaluates to the new instance whatever `init` does, and an
+    # explicit `init` call returns that same instance rather than nil
+    collected = run("""
+        class A { init() { this.x = 1; } }
+        var a = A();
+        print a, a.init(), a.init().x;
+    """)
+    (group,) = collected
+    instance, returned, field = group
+    assert isinstance(instance, LoxInstance)
+    # the same object, not merely an equal one
+    assert returned is instance
+    _assert_value(field, 1.0)
+
+
+def test_class_declaration_allows_self_reference(value):
+    # the name is bound before the methods are built, so a method body may
+    # mention the class it belongs to
+    result = value("class A { me() { return A; } } print A().me();")
+    assert isinstance(result, LoxClass)
+    assert str(result) == "<class A>"
+
+
+def test_method_closes_over_enclosing_scope(run):
+    # a method is a function like any other: its closure is the scope the class
+    # was declared in, with the `this` binding layered on top
+    assert run("""
+        fun make(v) {
+            class A {
+                get_() { return v; }
+                both() { fun inner() { return v; } return inner(); }
+            }
+            return A();
+        }
+        print make(1).get_(), make(2).both();
+    """) == [[1.0, 2.0]]
+
+
 # A representative call for each native, by name. The test below asserts
 # this covers the library exactly, so adding a native fails here until it is
 # given a meaningful call rather than being silently skipped.
@@ -1083,3 +1288,120 @@ def test_undefined_variable_error(run, error_position, source, position):
         run(source)
     assert str(excinfo.value) == "Undefined variable: x"
     assert error_position(excinfo.value) == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # reading a property the instance has neither as a field nor a method;
+        # the error sits at the property name
+        ("class A {} var a = A(); a.x;", (1, 27)),
+        # a field written on one instance is not on another
+        ("class A {} var a = A(); var b = A(); a.x = 1; b.x;", (1, 49)),
+        # an initializer that never assigned it leaves it undefined
+        ("class A { init() {} } var a = A(); a.x;", (1, 38)),
+    ],
+)
+def test_undefined_property_error(run, error_position, source, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == "Undefined property 'x'"
+    assert error_position(excinfo.value) == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # only instances carry properties, so every other value rejects a get
+        ("var a = 1; a.x;", (1, 14)),
+        ('var a = "s"; a.x;', (1, 16)),
+        ("var a = true; a.x;", (1, 17)),
+        ("var a = nil; a.x;", (1, 16)),
+        # a class is not an instance of itself: there are no static members
+        ("class A {} A.x;", (1, 14)),
+        # nor is a function, or a native
+        ("fun f() {} f.x;", (1, 14)),
+        ("clock.x;", (1, 7)),
+    ],
+)
+def test_get_on_non_instance_error(run, error_position, source, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == "Only instances have properties"
+    assert error_position(excinfo.value) == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # the same holds for a set, with its own message
+        ("var a = 1; a.x = 1;", (1, 14)),
+        ('var a = "s"; a.x = 1;', (1, 16)),
+        ("var a = nil; a.x = 1;", (1, 16)),
+        ("class A {} A.x = 1;", (1, 14)),
+        ("fun f() {} f.x = 1;", (1, 14)),
+    ],
+)
+def test_set_on_non_instance_error(run, error_position, source, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == "Only instances have fields"
+    assert error_position(excinfo.value) == position
+
+
+def test_set_target_is_checked_before_the_value_runs(run):
+    # the object is evaluated and rejected before the value expression is, so
+    # a bad target reports its own error rather than the value's
+    with pytest.raises(InterpreterError) as excinfo:
+        run("var a = 1; a.x = undefined_name;")
+    assert str(excinfo.value) == "Only instances have fields"
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # a class with no initializer takes no arguments
+        ("class A {} A(1);", "Expected 0 arguments but got 1", (1, 13)),
+        # otherwise the initializer's parameters set the arity
+        ("class A { init(a) {} } A();", "Expected 1 argument but got 0", (1, 25)),
+        ("class A { init(a, b) {} } A(1);", "Expected 2 arguments but got 1", (1, 28)),
+        ("class A { init(a) {} } A(1, 2);", "Expected 1 argument but got 2", (1, 25)),
+        # a method's own arity is checked like any function's
+        ("class A { m() {} } A().m(1);", "Expected 0 arguments but got 1", (1, 25)),
+    ],
+)
+def test_class_arity_error(run, error_position, source, message, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == message
+    assert error_position(excinfo.value) == position
+
+
+def test_calling_a_non_method_field_error(run, error_position):
+    # a field holding a non-callable is not made callable by being reached
+    # through an instance
+    with pytest.raises(InterpreterError) as excinfo:
+        run("class A {} var a = A(); a.x = 1; a.x();")
+    assert str(excinfo.value) == "Can only call functions and methods"
+    assert error_position(excinfo.value) == (1, 37)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # an error inside a method carries the frame for the call that reached
+        # it, outermost first
+        ("class A { m() { x; } } A().m();", [(1, 29), (1, 17)]),
+        # an error inside an initializer carries the frame for the class call
+        ("class A { init() { x; } } A();", [(1, 28), (1, 20)]),
+        # one method calling another stacks a frame per call
+        (
+            "class A { one() { x; } two() { this.one(); } } A().two();",
+            [(1, 55), (1, 40), (1, 19)],
+        ),
+    ],
+)
+def test_method_error_stack(run, error_stack, source, expected):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert error_stack(excinfo.value) == expected

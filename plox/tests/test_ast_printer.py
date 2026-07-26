@@ -8,8 +8,12 @@ from plox.ast import (
     Literal,
     Unary,
     Call,
+    Get,
+    This,
     Variable,
     Assign,
+    Set,
+    Class,
     Function,
     For,
     If,
@@ -91,10 +95,31 @@ def test_variable(show):
     assert show(Variable(ident("foo"))) == "foo"
 
 
+def test_this(show):
+    # `this` renders as its bare keyword, like a variable does
+    assert show(This(Token(TT.THIS, "this", None, 0))) == "this"
+
+
 def test_assign(show):
     assert show(Assign(ident("x"), Literal(1.0))) == "(= x 1)"
     expr = Assign(ident("x"), Binary(Literal(1.0), op("+", TT.PLUS), Literal(2.0)))
     assert show(expr) == "(= x (+ 1 2))"
+
+
+def test_set(show):
+    # the property name sits in the head; the object and the value are children
+    node = Set(Variable(ident("obj")), ident("x"), Literal(1.0))
+    assert show(node) == "(set x obj 1)"
+    # the object is an arbitrary expression, so a chained target nests
+    nested = Set(Get(Variable(ident("a")), ident("b")), ident("c"), Literal(2.0))
+    assert show(nested) == "(set c (get b a) 2)"
+    # so is the value
+    node = Set(
+        This(Token(TT.THIS, "this", None, 0)),
+        ident("x"),
+        Binary(Literal(1.0), op("+", TT.PLUS), Literal(2.0)),
+    )
+    assert show(node) == "(set x this (+ 1 2))"
 
 
 def test_conditional(show):
@@ -172,6 +197,36 @@ def test_call(show):
     # the callee is an arbitrary expression, so calls nest
     inner = Call(callee, paren, [Literal(1.0)])
     assert show(Call(inner, paren, [Literal(2.0)])) == "(call (call f 1) 2)"
+
+
+def test_get(show):
+    # the property name sits in the head, the object is the only child
+    assert show(Get(Variable(ident("obj")), ident("x"))) == "(get x obj)"
+    # `.` is left-associative, so a chain nests to the left
+    chain = Get(Get(Variable(ident("a")), ident("b")), ident("c"))
+    assert show(chain) == "(get c (get b a))"
+    # the object is an arbitrary expression: a property of a call's result
+    call = Call(Variable(ident("f")), op(")", TT.RIGHT_PAREN), [])
+    assert show(Get(call, ident("x"))) == "(get x (call f))"
+
+
+def test_class_statement(show):
+    # a class with no methods has no children
+    assert show(Class(ident("A"), [])) == "(class A)"
+    # methods render as the function statements they are
+    node = Class(ident("A"), [Function(ident("m"), [], [])])
+    assert show(node) == "(class A (fun m ()))"
+    # several methods render as successive children
+    node = Class(
+        ident("A"),
+        [
+            Function(ident("init"), [ident("a")], [Print([Variable(ident("a"))])]),
+            Function(
+                ident("m"), [], [Return(Token(TT.RETURN, "return", None, 0), None)]
+            ),
+        ],
+    )
+    assert show(node) == "(class A (fun init (a) (print a)) (fun m () (return)))"
 
 
 def test_function_statement(show):

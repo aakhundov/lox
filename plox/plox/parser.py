@@ -4,6 +4,7 @@ from typing import NoReturn
 from plox.ast import (
     Program,
     Stmt,
+    Class,
     Function,
     Var,
     For,
@@ -16,12 +17,15 @@ from plox.ast import (
     Expression,
     Expr,
     Assign,
+    Set,
     Conditional,
     Logical,
     Binary,
     Unary,
     Call,
+    Get,
     Literal,
+    This,
     Variable,
     Grouping,
 )
@@ -53,6 +57,8 @@ class Parser:
         return Program(tuple(statements))
 
     def _declaration(self) -> Stmt:
+        if self._match(TT.CLASS):
+            return self._class()
         if self._match(TT.FUN):
             return self._function("function")
         if self._match(TT.VAR):
@@ -60,7 +66,28 @@ class Parser:
 
         return self._statement()
 
-    def _function(self, kind: str) -> Stmt:
+    def _class(self) -> Class:
+        name = self._consume(
+            TT.IDENTIFIER,
+            "Expect class name",
+        )
+        self._consume(
+            TT.LEFT_BRACE,
+            "Expect '{' before class body",
+        )
+
+        methods: list[Function] = []
+        while not self._check(TT.RIGHT_BRACE) and not self._is_at_end():
+            methods.append(self._function("method"))
+
+        self._consume(
+            TT.RIGHT_BRACE,
+            "Expect '}' after class body",
+        )
+
+        return Class(name, methods)
+
+    def _function(self, kind: str) -> Function:
         name = self._consume(
             TT.IDENTIFIER,
             f"Expect {kind} name",
@@ -99,7 +126,7 @@ class Parser:
 
         return Function(name, parameters, body)
 
-    def _var(self) -> Stmt:
+    def _var(self) -> Var:
         name = self._consume(
             TT.IDENTIFIER,
             "Expect variable name",
@@ -134,13 +161,13 @@ class Parser:
 
         return self._expression_statement()
 
-    def _for(self) -> Stmt:
+    def _for(self) -> For:
         self._consume(
             TT.LEFT_PAREN,
             "Expect '(' after for",
         )
 
-        initializer = None
+        initializer: Var | Expression | None = None
         if not self._match(TT.SEMICOLON):
             if self._match(TT.VAR):
                 initializer = self._var()
@@ -169,7 +196,7 @@ class Parser:
 
         return For(initializer, condition, increment, body)
 
-    def _if(self) -> Stmt:
+    def _if(self) -> If:
         self._consume(
             TT.LEFT_PAREN,
             "Expect '(' after if",
@@ -187,7 +214,7 @@ class Parser:
 
         return If(condition, then_branch, else_branch)
 
-    def _print(self) -> Stmt:
+    def _print(self) -> Print:
         expressions = [self._expression()]
         while self._match(TT.COMMA):
             expressions.append(self._expression())
@@ -199,7 +226,7 @@ class Parser:
 
         return Print(expressions)
 
-    def _return(self) -> Stmt:
+    def _return(self) -> Return:
         keyword = self._previous()
 
         value = None
@@ -213,7 +240,7 @@ class Parser:
 
         return Return(keyword, value)
 
-    def _while(self) -> Stmt:
+    def _while(self) -> While:
         self._consume(
             TT.LEFT_PAREN,
             "Expect '(' after while",
@@ -230,7 +257,7 @@ class Parser:
 
         return While(condition, body)
 
-    def _loop_jump(self) -> Stmt:
+    def _loop_jump(self) -> LoopJump:
         keyword = self._previous()
         kw = keyword.type.name.lower()
 
@@ -241,11 +268,11 @@ class Parser:
 
         return LoopJump(keyword)
 
-    def _block(self) -> Stmt:
+    def _block(self) -> Block:
         statements = self._parse_block()
         return Block(statements)
 
-    def _expression_statement(self) -> Stmt:
+    def _expression_statement(self) -> Expression:
         expression = self._expression()
 
         self._consume(
@@ -267,6 +294,9 @@ class Parser:
 
             if isinstance(expr, Variable):
                 return Assign(expr.name, value)
+            elif isinstance(expr, Get):
+                # turn preceding getter into a setter
+                return Set(expr.object, expr.name, value)
 
             # don't raise, as already in a consistent state
             self._error("Invalid assignment target", equals)
@@ -357,8 +387,18 @@ class Parser:
     def _call(self) -> Expr:
         expr = self._primary()
 
-        while self._check(TT.LEFT_PAREN):
-            expr = self._finish_call(expr)
+        while True:
+            if self._check(TT.LEFT_PAREN):
+                expr = self._finish_call(expr)
+            elif self._match(TT.DOT):
+                name = self._consume(
+                    TT.IDENTIFIER,
+                    "Expect property name after '.'",
+                )
+
+                expr = Get(expr, name)
+            else:
+                break
 
         return expr
 
@@ -372,6 +412,8 @@ class Parser:
 
         if self._match(TT.NUMBER, TT.STRING):
             return Literal(self._previous().literal)
+        if self._match(TT.THIS):
+            return This(self._previous())
         if self._match(TT.IDENTIFIER):
             return Variable(self._previous())
 

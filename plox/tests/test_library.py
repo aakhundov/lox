@@ -3,7 +3,8 @@ import pytest
 from time import time
 
 from plox.common import LoxCallable
-from plox.interpreter import Interpreter, _NativeFnError
+from plox.errors import NativeFnError
+from plox.interpreter import Interpreter
 from plox.library import Clock, LoxNativeFn, Sleep, get_library
 
 
@@ -129,10 +130,10 @@ def test_sleep(interpreter):
     ],
 )
 def test_sleep_rejects_bad_arguments(interpreter, seconds, message):
-    # natives report bad arguments with _NativeFnError, which carries neither
+    # natives report bad arguments with NativeFnError, which carries neither
     # a position nor the function name; the interpreter adds both at the call
     # site, so the bare reason is what a native is responsible for
-    with pytest.raises(_NativeFnError) as excinfo:
+    with pytest.raises(NativeFnError) as excinfo:
         Sleep().call([seconds], interpreter)
     assert str(excinfo.value) == message
 

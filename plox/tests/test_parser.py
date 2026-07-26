@@ -578,6 +578,82 @@ def test_loop_jump_error(parse_errors, error_position, source, message, position
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # a class with no methods is legal and has no children
+        ("class A {}", "(class A)"),
+        # methods are functions declared without the `fun` keyword
+        ("class A { m() {} }", "(class A (fun m ()))"),
+        (
+            "class A { m(a, b) { return a + b; } }",
+            "(class A (fun m (a, b) (return (+ a b))))",
+        ),
+        # several methods keep source order
+        ("class A { a() {} b() {} }", "(class A (fun a ()) (fun b ()))"),
+        # `init` is parsed as an ordinary method; nothing distinguishes it here
+        (
+            "class A { init(x) { this.x = x; } }",
+            "(class A (fun init (x) (exp (set x this x))))",
+        ),
+        # a class is a declaration, so it nests wherever one may
+        ("{ class A {} }", "(blk (class A))"),
+        ("fun f() { class A {} }", "(fun f () (class A))"),
+    ],
+)
+def test_class_declaration(show_one, source, expected):
+    assert show_one(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        ("class {}", "Expect class name", (1, 7)),
+        ("class A ()", "Expect '{' before class body", (1, 9)),
+        # the body must be closed; at EOF the error points just past the source
+        ("class A {", "Expect '}' after class body", (1, 10)),
+        # a class body holds methods only, so anything else wants a method name
+        ("class A { 1 }", "Expect method name", (1, 11)),
+        # a method's signature is checked like a function's, but reports "method"
+        ("class A { m {} }", "Expect '(' after method name", (1, 13)),
+        ("class A { m(1) {} }", "Expect parameter name", (1, 13)),
+    ],
+)
+def test_class_error(parse_errors, error_position, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # recovery abandons the whole class declaration, so the '}' that would
+        # have closed the body is left over and reported as a second error
+        (
+            "class A { var x; }",
+            [("Expect method name", (1, 11)), ("Expect expression", (1, 18))],
+        ),
+        (
+            "class A { print 1; }",
+            [("Expect method name", (1, 11)), ("Expect expression", (1, 20))],
+        ),
+        (
+            "class A { m() ; }",
+            [
+                ("Expect '{' before method body", (1, 15)),
+                ("Expect expression", (1, 17)),
+            ],
+        ),
+    ],
+)
+def test_class_error_recovery(parse_errors, error_position, source, expected):
+    # the first error is the real one; the parser then synchronizes to the next
+    # declaration keyword or ';', which is past the end of the class body
+    errors = parse_errors(source)
+    assert [(str(e), error_position(e)) for e in errors] == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # the signature renders in the head, the body as children
         ("fun f() {}", "(fun f ())"),
         ("fun f(a) { print a; }", "(fun f (a) (print a))"),
@@ -701,6 +777,81 @@ def test_call_error(parse_errors, error_position, source, message, position):
 
 
 @pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("a.b;", "(get b a)"),
+        # `.` is left-associative, so a chain reads outside-in
+        ("a.b.c;", "(get c (get b a))"),
+        # property access and calls interleave at the same precedence level
+        ("a.b();", "(call (get b a))"),
+        ("a.b(1, 2);", "(call (get b a) 1 2)"),
+        ("f().x;", "(get x (call f))"),
+        ("a.b(1).c;", "(get c (call (get b a) 1))"),
+        # `this` is a primary, so it takes properties like any other object
+        ("this.x;", "(get x this)"),
+        ("this.m();", "(call (get m this))"),
+        # `.` binds tighter than unary...
+        ("-a.b;", "(- (get b a))"),
+        ("!a.b;", "(! (get b a))"),
+        # ...and tighter than any binary operator
+        ("a.b + c.d;", "(+ (get b a) (get d c))"),
+        # a parenthesized object is a grouping, then accessed
+        ("(a).b;", "(get b (grp a))"),
+    ],
+)
+def test_property_access(show_expr, source, expected):
+    assert show_expr(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a `get` in assignment-target position becomes a `set`
+        ("a.b = 1;", "(set b a 1)"),
+        # only the last `.` becomes the setter; the rest stay getters
+        ("a.b.c = 1;", "(set c (get b a) 1)"),
+        # the object may be any expression that produced the getter
+        ("f().x = 1;", "(set x (call f) 1)"),
+        ("this.x = 1;", "(set x this 1)"),
+        # the value is a full expression
+        ("a.b = c + d;", "(set b a (+ c d))"),
+        # assignment stays right-associative across property targets
+        ("a.b = c.d = 1;", "(set b a (set d c 1))"),
+        # a plain variable target is still a plain assignment
+        ("x = a.b;", "(= x (get b a))"),
+    ],
+)
+def test_property_assignment(show_expr, source, expected):
+    assert show_expr(source) == expected
+
+
+def test_this_expression(show_expr):
+    # `this` parses anywhere a primary may appear; whether it is *legal* there
+    # is a resolver question, not a grammatical one
+    assert show_expr("this;") == "this"
+    assert show_expr("f(this);") == "(call f this)"
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        ("a.;", (1, 3)),
+        # the name must be an identifier, not any other token
+        ("a.1;", (1, 3)),
+        ('a."x";', (1, 3)),
+        # a keyword is not a property name either
+        ("a.this;", (1, 3)),
+        # the check applies at every link of a chain
+        ("a.b.;", (1, 5)),
+    ],
+)
+def test_property_name_error(parse_errors, error_position, source, position):
+    (error,) = parse_errors(source)
+    assert str(error) == "Expect property name after '.'"
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
     "source, position",
     [
         # a binary operator with no left operand
@@ -803,6 +954,12 @@ def test_var_declaration_error(parse_errors, error_position, source, message, po
         ("1 = 2;", (1, 3)),
         ("(x) = 2;", (1, 5)),
         ("a + b = c;", (1, 7)),
+        # a call is not assignable, even though it sits at the same precedence
+        # level as the property access that is
+        ("f() = 1;", (1, 5)),
+        ("a.b() = 1;", (1, 7)),
+        # `this` names a binding the program may not rebind
+        ("this = 1;", (1, 6)),
     ],
 )
 def test_invalid_assignment_target_error(

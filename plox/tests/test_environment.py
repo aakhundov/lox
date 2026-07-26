@@ -111,9 +111,9 @@ def test_get_at_reads_the_scope_that_many_hops_up():
     # distance 0 is the environment itself, and each hop is one parent link
     child.define("x", 3.0)
     parent.define("x", 2.0)
-    assert child.get_at(0, name("x")) == 3.0
-    assert child.get_at(1, name("x")) == 2.0
-    assert child.get_at(2, name("x")) == 1.0
+    assert child.get_at(0, "x") == 3.0
+    assert child.get_at(1, "x") == 2.0
+    assert child.get_at(2, "x") == 1.0
 
 
 def test_get_at_does_not_search_other_scopes():
@@ -123,14 +123,14 @@ def test_get_at_does_not_search_other_scopes():
     child.define("x", 2.0)
     # unlike `get`, the distance names the scope outright: the nearer binding
     # is skipped rather than preferred
-    assert child.get_at(1, name("x")) == 1.0
+    assert child.get_at(1, "x") == 1.0
 
 
 def test_assign_at_writes_the_scope_that_many_hops_up():
     parent = Environment()
     parent.define("x", 1.0)
     child = Environment(parent=parent)
-    child.assign_at(1, name("x"), 2.0)
+    child.assign_at(1, "x", 2.0)
     assert parent.get(name("x")) == 2.0
 
 
@@ -140,6 +140,6 @@ def test_assign_at_does_not_search_other_scopes():
     child = Environment(parent=parent)
     child.define("x", 2.0)
     # the shadowing local is bypassed, not updated
-    child.assign_at(1, name("x"), 3.0)
+    child.assign_at(1, "x", 3.0)
     assert parent.get(name("x")) == 3.0
-    assert child.get_at(0, name("x")) == 2.0
+    assert child.get_at(0, "x") == 2.0

@@ -16,6 +16,8 @@ class Program:
 class Stmt(ABC):
     class Visitor[R](ABC):
         @abstractmethod
+        def visit_class(self, s: "Class") -> R: ...
+        @abstractmethod
         def visit_function(self, s: "Function") -> R: ...
         @abstractmethod
         def visit_var(self, s: "Var") -> R: ...
@@ -41,6 +43,15 @@ class Stmt(ABC):
 
 
 @dataclass(frozen=True)
+class Class(Stmt):
+    name: Token
+    methods: list["Function"]
+
+    def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
+        return visitor.visit_class(self)
+
+
+@dataclass(frozen=True)
 class Function(Stmt):
     name: Token
     parameters: list[Token]
@@ -61,7 +72,7 @@ class Var(Stmt):
 
 @dataclass(frozen=True)
 class For(Stmt):
-    initializer: Stmt | None
+    initializer: "Var | Expression | None"
     condition: "Expr | None"
     increment: "Expr | None"
     body: Stmt
@@ -135,6 +146,8 @@ class Expr(ABC):
         @abstractmethod
         def visit_assign(self, e: "Assign") -> R: ...
         @abstractmethod
+        def visit_set(self, e: "Set") -> R: ...
+        @abstractmethod
         def visit_conditional(self, e: "Conditional") -> R: ...
         @abstractmethod
         def visit_logical(self, e: "Logical") -> R: ...
@@ -145,7 +158,11 @@ class Expr(ABC):
         @abstractmethod
         def visit_call(self, e: "Call") -> R: ...
         @abstractmethod
+        def visit_get(self, e: "Get") -> R: ...
+        @abstractmethod
         def visit_literal(self, e: "Literal") -> R: ...
+        @abstractmethod
+        def visit_this(self, e: "This") -> R: ...
         @abstractmethod
         def visit_variable(self, e: "Variable") -> R: ...
         @abstractmethod
@@ -174,6 +191,16 @@ class Assign(Expr):
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_assign(self)
+
+
+@dataclass(frozen=True)
+class Set(Expr):
+    object: Expr
+    name: Token
+    value: Expr
+
+    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
+        return visitor.visit_set(self)
 
 
 @dataclass(frozen=True)
@@ -226,11 +253,40 @@ class Call(Expr):
 
 
 @dataclass(frozen=True)
+class Get(Expr):
+    object: Expr
+    name: Token
+
+    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
+        return visitor.visit_get(self)
+
+
+@dataclass(frozen=True)
 class Literal(Expr):
     value: LoxValue
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_literal(self)
+
+
+@dataclass(frozen=True)
+class This(Expr):
+    keyword: Token
+
+    _meta: dict[str, Any] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
+
+    def get_distance(self) -> int | None:
+        return cast(int | None, self._meta.get("distance"))
+
+    def set_distance(self, value: int | None) -> None:
+        self._meta["distance"] = value
+
+    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
+        return visitor.visit_this(self)
 
 
 @dataclass(frozen=True)

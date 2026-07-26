@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
-from plox.common import Token
+from plox.common import Token, LoxValue
 
 
 class LoxError(ABC, Exception):
@@ -63,4 +63,17 @@ class ResolverError(_LoxErrorFromTokens):
 
 
 class InterpreterError(_LoxErrorFromTokens):
+    pass
+
+
+class CallableReturn(Exception):
+    def __init__(self, value: LoxValue):
+        self._value = value
+
+    @property
+    def value(self) -> LoxValue:
+        return self._value
+
+
+class NativeFnError(Exception):
     pass

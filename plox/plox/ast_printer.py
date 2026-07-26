@@ -1,5 +1,6 @@
 from plox.ast import (
     Stmt,
+    Class,
     Function,
     Var,
     For,
@@ -12,12 +13,15 @@ from plox.ast import (
     Expression,
     Expr,
     Assign,
+    Set,
     Conditional,
     Logical,
     Binary,
     Unary,
     Call,
+    Get,
     Literal,
+    This,
     Variable,
     Grouping,
 )
@@ -30,6 +34,9 @@ class AstPrinter(
 ):
     def print(self, node: Expr | Stmt) -> str:
         return node.accept(self)
+
+    def visit_class(self, s: Class) -> str:
+        return self._parens(f"class {s.name.lexeme}", *s.methods)
 
     def visit_function(self, s: Function) -> str:
         name = s.name.lexeme
@@ -72,7 +79,7 @@ class AstPrinter(
         return self._parens("while", s.condition, s.body)
 
     def visit_loopjump(self, s: LoopJump) -> str:
-        return f"({s.keyword.type.name.lower()})"
+        return f"({s.keyword.lexeme})"
 
     def visit_block(self, s: Block) -> str:
         return self._parens("blk", *s.statements)
@@ -82,6 +89,9 @@ class AstPrinter(
 
     def visit_assign(self, e: Assign) -> str:
         return self._parens(f"= {e.name.lexeme}", e.value)
+
+    def visit_set(self, e: Set) -> str:
+        return self._parens(f"set {e.name.lexeme}", e.object, e.value)
 
     def visit_conditional(self, e: Conditional) -> str:
         return self._parens(
@@ -103,8 +113,14 @@ class AstPrinter(
     def visit_call(self, e: Call) -> str:
         return self._parens("call", e.callee, *e.arguments)
 
+    def visit_get(self, e: Get) -> str:
+        return self._parens(f"get {e.name.lexeme}", e.object)
+
     def visit_literal(self, e: Literal) -> str:
         return f'"{e.value}"' if isinstance(e.value, str) else to_str(e.value)
+
+    def visit_this(self, e: This) -> str:
+        return e.keyword.lexeme
 
     def visit_variable(self, e: Variable) -> str:
         return e.name.lexeme

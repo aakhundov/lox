@@ -98,13 +98,21 @@ class Token:
         return f"{self.type.name} {desc}({self.line_num}:{self.col_num})"
 
 
+class LoxObject(ABC):
+    @abstractmethod
+    def __str__(self) -> str: ...
+
+
+LoxValue = bool | float | str | LoxObject | None
+
+
 class LoxCallable(ABC):
     @abstractmethod
     def call(
         self,
-        arguments: list["LoxValue"],
+        arguments: list[LoxValue],
         interpreter: "Interpreter",
-    ) -> "LoxValue": ...
+    ) -> LoxValue: ...
 
     @property
     @abstractmethod
@@ -116,9 +124,6 @@ class LoxCallable(ABC):
 
     @abstractmethod
     def __str__(self) -> str: ...
-
-
-LoxValue = bool | float | str | LoxCallable | None
 
 
 def is_equal(a: LoxValue, b: LoxValue) -> bool:

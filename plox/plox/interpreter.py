@@ -6,6 +6,7 @@ from typing import NoReturn
 from plox.ast import (
     Program,
     Stmt,
+    Class,
     Function,
     Var,
     For,
@@ -18,15 +19,19 @@ from plox.ast import (
     Expression,
     Expr,
     Assign,
+    Set,
     Conditional,
     Logical,
     Binary,
     Unary,
     Call,
+    Get,
     Literal,
+    This,
     Variable,
     Grouping,
 )
+from plox.class_ import LoxClass
 from plox.common import (
     Token,
     TokenType as TT,
@@ -37,7 +42,9 @@ from plox.common import (
     to_str,
 )
 from plox.environment import Environment
-from plox.errors import InterpreterError
+from plox.errors import InterpreterError, CallableReturn, NativeFnError
+from plox.function import LoxFunction
+from plox.instance import LoxInstance
 
 
 class _LoopBreak(Exception):
@@ -45,19 +52,6 @@ class _LoopBreak(Exception):
 
 
 class _LoopContinue(Exception):
-    pass
-
-
-class _CallableReturn(Exception):
-    def __init__(self, value: LoxValue):
-        self._value = value
-
-    @property
-    def value(self) -> LoxValue:
-        return self._value
-
-
-class _NativeFnError(Exception):
     pass
 
 
@@ -121,10 +115,23 @@ class Interpreter(
             e.tokens.reverse()
             raise
 
-    def visit_function(self, s: Function) -> None:
-        # local to avoid circular import
-        from plox.function import LoxFunction
+    def visit_class(self, s: Class) -> None:
+        name = s.name.lexeme
 
+        # to allow references to the
+        # class inside its own methods
+        self._env.define(name, None)
+
+        methods: dict[str, LoxFunction] = {}
+        for fn in s.methods:
+            methods[fn.name.lexeme] = LoxFunction(
+                fn, self._env, is_init=(fn.name.lexeme == "init")
+            )
+
+        class_ = LoxClass(name, methods)
+        self._env.assign(s.name, class_)
+
+    def visit_function(self, s: Function) -> None:
         fn = LoxFunction(s, self._env)
         self._env.define(fn.name, fn)
 
@@ -173,7 +180,7 @@ class Interpreter(
         if s.value is not None:
             value = self._evaluate(s.value)
 
-        raise _CallableReturn(value)
+        raise CallableReturn(value)
 
     def visit_while(self, s: While) -> None:
         while is_truthy(self._evaluate(s.condition)):
@@ -204,10 +211,19 @@ class Interpreter(
 
         if (distance := e.get_distance()) is not None:
             # the env distance has been resolved
-            self._env.assign_at(distance, e.name, value)
+            self._env.assign_at(distance, e.name.lexeme, value)
         else:
             self._globals.assign(e.name, value)
 
+        return value
+
+    def visit_set(self, e: Set) -> LoxValue:
+        object = self._evaluate(e.object)
+        if not isinstance(object, LoxInstance):
+            self._raise("Only instances have fields", e.name)
+
+        value = self._evaluate(e.value)
+        object.set(e.name, value)
         return value
 
     def visit_conditional(self, e: Conditional) -> LoxValue:
@@ -296,7 +312,7 @@ class Interpreter(
 
         try:
             return callee.call(arguments, self)
-        except _NativeFnError as error:
+        except NativeFnError as error:
             # calling a native function raised an error
             self._raise(f"Error calling '{callee.name}': {error}", e.paren)
         except InterpreterError as error:
@@ -305,18 +321,31 @@ class Interpreter(
         except RecursionError:
             self._raise("Maximum recursion depth exceeded", e.paren)
 
+    def visit_get(self, e: Get) -> LoxValue:
+        object = self._evaluate(e.object)
+        if not isinstance(object, LoxInstance):
+            self._raise("Only instances have properties", e.name)
+
+        return object.get(e.name)
+
     def visit_literal(self, e: Literal) -> LoxValue:
         return e.value
 
+    def visit_this(self, e: This) -> LoxValue:
+        return self._look_up_variable(e.keyword, e)
+
     def visit_variable(self, e: Variable) -> LoxValue:
-        if (distance := e.get_distance()) is not None:
-            # the env distance has been resolved
-            return self._env.get_at(distance, e.name)
-        else:
-            return self._globals.get(e.name)
+        return self._look_up_variable(e.name, e)
 
     def visit_grouping(self, e: Grouping) -> LoxValue:
         return self._evaluate(e.expression)
+
+    def _look_up_variable(self, name: Token, e: Variable | This) -> LoxValue:
+        if (distance := e.get_distance()) is not None:
+            # the env distance has been resolved
+            return self._env.get_at(distance, name.lexeme)
+        else:
+            return self._globals.get(name)
 
     def _execute_block(
         self,

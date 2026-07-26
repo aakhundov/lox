@@ -15,6 +15,10 @@ _METADATA: dict[
     ],
 ] = {
     "Stmt": {
+        "Class": {
+            "name": "Token",
+            "methods": 'list["Function"]',
+        },
         "Function": {
             "name": "Token",
             "parameters": "list[Token]",
@@ -25,7 +29,7 @@ _METADATA: dict[
             "initializer": "'Expr | None'",
         },
         "For": {
-            "initializer": "Stmt | None",
+            "initializer": '"Var | Expression | None"',
             "condition": "'Expr | None'",
             "increment": "'Expr | None'",
             "body": "Stmt",
@@ -64,6 +68,11 @@ _METADATA: dict[
                 "distance": "int",
             },
         },
+        "Set": {
+            "object": "Expr",
+            "name": "Token",
+            "value": "Expr",
+        },
         "Conditional": {
             "condition": "Expr",
             "then_expression": "Expr",
@@ -88,8 +97,18 @@ _METADATA: dict[
             "paren": "Token",
             "arguments": "list[Expr]",
         },
+        "Get": {
+            "object": "Expr",
+            "name": "Token",
+        },
         "Literal": {
             "value": "LoxValue",
+        },
+        "This": {
+            "keyword": "Token",
+            "_meta": {
+                "distance": "int",
+            },
         },
         "Variable": {
             "name": "Token",

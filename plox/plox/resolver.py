@@ -5,6 +5,7 @@ from enum import Enum, auto
 from plox.ast import (
     Program,
     Stmt,
+    Class,
     Function,
     Var,
     For,
@@ -17,12 +18,15 @@ from plox.ast import (
     Expression,
     Expr,
     Assign,
+    Set,
     Conditional,
     Logical,
     Binary,
     Unary,
     Call,
+    Get,
     Literal,
+    This,
     Variable,
     Grouping,
 )
@@ -38,6 +42,11 @@ class LoopType(Enum):
 class FunctionType(Enum):
     FUNCTION = auto()
     METHOD = auto()
+    INIT = auto()
+
+
+class ClassType(Enum):
+    CLASS = auto()
 
 
 class Resolver(
@@ -51,6 +60,7 @@ class Resolver(
         self._errors: list[ResolverError] = []
         self._in_loop: list[LoopType] = []
         self._in_function: list[FunctionType] = []
+        self._in_class: list[ClassType] = []
 
     def resolve(self, program: Program) -> None:
         self._errors.clear()
@@ -61,9 +71,28 @@ class Resolver(
         assert not self._scopes
         assert not self._in_loop
         assert not self._in_function
+        assert not self._in_class
 
         if self._errors:
             raise ExceptionGroup("Resolver errors", self._errors)
+
+    def visit_class(self, s: Class) -> None:
+        self._declare(s.name)
+        self._define(s.name)
+
+        with self._class(ClassType.CLASS):
+            with self._scope() as scope:
+                assert scope is not None
+                # nested scope with `this` bound
+                scope["this"] = True
+
+                for method in s.methods:
+                    self._resolve_function(
+                        method,
+                        FunctionType.INIT
+                        if method.name.lexeme == "init"
+                        else FunctionType.METHOD,
+                    )
 
     def visit_function(self, s: Function) -> None:
         if len(s.parameters) > self._MAX_ARITY:
@@ -71,7 +100,7 @@ class Resolver(
 
         self._declare(s.name)
         self._define(s.name)
-        self._resolve_function(s)
+        self._resolve_function(s, FunctionType.FUNCTION)
 
     def visit_var(self, s: Var) -> None:
         self._declare(s.name)
@@ -111,6 +140,12 @@ class Resolver(
             )
 
         if s.value is not None:
+            if self._in_function and self._in_function[-1] == FunctionType.INIT:
+                self._error(
+                    "Can't return value from initializer",
+                    s.keyword,
+                )
+
             self._resolve(s.value)
 
     def visit_while(self, s: While) -> None:
@@ -137,6 +172,10 @@ class Resolver(
         self._resolve(e.value)
         self._resolve_local(e, e.name.lexeme)
 
+    def visit_set(self, e: Set) -> None:
+        self._resolve(e.object)
+        self._resolve(e.value)
+
     def visit_conditional(self, e: Conditional) -> None:
         self._resolve(e.condition)
         self._resolve(e.then_expression)
@@ -161,15 +200,24 @@ class Resolver(
         for arg in e.arguments:
             self._resolve(arg)
 
+    def visit_get(self, e: Get) -> None:
+        self._resolve(e.object)
+
     def visit_literal(self, e: Literal) -> None:
         pass
+
+    def visit_this(self, e: This) -> None:
+        if not self._in_class:
+            self._error("Can't use 'this' outside of class", e.keyword)
+        else:
+            self._resolve_local(e, e.keyword.lexeme)
 
     def visit_variable(self, e: Variable) -> None:
         name = e.name.lexeme
         if self._scopes and self._scopes[-1].get(name) is False:
             self._error("Can't read local variable in its own initializer", e.name)
-
-        self._resolve_local(e, name)
+        else:
+            self._resolve_local(e, name)
 
     def visit_grouping(self, e: Grouping) -> None:
         self._resolve(e.expression)
@@ -177,7 +225,7 @@ class Resolver(
     def _resolve(self, node: Expr | Stmt) -> None:
         node.accept(self)
 
-    def _resolve_local(self, e: Variable | Assign, name: str) -> None:
+    def _resolve_local(self, e: Variable | Assign | This, name: str) -> None:
         for distance, scope in enumerate(reversed(self._scopes)):
             if name in scope:
                 e.set_distance(distance)
@@ -190,14 +238,14 @@ class Resolver(
         for statement in block:
             self._resolve(statement)
 
-    def _resolve_function(self, s: Function) -> None:
+    def _resolve_function(self, s: Function, type_: FunctionType) -> None:
         with self._scope():
             for param in s.parameters:
                 # bind function parameters
                 self._declare(param)
                 self._define(param)
 
-            with self._function(FunctionType.FUNCTION):
+            with self._function(type_):
                 self._resolve_block(s.body)
 
     def _declare(self, name: Token) -> None:
@@ -218,15 +266,15 @@ class Resolver(
         self._scopes[-1][name.lexeme] = True
 
     @contextmanager
-    def _scope(self, *, enabled: bool = True) -> Generator[None]:
+    def _scope(self, *, enabled: bool = True) -> Generator[dict[str, bool] | None]:
         if not enabled:
             # when not enabled, this is a no op
-            yield
+            yield None
             return
 
         try:
             self._scopes.append({})
-            yield
+            yield self._scopes[-1]
         finally:
             self._scopes.pop()
 
@@ -248,6 +296,14 @@ class Resolver(
         finally:
             self._in_function.pop()
             self._in_loop = prev_in_loop  # restore loop
+
+    @contextmanager
+    def _class(self, type_: ClassType) -> Generator[None]:
+        try:
+            self._in_class.append(type_)
+            yield
+        finally:
+            self._in_class.pop()
 
     def _error(self, msg: str, token: Token) -> None:
         # all errors must be reported through this method

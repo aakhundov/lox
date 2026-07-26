@@ -2,8 +2,11 @@ import dataclasses
 
 import pytest
 
-from plox.ast import Assign, Expr, Stmt, Variable
+from plox.ast import Assign, Expr, Stmt, This, Variable
 from plox.resolver import Resolver, ResolverError
+
+# the node types the resolver writes a scope distance onto
+_RESOLVED = (Variable, Assign, This)
 
 
 def _walk(node):
@@ -19,6 +22,16 @@ def _walk(node):
         for item in value if isinstance(value, list) else [value]:
             if isinstance(item, (Expr, Stmt)):
                 yield from _walk(item)
+
+
+def _resolved_name(node):
+    """Give the name a resolved node was looked up under.
+
+    `this` is a keyword rather than an identifier, so `This` carries its lexeme
+    as `keyword` where `Variable`/`Assign` carry theirs as `name`. It resolves
+    through the same scope machinery either way, which is the point.
+    """
+    return (node.keyword if isinstance(node, This) else node.name).lexeme
 
 
 @pytest.fixture
@@ -40,19 +53,20 @@ def distances(resolve):
     """Return a helper listing each resolved name and its scope distance.
 
     Distances are what the resolver produces: they are written onto the
-    `Variable` and `Assign` nodes themselves, so the helper walks the resolved
-    tree and pairs every such node's lexeme with its distance, in traversal
-    order. `None` means the name was not found in any enclosing local scope and
-    is therefore assumed global. Declarations (`var a = 1;`, `fun f() {}`) are
-    not `Variable` nodes and so do not appear -- only *uses* of a name do.
+    `Variable`, `Assign` and `This` nodes themselves, so the helper walks the
+    resolved tree and pairs every such node's lexeme with its distance, in
+    traversal order. `None` means the name was not found in any enclosing local
+    scope and is therefore assumed global. Declarations (`var a = 1;`,
+    `fun f() {}`, `class A {}`) are not uses, so they do not appear -- only
+    *uses* of a name do.
     """
 
     def _distances(source):
         return [
-            (node.name.lexeme, node.get_distance())
+            (_resolved_name(node), node.get_distance())
             for statement in resolve(source)
             for node in _walk(statement)
-            if isinstance(node, (Variable, Assign))
+            if isinstance(node, _RESOLVED)
         ]
 
     return _distances
@@ -123,6 +137,58 @@ def test_block_distance(distances, source, expected):
     ],
 )
 def test_function_distance(distances, source, expected):
+    assert distances(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a method body sits inside an implicit scope holding `this`, so the
+        # parameter scope is distance 0 and `this` is one hop further out
+        ("class A { m() { print this; } }", [("this", 1)]),
+        ("class A { m(a) { print a; } }", [("a", 0)]),
+        # a block inside the body adds a hop to both
+        ("class A { m() { { print this; } } }", [("this", 2)]),
+        # the `this` scope wraps the whole class, but each method still gets
+        # its own parameter scope, so the distance is the same in every one
+        (
+            "class A { m() { print this; } n() { print this; } }",
+            [("this", 1), ("this", 1)],
+        ),
+        ("class A { m(a) { print a; } n(b) { print b; } }", [("a", 0), ("b", 0)]),
+        # a function declared inside a method closes over `this`, one hop
+        # further out again -- this is why a callback can still see its object
+        ("class A { m() { fun f() { print this; } } }", [("this", 2)]),
+        # a field access resolves the object, not the property name: `x` is
+        # looked up on the instance at runtime, so it has no scope distance
+        ("class A { m() { print this.x; } }", [("this", 1)]),
+        ("class A { init() { this.x = 1; } }", [("this", 1)]),
+    ],
+)
+def test_this_distance(distances, source, expected):
+    assert distances(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a class declared at the top level is a global like any other name
+        ("class A {} var a = A();", [("A", None)]),
+        # ...and a local one resolves to the scope it was declared in
+        ("{ class A {} var a = A(); }", [("A", 0)]),
+        # a method may name its own class: the declaration is complete before
+        # any method body runs, and it sits outside the `this` scope
+        ("{ class A { m() { return A; } } }", [("A", 2)]),
+        # an enclosing local reached from a method body crosses the parameter
+        # scope and the `this` scope
+        ("{ var g = 1; class A { m() { print g; } } }", [("g", 2)]),
+        # a global stays global however deep the method is
+        ("var g = 1; class A { m() { print g; } }", [("g", None)]),
+        # a parameter shadows an enclosing local of the same name
+        ("{ var a = 1; class A { m(a) { print a; } } }", [("a", 0)]),
+    ],
+)
+def test_class_name_distance(distances, source, expected):
     assert distances(source) == expected
 
 
@@ -290,6 +356,165 @@ def test_return_outside_function_error(
     ],
 )
 def test_return_allowed(resolve, source):
+    resolve(source)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # `this` only means something inside a method body, so it is rejected
+        # anywhere else, at the keyword itself
+        ("print this;", (1, 7)),
+        ("this;", (1, 1)),
+        ("{ print this; }", (1, 9)),
+        # a plain function is not a method, however it is later called
+        ("fun f() { print this; }", (1, 17)),
+        # a function declared inside a method is fine (it closes over `this`),
+        # but one declared outside is not, even next to a class
+        ("class A {} fun f() { return this; }", (1, 29)),
+        # accessing a property of `this` is still a use of `this`
+        ("print this.x;", (1, 7)),
+        ("this.x = 1;", (1, 1)),
+    ],
+)
+def test_this_outside_class_error(resolve_errors, error_position, source, position):
+    (error,) = resolve_errors(source)
+    assert str(error) == "Can't use 'this' outside of class"
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class A { m() { return this; } }",
+        # `this` is in scope for the whole class, not just one method
+        "class A { init() { this.x = 1; } get_() { return this.x; } }",
+        # a function declared inside a method closes over the method's `this`
+        "class A { m() { fun f() { return this; } } }",
+        # so does a nested class's method, over its own `this`
+        "class A { m() { class B { n() { return this; } } } }",
+        # `this` may appear anywhere an expression may
+        "class A { m() { if (this) print this; while (false) print this; } }",
+    ],
+)
+def test_this_allowed(resolve, source):
+    resolve(source)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # an initializer implicitly returns the new instance, so returning
+        # something else would silently do nothing -- reject it at the keyword
+        ("class A { init() { return 1; } }", (1, 20)),
+        ("class A { init() { return this; } }", (1, 20)),
+        # wherever in the initializer it appears
+        ("class A { init() { if (true) return 1; } }", (1, 30)),
+        ("class A { init() { while (true) return 1; } }", (1, 33)),
+        ("class A { init() { { return 1; } } }", (1, 22)),
+    ],
+)
+def test_return_value_from_initializer_error(
+    resolve_errors, error_position, source, position
+):
+    (error,) = resolve_errors(source)
+    assert str(error) == "Can't return value from initializer"
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # a bare `return` is how an initializer exits early, and is allowed
+        "class A { init() { return; } }",
+        "class A { init() { if (true) return; this.x = 1; } }",
+        # only `init` is an initializer; any other method returns normally
+        "class A { m() { return 1; } }",
+        # a function declared inside an initializer is not itself one
+        "class A { init() { fun f() { return 1; } } }",
+        # `init` is only special as a method name, not as a function's
+        "fun init() { return 1; }",
+        "class A { m() { fun init() { return 1; } } }",
+    ],
+)
+def test_return_in_initializer_allowed(resolve, source):
+    resolve(source)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # a method body is a function body: `return` is licensed inside it...
+        ("class A { m() { break; } }", "break allowed only inside loop body", (1, 17)),
+        # ...and it starts a fresh loop context, so an enclosing loop does not
+        # license a jump inside a method declared within it
+        (
+            "while (true) { class A { m() { break; } } }",
+            "break allowed only inside loop body",
+            (1, 32),
+        ),
+        (
+            "for (;;) { class A { m() { continue; } } }",
+            "continue allowed only inside loop body",
+            (1, 28),
+        ),
+    ],
+)
+def test_method_body_is_a_function_context(
+    resolve_errors, error_position, source, message, position
+):
+    (error,) = resolve_errors(source)
+    assert str(error) == message
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # `return` needs a function body, and a method body is one
+        "class A { m() { return 1; } }",
+        # a loop inside a method licenses jumps normally
+        "class A { m() { while (true) break; } }",
+        # the enclosing loop context is restored after the class declaration
+        "while (true) { class A { m() {} } break; }",
+    ],
+)
+def test_method_body_allowed(resolve, source):
+    resolve(source)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # a class binds its name in the enclosing scope, so it collides there
+        # exactly like a `var` or a `fun` does
+        ("{ class A {} class A {} }", (1, 20)),
+        ("{ var A = 1; class A {} }", (1, 20)),
+        ("{ class A {} fun A() {} }", (1, 18)),
+        ("fun f(A) { class A {} }", (1, 18)),
+    ],
+)
+def test_duplicate_class_declaration_error(
+    resolve_errors, error_position, source, position
+):
+    (error,) = resolve_errors(source)
+    assert str(error) == "Already a variable with this name in this scope"
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # redeclaration is allowed at the top level, as for every declaration
+        "class A {} class A {}",
+        # sibling and nested scopes are separate
+        "{ class A {} } { class A {} }",
+        "{ class A {} { class A {} } }",
+        # a method's parameters are its own scope, so they may shadow the class
+        "{ class A { m(A) { return A; } } }",
+    ],
+)
+def test_class_redeclaration_allowed(resolve, source):
     resolve(source)  # must not raise
 
 
