@@ -3,9 +3,7 @@ import dataclasses
 import pytest
 
 from plox.ast import Assign, Expr, Stmt, Variable
-from plox.parser import Parser
 from plox.resolver import Resolver, ResolverError
-from plox.scanner import Scanner
 
 
 def _walk(node):
@@ -24,17 +22,15 @@ def _walk(node):
 
 
 @pytest.fixture
-def resolve():
-    """Return a helper that scans, parses and resolves `source`.
+def resolve(resolve_program):
+    """Return a helper that resolves `source` into a tuple of Stmt.
 
-    Driving the resolver through the real Scanner and Parser mirrors the actual
-    pipeline and keeps expectations free of hand-built AST details.
+    The pipeline hands back a `Program`; the tests walk the statements in it,
+    so the helper unwraps it.
     """
 
     def _resolve(source):
-        program = Parser(Scanner(source).scan()).parse()
-        Resolver().resolve(program)
-        return program.statements
+        return resolve_program(source).statements
 
     return _resolve
 
@@ -62,35 +58,16 @@ def distances(resolve):
     return _distances
 
 
-def error_position(error):
-    """Return the single source position `error` points at.
-
-    `get_line_info` yields one (line, col) pair per reported position -- the
-    interpreter reports a whole call stack that way. A resolver error has no
-    stack behind it, so the unpack doubles as a check that there is exactly one.
-    """
-    (position,) = error.get_line_info()
-    return position
-
-
 @pytest.fixture
-def resolve_errors(resolve):
+def resolve_errors(collect_errors, resolve):
     """Return a helper that resolves `source` expecting failure.
 
-    The resolver reports every error it finds by raising a single
-    ExceptionGroup; this unwraps it into the flat list of ResolverErrors, in
-    source order.
+    The resolver keeps going after each error it finds, so a single source can
+    yield several.
     """
 
     def _resolve_errors(source):
-        with pytest.raises(ExceptionGroup) as excinfo:
-            resolve(source)
-
-        errors: list[ResolverError] = []
-        for error in excinfo.value.exceptions:
-            assert isinstance(error, ResolverError)  # flat: no nested groups
-            errors.append(error)
-        return errors
+        return collect_errors(ResolverError, resolve, source)
 
     return _resolve_errors
 
@@ -216,7 +193,9 @@ def test_for_loop_distance(distances, source, expected):
         ("fun a() {} { var a = a(); }", (1, 22)),
     ],
 )
-def test_self_reference_in_initializer_error(resolve_errors, source, position):
+def test_self_reference_in_initializer_error(
+    resolve_errors, error_position, source, position
+):
     (error,) = resolve_errors(source)
     assert str(error) == "Can't read local variable in its own initializer"
     assert error_position(error) == position
@@ -253,7 +232,7 @@ def test_self_reference_allowed(resolve, source):
         ("fun f(a) { var a = 1; }", (1, 16)),
     ],
 )
-def test_duplicate_declaration_error(resolve_errors, source, position):
+def test_duplicate_declaration_error(resolve_errors, error_position, source, position):
     (error,) = resolve_errors(source)
     assert str(error) == "Already a variable with this name in this scope"
     assert error_position(error) == position
@@ -292,7 +271,9 @@ def test_redeclaration_allowed(resolve, source):
         ("while (true) return 1;", (1, 14)),
     ],
 )
-def test_return_outside_function_error(resolve_errors, source, position):
+def test_return_outside_function_error(
+    resolve_errors, error_position, source, position
+):
     (error,) = resolve_errors(source)
     assert str(error) == "return allowed only inside function body"
     assert error_position(error) == position
@@ -339,7 +320,9 @@ def test_return_allowed(resolve, source):
         ("fun f() { break; }", "break allowed only inside loop body", (1, 11)),
     ],
 )
-def test_loop_jump_outside_loop_error(resolve_errors, source, message, position):
+def test_loop_jump_outside_loop_error(
+    resolve_errors, error_position, source, message, position
+):
     (error,) = resolve_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -386,7 +369,7 @@ def test_max_arguments(resolve, resolve_errors, count):
     assert str(error) == f"Max {Resolver._MAX_ARITY} arguments allowed"
 
 
-def test_multiple_errors(resolve_errors):
+def test_multiple_errors(resolve_errors, error_position):
     # every error is collected in one pass, in source order, rather than
     # reporting only the first one
     errors = resolve_errors("{ var a = 1; var a = 2; var b = b; }")
@@ -397,14 +380,15 @@ def test_multiple_errors(resolve_errors):
     assert [error_position(e) for e in errors] == [(1, 18), (1, 33)]
 
 
-def test_resolver_can_be_reused(resolve):
+def test_resolver_can_be_reused(parse_program):
     # `resolve` clears its scope stack and collected errors per call, so a
-    # failed resolution does not leak into the next one
+    # failed resolution does not leak into the next one. The one Resolver is
+    # driven by hand here: the `resolve` fixture makes a fresh one per call.
     resolver = Resolver()
     with pytest.raises(ExceptionGroup):
-        resolver.resolve(Parser(Scanner("{ var a = 1; var a = 2; }").scan()).parse())
+        resolver.resolve(parse_program("{ var a = 1; var a = 2; }"))
 
-    program = Parser(Scanner("{ var b = 1; print b; }").scan()).parse()
+    program = parse_program("{ var b = 1; print b; }")
     resolver.resolve(program)  # must not raise
     assert [
         node.get_distance()

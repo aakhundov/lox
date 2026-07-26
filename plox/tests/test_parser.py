@@ -2,55 +2,33 @@ import pytest
 
 from plox.ast import Expression
 from plox.ast_printer import AstPrinter
-from plox.parser import Parser, ParserError
-from plox.scanner import Scanner
+from plox.parser import ParserError
 
 
 @pytest.fixture
-def parse():
-    """Return a helper that scans then parses `source` into a tuple of Stmt.
+def parse(parse_program):
+    """Return a helper that parses `source` into a tuple of Stmt.
 
-    Driving the parser through the real Scanner mirrors how it is used in
-    practice and keeps expectations free of token-construction details. The
-    parser hands back a `Program`; the tests are about the statements in it,
-    so the helper unwraps it.
+    The parser hands back a `Program`; the tests are about the statements in
+    it, so the helper unwraps it.
     """
 
     def _parse(source):
-        return Parser(Scanner(source).scan()).parse().statements
+        return parse_program(source).statements
 
     return _parse
 
 
-def error_position(error):
-    """Return the single source position `error` points at.
-
-    `get_line_info` yields one (line, col) pair per reported position -- the
-    interpreter reports a whole call stack that way. A parser error has no
-    stack behind it, so the unpack doubles as a check that there is exactly one.
-    """
-    (position,) = error.get_line_info()
-    return position
-
-
 @pytest.fixture
-def parse_errors(parse):
+def parse_errors(collect_errors, parse):
     """Return a helper that parses `source` expecting failure.
 
-    The parser recovers from each error and reports them all by raising a
-    single ExceptionGroup; this unwraps it into the flat list of
-    ParserErrors, in source order.
+    The parser recovers from each error and carries on, so a single source can
+    yield several.
     """
 
     def _parse_errors(source):
-        with pytest.raises(ExceptionGroup) as excinfo:
-            parse(source)
-
-        errors: list[ParserError] = []
-        for error in excinfo.value.exceptions:
-            assert isinstance(error, ParserError)  # flat: no nested groups
-            errors.append(error)
-        return errors
+        return collect_errors(ParserError, parse, source)
 
     return _parse_errors
 
@@ -326,7 +304,7 @@ def test_conditional(show_expr, source, expected):
         ("a ? b c;", (1, 7)),
     ],
 )
-def test_conditional_error(parse_errors, source, position):
+def test_conditional_error(parse_errors, error_position, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Expect ':' to match ?"
     assert error_position(error) == position
@@ -473,7 +451,7 @@ def test_if_statement(show_one, source, expected):
         ("if (true print 1;", "Expect ')' after if condition", (1, 10)),
     ],
 )
-def test_if_error(parse_errors, source, message, position):
+def test_if_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -501,7 +479,7 @@ def test_while_statement(show_one, source, expected):
         ("while (true print 1;", "Expect ')' after while condition", (1, 13)),
     ],
 )
-def test_while_error(parse_errors, source, message, position):
+def test_while_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -554,7 +532,7 @@ def test_for_statement(show_one, source, expected):
         ),
     ],
 )
-def test_for_error(parse_errors, source, message, position):
+def test_for_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -591,7 +569,7 @@ def test_loop_jump_statement(show_one, source, expected):
         ("while (true) continue", "Expect ';' after continue", (1, 22)),
     ],
 )
-def test_loop_jump_error(parse_errors, source, message, position):
+def test_loop_jump_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -636,7 +614,7 @@ def test_function_declaration(show_one, source, expected):
         ("fun f() ;", "Expect '{' before function body", (1, 9)),
     ],
 )
-def test_function_error(parse_errors, source, message, position):
+def test_function_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -673,7 +651,7 @@ def test_return_statement(show_one, source, expected):
         ("fun f() { return 1 }", "Expect ';' after return value", (1, 20)),
     ],
 )
-def test_return_error(parse_errors, source, message, position):
+def test_return_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -716,7 +694,7 @@ def test_call_expression(show_expr, source, expected):
         ("f(1,);", "Expect expression", (1, 5)),
     ],
 )
-def test_call_error(parse_errors, source, message, position):
+def test_call_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -757,7 +735,7 @@ def test_call_error(parse_errors, source, message, position):
         ("a ? b : ;", (1, 9)),
     ],
 )
-def test_expected_expression_error(parse_errors, source, position):
+def test_expected_expression_error(parse_errors, error_position, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Expect expression"
     assert error_position(error) == position
@@ -774,7 +752,7 @@ def test_expected_expression_error(parse_errors, source, position):
         ("(1 2)", (1, 4)),
     ],
 )
-def test_missing_closing_paren_error(parse_errors, source, position):
+def test_missing_closing_paren_error(parse_errors, error_position, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Expect ')' after expression"
     assert error_position(error) == position
@@ -792,7 +770,7 @@ def test_missing_closing_paren_error(parse_errors, source, position):
         ("print 1 2", "Expect ';' after values", (1, 9)),
     ],
 )
-def test_missing_semicolon_error(parse_errors, source, message, position):
+def test_missing_semicolon_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -809,7 +787,7 @@ def test_missing_semicolon_error(parse_errors, source, message, position):
         ("var x 1;", "Expect ';' after variable declaration", (1, 7)),
     ],
 )
-def test_var_declaration_error(parse_errors, source, message, position):
+def test_var_declaration_error(parse_errors, error_position, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -825,7 +803,7 @@ def test_var_declaration_error(parse_errors, source, message, position):
         ("a + b = c;", (1, 7)),
     ],
 )
-def test_invalid_assignment_target_error(parse_errors, source, position):
+def test_invalid_assignment_target_error(parse_errors, error_position, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Invalid assignment target"
     assert error_position(error) == position
@@ -840,7 +818,7 @@ def test_invalid_assignment_target_error(parse_errors, source, position):
         ("{ var x = 1;", (1, 13)),
     ],
 )
-def test_missing_closing_brace_error(parse_errors, source, position):
+def test_missing_closing_brace_error(parse_errors, error_position, source, position):
     (error,) = parse_errors(source)
     assert str(error) == "Expect '}' after block"
     assert error_position(error) == position
@@ -895,6 +873,6 @@ def test_missing_closing_brace_error(parse_errors, source, position):
         ),
     ],
 )
-def test_multiple_errors(parse_errors, source, expected):
+def test_multiple_errors(parse_errors, error_position, source, expected):
     errors = parse_errors(source)
     assert [(str(e), error_position(e)) for e in errors] == expected

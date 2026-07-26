@@ -8,32 +8,14 @@ from plox.scanner import Scanner, ScannerError
 EOF = (TT.EOF, "", None)
 
 
-def scan_errors(source):
-    """Scan `source`, expecting failure, and return the collected errors.
+@pytest.fixture
+def scan_errors(collect_errors):
+    """Return a helper that scans `source` expecting failure."""
 
-    The scanner reports every error it finds by raising a single
-    ExceptionGroup at the end; this unwraps it into the flat list of
-    ScannerErrors, in source order.
-    """
-    with pytest.raises(ExceptionGroup) as excinfo:
-        Scanner(source).scan()
+    def _scan_errors(source):
+        return collect_errors(ScannerError, Scanner(source).scan)
 
-    errors: list[ScannerError] = []
-    for error in excinfo.value.exceptions:
-        assert isinstance(error, ScannerError)  # flat: no nested groups
-        errors.append(error)
-    return errors
-
-
-def error_position(error):
-    """Return the single source position `error` points at.
-
-    `get_line_info` yields one (line, col) pair per reported position -- the
-    interpreter reports a whole call stack that way. A scanner error has no
-    stack behind it, so the unpack doubles as a check that there is exactly one.
-    """
-    (line_pos,) = error.get_line_info()
-    return line_pos
+    return _scan_errors
 
 
 @pytest.fixture
@@ -491,7 +473,7 @@ def test_eof_position(source, position):
         ("foo\n  ^", "^", (2, 3)),
     ],
 )
-def test_unexpected_character(source, char, position):
+def test_unexpected_character(scan_errors, error_position, source, char, position):
     (error,) = scan_errors(source)
     assert str(error) == f"Unexpected character: '{char}'"
     assert error_position(error) == position
@@ -504,7 +486,7 @@ def test_unexpected_character(source, char, position):
         ('foo\n"bar', (2, 1)),
     ],
 )
-def test_unterminated_string(source, position):
+def test_unterminated_string(scan_errors, error_position, source, position):
     (error,) = scan_errors(source)
     assert str(error) == "Unterminated string"
     assert error_position(error) == position
@@ -520,7 +502,7 @@ def test_unterminated_string(source, position):
         ("/* outer /* inner", (1, 1)),
     ],
 )
-def test_unterminated_block_comment(source, position):
+def test_unterminated_block_comment(scan_errors, error_position, source, position):
     (error,) = scan_errors(source)
     assert str(error) == "Unterminated comment"
     assert error_position(error) == position
@@ -556,6 +538,6 @@ def test_unterminated_block_comment(source, position):
         ),
     ],
 )
-def test_multiple_errors(source, expected):
+def test_multiple_errors(scan_errors, error_position, source, expected):
     errors = scan_errors(source)
     assert [(str(e), error_position(e)) for e in errors] == expected

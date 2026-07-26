@@ -5,18 +5,6 @@ from plox.environment import Environment
 from plox.errors import InterpreterError
 
 
-def error_position(error):
-    """Return the single source position `error` points at.
-
-    `get_line_info` yields one (line, col) pair per reported position -- the
-    interpreter reports a whole call stack that way. An environment lookup
-    knows only the token it was handed, so the unpack doubles as a check that
-    there is exactly one; the call frames are appended as the error propagates.
-    """
-    (position,) = error.get_line_info()
-    return position
-
-
 def name(lexeme, line=1, col=1):
     """Build an identifier token carrying a source position.
 
@@ -47,7 +35,7 @@ def test_redefine_overwrites_in_same_scope():
     assert env.get(name("x")) == 2.0
 
 
-def test_get_undefined_raises_at_token():
+def test_get_undefined_raises_at_token(error_position):
     env = Environment()
     with pytest.raises(InterpreterError) as excinfo:
         env.get(name("x", line=3, col=7))
@@ -62,7 +50,7 @@ def test_assign_updates_existing():
     assert env.get(name("x")) == 2.0
 
 
-def test_assign_undefined_raises_at_token():
+def test_assign_undefined_raises_at_token(error_position):
     env = Environment()
     with pytest.raises(InterpreterError) as excinfo:
         env.assign(name("x", line=4, col=2), 1.0)

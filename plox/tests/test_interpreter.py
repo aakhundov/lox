@@ -3,42 +3,10 @@ import pytest
 from plox.common import LoxCallable, LoxValue
 from plox.interpreter import Interpreter, InterpreterError
 from plox.library import get_library
-from plox.parser import Parser
-from plox.resolver import Resolver
-from plox.scanner import Scanner
-
-
-def _resolved(source):
-    """Scan, parse and resolve `source` into a Program ready to interpret.
-
-    The interpreter only ever runs resolved ASTs: an unresolved `Variable` or
-    `Assign` carries no distance, which the interpreter reads as "this is a
-    global". Driving the real Resolver here mirrors the actual pipeline.
-    """
-    program = Parser(Scanner(source).scan()).parse()
-    Resolver().resolve(program)
-    return program
-
-
-def error_position(error):
-    """Return the single source position `error` points at.
-
-    `get_line_info` yields one (line, col) pair per stack frame, outermost
-    first. Every error here is raised outside any call, so the unpack doubles
-    as a check that there is exactly one frame; `error_stack` covers the cases
-    that do unwind through calls.
-    """
-    (position,) = error.get_line_info()
-    return position
-
-
-def error_stack(error):
-    """Return every source position `error` points at, outermost call first."""
-    return list(error.get_line_info())
 
 
 @pytest.fixture
-def run():
+def run(resolve_program):
     """Return a helper that runs `source`, collecting the values it prints.
 
     The interpreter's `print_fn` seam is tapped with a raw collector, so each
@@ -46,11 +14,15 @@ def run():
     group). Operating at the Python-implementation level lets tests observe the
     actual runtime values rather than their rendered text. A fresh interpreter
     runs each source, so no state leaks between cases.
+
+    The interpreter only ever runs resolved ASTs: an unresolved `Variable` or
+    `Assign` carries no distance, which the interpreter reads as "this is a
+    global", so the source goes through the whole pipeline first.
     """
 
     def _run(source):
         collected: list[list[LoxValue]] = []
-        Interpreter(print_fn=collected.append).interpret(_resolved(source))
+        Interpreter(print_fn=collected.append).interpret(resolve_program(source))
         return collected
 
     return _run
@@ -481,7 +453,7 @@ def test_for_statement(run, source, expected):
     assert run(source) == expected
 
 
-def test_for_initializer_scope(run):
+def test_for_initializer_scope(run, error_position):
     # a `var` initializer is scoped to the loop and does not leak past it
     with pytest.raises(InterpreterError) as excinfo:
         run("for (var i = 0; i < 1; i = i + 1) print i; print i;")
@@ -785,7 +757,7 @@ def test_native_functions_are_callable(run, value):
         ("clock(1);", "Expected 0 arguments but got 1", (1, 6)),
     ],
 )
-def test_call_arity_error(run, source, message, position):
+def test_call_arity_error(run, error_position, source, message, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == message
@@ -816,7 +788,7 @@ def test_call_arity_error(run, source, message, position):
         ),
     ],
 )
-def test_native_argument_error(run, source, message, position):
+def test_native_argument_error(run, error_position, source, message, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == message
@@ -834,7 +806,7 @@ def test_native_argument_error(run, source, message, position):
         ("(1 + 2)();", (1, 8)),
     ],
 )
-def test_not_callable_error(run, source, position):
+def test_not_callable_error(run, error_position, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Can only call functions and methods"
@@ -875,7 +847,7 @@ def test_not_callable_error(run, source, position):
         ),
     ],
 )
-def test_error_stack(run, source, expected):
+def test_error_stack(run, error_stack, source, expected):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert error_stack(excinfo.value) == expected
@@ -915,8 +887,8 @@ def test_print_grouping(run, source, expected):
         ("print 1; print 2;", "1\n2\n"),
     ],
 )
-def test_default_print_output(capsys, source, expected):
-    Interpreter().interpret(_resolved(source))
+def test_default_print_output(capsys, resolve_program, source, expected):
+    Interpreter().interpret(resolve_program(source))
     assert capsys.readouterr().out == expected
 
 
@@ -931,7 +903,7 @@ def test_default_print_output(capsys, source, expected):
         ("nil + 2;", (1, 5)),
     ],
 )
-def test_plus_operand_error(run, source, position):
+def test_plus_operand_error(run, error_position, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Operands must both be number or string"
@@ -949,7 +921,7 @@ def test_plus_operand_error(run, source, position):
         ("nil * 2;", "Left operand must be a number", (1, 5)),
     ],
 )
-def test_arithmetic_operand_error(run, source, message, position):
+def test_arithmetic_operand_error(run, error_position, source, message, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == message
@@ -970,7 +942,7 @@ def test_arithmetic_operand_error(run, source, message, position):
         ("nil > nil;", (1, 5)),
     ],
 )
-def test_comparison_operand_error(run, source, position):
+def test_comparison_operand_error(run, error_position, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Operands must both be number or string"
@@ -986,7 +958,7 @@ def test_comparison_operand_error(run, source, position):
         ("1 / (2 - 2);", (1, 3)),
     ],
 )
-def test_division_by_zero_error(run, source, position):
+def test_division_by_zero_error(run, error_position, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Division by zero"
@@ -1003,7 +975,7 @@ def test_division_by_zero_error(run, source, position):
         ('-"a";', (1, 1)),
     ],
 )
-def test_unary_negation_error(run, source, position):
+def test_unary_negation_error(run, error_position, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Operand must be a number"
@@ -1021,7 +993,7 @@ def test_unary_negation_error(run, source, position):
         ("{ var x = 1; } print x;", (1, 22)),
     ],
 )
-def test_undefined_variable_error(run, source, position):
+def test_undefined_variable_error(run, error_position, source, position):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert str(excinfo.value) == "Undefined variable: x"
