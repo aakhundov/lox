@@ -28,19 +28,13 @@ from plox.common import Token, TokenType as TT, ParserError
 
 
 class Parser:
-    _MAX_ARITY = 255
-
     def __init__(self, tokens: list[Token]) -> None:
         self._tokens = tokens
         self._current = 0
-        self._loop_depth = 0
-        self._fn_depth = 0
         self._errors: list[ParserError] = []
 
     def parse(self) -> list[Stmt]:
         self._current = 0
-        self._loop_depth = 0
-        self._fn_depth = 0
         self._errors.clear()
 
         statements: list[Stmt] = []
@@ -83,9 +77,6 @@ class Parser:
                 )
             )
             while self._match(TT.COMMA):
-                # check == to report one error per function
-                if len(parameters) == self._MAX_ARITY:
-                    self._error(f"Max {self._MAX_ARITY} parameters allowed")
                 parameters.append(
                     self._consume(
                         TT.IDENTIFIER,
@@ -102,14 +93,7 @@ class Parser:
             f"Expect '{{' before {kind} body",
         )
 
-        prev_loop_depth = self._loop_depth
-        try:
-            self._fn_depth += 1
-            self._loop_depth = 0  # reset inside a function
-            body = self._parse_block()
-        finally:
-            self._fn_depth -= 1
-            self._loop_depth = prev_loop_depth  # restore
+        body = self._parse_block()
 
         return Function(name, parameters, body)
 
@@ -179,11 +163,7 @@ class Parser:
             "Expect ')' after for clauses",
         )
 
-        try:
-            self._loop_depth += 1
-            body = self._statement()
-        finally:
-            self._loop_depth -= 1
+        body = self._statement()
 
         return For(initializer, condition, increment, body)
 
@@ -220,9 +200,6 @@ class Parser:
     def _return(self) -> Stmt:
         keyword = self._previous()
 
-        if self._fn_depth < 1:
-            self._raise("return allowed only inside function body", keyword)
-
         value = None
         if not self._check(TT.SEMICOLON):
             value = self._expression()
@@ -247,20 +224,13 @@ class Parser:
             "Expect ')' after while condition",
         )
 
-        try:
-            self._loop_depth += 1
-            body = self._statement()
-        finally:
-            self._loop_depth -= 1
+        body = self._statement()
 
         return While(condition, body)
 
     def _loop_jump(self) -> Stmt:
         keyword = self._previous()
         kw = keyword.type.name.lower()
-
-        if self._loop_depth < 1:
-            self._raise(f"{kw} allowed only inside loop body", keyword)
 
         self._consume(
             TT.SEMICOLON,
@@ -420,9 +390,6 @@ class Parser:
         if not self._check(TT.RIGHT_PAREN):
             arguments.append(self._expression())  # first arg
             while self._match(TT.COMMA):
-                # check == to report one error per call
-                if len(arguments) == self._MAX_ARITY:
-                    self._error(f"Max {self._MAX_ARITY} arguments allowed")
                 arguments.append(self._expression())  # more args
 
         paren = self._consume(

@@ -573,13 +573,6 @@ def test_loop_jump_statement(show_one, source, expected):
 @pytest.mark.parametrize(
     "source, message, position",
     [
-        # a jump outside any loop body is rejected, at the keyword itself
-        ("break;", "break allowed only inside loop body", (1, 1)),
-        ("continue;", "continue allowed only inside loop body", (1, 1)),
-        # an enclosing `if` is not a loop
-        ("if (true) break;", "break allowed only inside loop body", (1, 11)),
-        # the loop has already ended by the time the jump is reached
-        ("while (true) {} break;", "break allowed only inside loop body", (1, 17)),
         # the jump must be terminated by ';'
         ("while (true) break", "Expect ';' after break", (1, 19)),
         ("while (true) continue", "Expect ';' after continue", (1, 22)),
@@ -663,15 +656,6 @@ def test_return_statement(show_one, source, expected):
 @pytest.mark.parametrize(
     "source, message, position",
     [
-        # `return` outside any function body is rejected, at the keyword itself
-        ("return;", "return allowed only inside function body", (1, 1)),
-        ("return 1;", "return allowed only inside function body", (1, 1)),
-        # a loop is not a function body
-        (
-            "while (true) return 1;",
-            "return allowed only inside function body",
-            (1, 14),
-        ),
         # the value must be terminated by ';'
         ("fun f() { return 1 }", "Expect ';' after return value", (1, 20)),
     ],
@@ -723,79 +707,6 @@ def test_call_error(parse_errors, source, message, position):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error.get_line_info() == position
-
-
-@pytest.mark.parametrize(
-    "source, message, position",
-    [
-        # a function body starts a fresh loop scope: an enclosing loop does
-        # not license a jump inside a function declared within it, because at
-        # runtime the jump would unwind out of the call into the caller's loop
-        (
-            "while (true) { fun f() { break; } }",
-            "break allowed only inside loop body",
-            (1, 26),
-        ),
-        (
-            "for (;;) { fun f() { continue; } }",
-            "continue allowed only inside loop body",
-            (1, 22),
-        ),
-        # the same holds without any enclosing loop at all
-        ("fun f() { break; }", "break allowed only inside loop body", (1, 11)),
-    ],
-)
-def test_function_resets_loop_scope(parse_errors, source, message, position):
-    # recovery resumes mid-block and trips over the closing brace, so a
-    # trailing cascade error follows; only the first one is the real report
-    error = parse_errors(source)[0]
-    assert str(error) == message
-    assert error.get_line_info() == position
-
-
-@pytest.mark.parametrize(
-    "source, expected",
-    [
-        # the enclosing loop scope is restored after the function body, so a
-        # jump following the declaration is still valid
-        (
-            "while (true) { fun f() { var x = 1; } break; }",
-            "(while true (blk (fun f () (var x 1)) (break)))",
-        ),
-        # a loop inside a function body licenses jumps normally
-        (
-            "fun f() { for (;;) continue; }",
-            "(fun f () (for nil nil nil (continue)))",
-        ),
-    ],
-)
-def test_function_restores_loop_scope(show_one, source, expected):
-    assert show_one(source) == expected
-
-
-@pytest.mark.parametrize("count", [Parser._MAX_ARITY, Parser._MAX_ARITY + 1])
-def test_max_parameters(parse, parse_errors, count):
-    # the limit is on the count itself, so exactly _MAX_ARITY is still legal
-    params = ", ".join(f"p{i}" for i in range(count))
-    source = f"fun f({params}) {{}}"
-    if count <= Parser._MAX_ARITY:
-        assert parse(source)
-        return
-    # over the limit reports once per function, not once per excess parameter
-    (error,) = parse_errors(source)
-    assert str(error) == f"Max {Parser._MAX_ARITY} parameters allowed"
-
-
-@pytest.mark.parametrize("count", [Parser._MAX_ARITY, Parser._MAX_ARITY + 1])
-def test_max_arguments(parse, parse_errors, count):
-    args = ", ".join(str(i) for i in range(count))
-    source = f"f({args});"
-    if count <= Parser._MAX_ARITY:
-        assert parse(source)
-        return
-    # likewise reported once per call site
-    (error,) = parse_errors(source)
-    assert str(error) == f"Max {Parser._MAX_ARITY} arguments allowed"
 
 
 @pytest.mark.parametrize(

@@ -271,6 +271,110 @@ def test_redeclaration_allowed(resolve, source):
     resolve(source)  # must not raise
 
 
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # `return` outside any function body is rejected, at the keyword itself
+        ("return;", (1, 1)),
+        ("return 1;", (1, 1)),
+        # a loop is not a function body
+        ("while (true) return 1;", (1, 14)),
+    ],
+)
+def test_return_outside_function_error(resolve_errors, source, position):
+    (error,) = resolve_errors(source)
+    assert str(error) == "return allowed only inside function body"
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "fun f() { return; }",
+        # each function body is its own context, and the inner one ends with it
+        "fun f() { fun g() { return 1; } return 2; }",
+        # a loop inside the body does not displace the enclosing function
+        "fun f() { while (true) { return 1; } }",
+    ],
+)
+def test_return_allowed(resolve, source):
+    resolve(source)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # a jump outside any loop body is rejected, at the keyword itself
+        ("break;", "break allowed only inside loop body", (1, 1)),
+        ("continue;", "continue allowed only inside loop body", (1, 1)),
+        # an enclosing `if` is not a loop
+        ("if (true) break;", "break allowed only inside loop body", (1, 11)),
+        # the loop has already ended by the time the jump is reached
+        ("while (true) {} break;", "break allowed only inside loop body", (1, 17)),
+        # a function body starts a fresh loop context: an enclosing loop does
+        # not license a jump inside a function declared within it, because at
+        # runtime the jump would unwind out of the call into the caller's loop
+        (
+            "while (true) { fun f() { break; } }",
+            "break allowed only inside loop body",
+            (1, 26),
+        ),
+        (
+            "for (;;) { fun f() { continue; } }",
+            "continue allowed only inside loop body",
+            (1, 22),
+        ),
+        # the same holds without any enclosing loop at all
+        ("fun f() { break; }", "break allowed only inside loop body", (1, 11)),
+    ],
+)
+def test_loop_jump_outside_loop_error(resolve_errors, source, message, position):
+    (error,) = resolve_errors(source)
+    assert str(error) == message
+    assert error.get_line_info() == position
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "while (true) break;",
+        "for (;;) continue;",
+        # the enclosing loop context is restored after the function body, so a
+        # jump following the declaration is still valid
+        "while (true) { fun f() { var x = 1; } break; }",
+        # a loop inside a function body licenses jumps normally
+        "fun f() { for (;;) continue; }",
+    ],
+)
+def test_loop_jump_allowed(resolve, source):
+    resolve(source)  # must not raise
+
+
+@pytest.mark.parametrize("count", [Resolver._MAX_ARITY, Resolver._MAX_ARITY + 1])
+def test_max_parameters(resolve, resolve_errors, count):
+    # the limit is on the count itself, so exactly _MAX_ARITY is still legal
+    params = ", ".join(f"p{i}" for i in range(count))
+    source = f"fun f({params}) {{}}"
+    if count <= Resolver._MAX_ARITY:
+        assert resolve(source)
+        return
+    # over the limit reports once per function, not once per excess parameter
+    (error,) = resolve_errors(source)
+    assert str(error) == f"Max {Resolver._MAX_ARITY} parameters allowed"
+
+
+@pytest.mark.parametrize("count", [Resolver._MAX_ARITY, Resolver._MAX_ARITY + 1])
+def test_max_arguments(resolve, resolve_errors, count):
+    args = ", ".join(str(i) for i in range(count))
+    source = f"f({args});"
+    if count <= Resolver._MAX_ARITY:
+        assert resolve(source)
+        return
+    # likewise reported once per call site
+    (error,) = resolve_errors(source)
+    assert str(error) == f"Max {Resolver._MAX_ARITY} arguments allowed"
+
+
 def test_multiple_errors(resolve_errors):
     # every error is collected in one pass, in source order, rather than
     # reporting only the first one
