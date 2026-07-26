@@ -854,6 +854,91 @@ def test_error_stack(run, error_stack, source, expected):
 
 
 @pytest.mark.parametrize(
+    "source",
+    [
+        # a function calling itself with no base case
+        "fun f() { f(); } f();",
+        # a base case the recursion moves away from instead of towards
+        "fun f(n) { if (n > 0) return 0; return f(n - 1); } f(0);",
+        # two functions calling each other
+        "fun a() { b(); } fun b() { a(); } a();",
+        # the function reached through a variable holding it
+        "fun f() { var g = f; g(); } f();",
+        # the recursive call sitting in argument position
+        "fun f(x) { return f(x); } f(1);",
+        # a local function recursing on its own name
+        "fun outer() { fun inner() { inner(); } inner(); } outer();",
+        # nested blocks in the body: they consume interpreter stack of their
+        # own, so how many Lox calls fit is a property of the body's shape
+        "fun f() { { { { f(); } } } } f();",
+    ],
+)
+def test_recursion_depth_error(run, source):
+    # Lox calls recurse on the stack the interpreter itself runs on, so
+    # unbounded recursion exhausts it. That is reported as an ordinary runtime
+    # error: expecting an InterpreterError *is* the assertion here, since a
+    # Python RecursionError escaping the interpreter would fail the test.
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == "Maximum recursion depth exceeded"
+
+
+def test_recursion_depth_error_stack(run, error_stack):
+    # the error unwinds through every activation, so it carries the top-level
+    # call first and then one frame per recursive call. How many frames that is
+    # depends on the Python stack still available, so only their positions are
+    # asserted: the recursion is what the trace is made of.
+    with pytest.raises(InterpreterError) as excinfo:
+        run("fun f() { f(); } f();")
+    stack = error_stack(excinfo.value)
+    assert stack[0] == (1, 19)
+    assert set(stack[1:]) == {(1, 12)}
+    assert len(stack) > 2
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # recursion that terminates is unaffected, however deep it nests: only
+        # exhausting the stack is an error, not recursing far
+        ("fun f(n) { if (n <= 0) return 0; return f(n - 1) + 1; } print f(30);", 30.0),
+        # a recursive sum, reached through a base case at the bottom
+        ("fun s(n) { if (n <= 0) return 0; return n + s(n - 1); } print s(30);", 465.0),
+        # mutual recursion that terminates
+        (
+            """
+            fun even(n) { if (n == 0) return true; return odd(n - 1); }
+            fun odd(n) { if (n == 0) return false; return even(n - 1); }
+            print even(30);
+            """,
+            True,
+        ),
+    ],
+)
+def test_deep_recursion_within_limit(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+def test_interpreter_usable_after_recursion_depth_error(resolve_program):
+    # exhausting the stack costs the failed call, not the interpreter: the same
+    # instance keeps its globals and goes on running afterwards. A fresh
+    # interpreter per source would not show this, so one is driven by hand.
+    collected: list[list[LoxValue]] = []
+    interpreter = Interpreter(print_fn=collected.append)
+
+    interpreter.interpret(resolve_program("var x = 1; fun f() { f(); }"))
+    with pytest.raises(InterpreterError):
+        interpreter.interpret(resolve_program("f();"))
+
+    interpreter.interpret(resolve_program("print x; print 1 + 2;"))
+    assert collected == [[1.0], [3.0]]
+    # and the recursion still reports rather than crashes the second time
+    with pytest.raises(InterpreterError) as excinfo:
+        interpreter.interpret(resolve_program("f();"))
+    assert str(excinfo.value) == "Maximum recursion depth exceeded"
+
+
+@pytest.mark.parametrize(
     "source, expected",
     [
         # each executed print appends one group of evaluated values

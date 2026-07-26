@@ -302,6 +302,8 @@ class Interpreter(
         except InterpreterError as error:
             error.tokens.append(e.paren)
             raise
+        except RecursionError:
+            self._raise("Maximum recursion depth exceeded", e.paren)
 
     def visit_literal(self, e: Literal) -> LoxValue:
         return e.value

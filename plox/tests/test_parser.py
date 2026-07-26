@@ -770,7 +770,9 @@ def test_missing_closing_paren_error(parse_errors, error_position, source, posit
         ("print 1 2", "Expect ';' after values", (1, 9)),
     ],
 )
-def test_missing_semicolon_error(parse_errors, error_position, source, message, position):
+def test_missing_semicolon_error(
+    parse_errors, error_position, source, message, position
+):
     (error,) = parse_errors(source)
     assert str(error) == message
     assert error_position(error) == position
@@ -803,7 +805,9 @@ def test_var_declaration_error(parse_errors, error_position, source, message, po
         ("a + b = c;", (1, 7)),
     ],
 )
-def test_invalid_assignment_target_error(parse_errors, error_position, source, position):
+def test_invalid_assignment_target_error(
+    parse_errors, error_position, source, position
+):
     (error,) = parse_errors(source)
     assert str(error) == "Invalid assignment target"
     assert error_position(error) == position
