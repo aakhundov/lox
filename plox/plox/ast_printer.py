@@ -21,6 +21,7 @@ from plox.ast import (
     Call,
     Get,
     Literal,
+    Super,
     This,
     Variable,
     Grouping,
@@ -36,6 +37,11 @@ class AstPrinter(
         return node.accept(self)
 
     def visit_class(self, s: Class) -> str:
+        if s.superclass is not None:
+            return self._parens(
+                f"class {s.name.lexeme} {s.superclass.name.lexeme}",
+                *s.methods,
+            )
         return self._parens(f"class {s.name.lexeme}", *s.methods)
 
     def visit_function(self, s: Function) -> str:
@@ -118,6 +124,9 @@ class AstPrinter(
 
     def visit_literal(self, e: Literal) -> str:
         return f'"{e.value}"' if isinstance(e.value, str) else to_str(e.value)
+
+    def visit_super(self, e: Super) -> str:
+        return f"{e.keyword.lexeme}.{e.method.lexeme}"
 
     def visit_this(self, e: This) -> str:
         return e.keyword.lexeme

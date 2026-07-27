@@ -26,6 +26,7 @@ from plox.ast import (
     Call,
     Get,
     Literal,
+    Super,
     This,
     Variable,
     Grouping,
@@ -47,6 +48,7 @@ class FunctionType(Enum):
 
 class ClassType(Enum):
     CLASS = auto()
+    SUBCLASS = auto()
 
 
 class Resolver(
@@ -80,19 +82,33 @@ class Resolver(
         self._declare(s.name)
         self._define(s.name)
 
-        with self._class(ClassType.CLASS):
-            with self._scope() as scope:
-                assert scope is not None
-                # nested scope with `this` bound
-                scope["this"] = True
+        if s.superclass is not None:
+            if s.superclass.name.lexeme == s.name.lexeme:
+                self._error(
+                    "A class can't inherit from itself",
+                    s.superclass.name,
+                )
 
-                for method in s.methods:
-                    self._resolve_function(
-                        method,
-                        FunctionType.INIT
-                        if method.name.lexeme == "init"
-                        else FunctionType.METHOD,
-                    )
+            self._resolve(s.superclass)
+
+        with self._class(
+            ClassType.SUBCLASS if s.superclass is not None else ClassType.CLASS
+        ):
+            with self._scope(enabled=(s.superclass is not None)) as super_scope:
+                if super_scope is not None:
+                    super_scope["super"] = True
+
+                with self._scope() as this_scope:
+                    assert this_scope is not None
+                    this_scope["this"] = True
+
+                    for method in s.methods:
+                        self._resolve_function(
+                            method,
+                            FunctionType.INIT
+                            if method.name.lexeme == "init"
+                            else FunctionType.METHOD,
+                        )
 
     def visit_function(self, s: Function) -> None:
         if len(s.parameters) > self._MAX_ARITY:
@@ -206,6 +222,14 @@ class Resolver(
     def visit_literal(self, e: Literal) -> None:
         pass
 
+    def visit_super(self, e: Super) -> None:
+        if not self._in_class:
+            self._error("Can't use super outside of class", e.keyword)
+        elif self._in_class[-1] != ClassType.SUBCLASS:
+            self._error("Can't use super in class with no superclass", e.keyword)
+
+        self._resolve_local(e, e.keyword.lexeme)
+
     def visit_this(self, e: This) -> None:
         if not self._in_class:
             self._error("Can't use 'this' outside of class", e.keyword)
@@ -225,7 +249,8 @@ class Resolver(
     def _resolve(self, node: Expr | Stmt) -> None:
         node.accept(self)
 
-    def _resolve_local(self, e: Variable | Assign | This, name: str) -> None:
+    # this accepts AST nodes with the distance defined
+    def _resolve_local(self, e: Variable | Assign | This | Super, name: str) -> None:
         for distance, scope in enumerate(reversed(self._scopes)):
             if name in scope:
                 e.set_distance(distance)

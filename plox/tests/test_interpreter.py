@@ -744,6 +744,23 @@ def test_instance_value_display(value):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # a subclass names its superclass alongside its own name
+        ("class A {} class B < A {} print B;", "<class B (A)>"),
+        # only the immediate superclass shows, however deep the chain
+        ("class A {} class B < A {} class C < B {} print C;", "<class C (B)>"),
+        # the base of the chain still renders as a plain class
+        ("class A {} class B < A {} print A;", "<class A>"),
+    ],
+)
+def test_subclass_value_display(value, source, expected):
+    result = value(source)
+    assert isinstance(result, LoxClass)
+    assert str(result) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # a field springs into being when it is first assigned
         ("class A {} var a = A(); a.x = 1; print a.x;", 1.0),
         ('class A {} var a = A(); a.x = "s"; print a.x;', "s"),
@@ -921,6 +938,184 @@ def test_method_closes_over_enclosing_scope(run):
         }
         print make(1).get_(), make(2).both();
     """) == [[1.0, 2.0]]
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # a method not found on the class is looked for on its superclass
+        ("class A { m() { return 1; } } class B < A {} print B().m();", 1.0),
+        # the search walks the whole chain, not just one link
+        (
+            "class A { m() { return 1; } } class B < A {} class C < B {}"
+            " print C().m();",
+            1.0,
+        ),
+        # a subclass method of the same name overrides rather than collides
+        (
+            "class A { m() { return 1; } } class B < A { m() { return 2; } }"
+            " print B().m();",
+            2.0,
+        ),
+        # overriding is per-name: the other inherited methods still resolve
+        (
+            "class A { one() { return 1; } two() { return 2; } }"
+            " class B < A { two() { return 3; } } print B().one() + B().two();",
+            4.0,
+        ),
+        # an inherited method runs with `this` bound to the subclass instance,
+        # so a call it makes dispatches back to the override
+        (
+            "class A { m() { return this.n(); } n() { return 1; } }"
+            " class B < A { n() { return 2; } } print B().m();",
+            2.0,
+        ),
+        # the superclass keeps its own behaviour: overriding does not mutate it
+        (
+            "class A { m() { return 1; } } class B < A { m() { return 2; } }"
+            " print A().m();",
+            1.0,
+        ),
+    ],
+)
+def test_method_inheritance(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # an initializer is inherited like any other method, arity included
+        ("class A { init(v) { this.x = v; } } class B < A {} print B(1).x;", 1.0),
+        # a subclass initializer replaces it, and may chain through `super`
+        (
+            "class A { init(v) { this.x = v; } }"
+            " class B < A { init(v) { super.init(v * 2); } } print B(1).x;",
+            2.0,
+        ),
+        # the chained initializer writes to the same instance, so both classes'
+        # fields end up on it
+        (
+            "class A { init() { this.a = 1; } }"
+            " class B < A { init() { super.init(); this.b = 2; } }"
+            " print B().a + B().b;",
+            3.0,
+        ),
+    ],
+)
+def test_initializer_inheritance(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # `super.m()` reaches the superclass's method past the override
+        (
+            "class A { m() { return 1; } } class B < A { m() { return super.m() + 1; } }"
+            " print B().m();",
+            2.0,
+        ),
+        # it works from a method of any name, not just the overriding one
+        (
+            "class A { m() { return 1; } } class B < A { n() { return super.m(); } }"
+            " print B().n();",
+            1.0,
+        ),
+        # arguments pass through as they do to any call
+        (
+            "class A { m(a, b) { return a + b; } }"
+            " class B < A { m(a, b) { return super.m(a, b) * 2; } } print B().m(1, 2);",
+            6.0,
+        ),
+        # the method is bound to the current instance, so `this` inside the
+        # superclass's body is still the subclass instance
+        (
+            "class A { m() { return this.x; } }"
+            " class B < A { init() { this.x = 1; } n() { return super.m(); } }"
+            " print B().n();",
+            1.0,
+        ),
+        # reading it without calling gives a bound method, callable later
+        (
+            "class A { m() { return 1; } }"
+            " class B < A { n() { var f = super.m; return f(); } } print B().n();",
+            1.0,
+        ),
+    ],
+)
+def test_super_call(value, source, expected):
+    _assert_value(value(source), expected)
+
+
+def test_super_is_resolved_statically(run):
+    # `super` means "the superclass of the class this method was *written* in",
+    # not "the superclass of the object's class" -- otherwise Mid.test on a
+    # Leaf would loop back to Leaf.m instead of reaching Base.m
+    assert run("""
+        class Base { m() { return "Base"; } }
+        class Mid < Base {
+            m() { return "Mid"; }
+            test() { return super.m(); }
+        }
+        class Leaf < Mid { m() { return "Leaf"; } }
+        print Leaf().test(), Mid().test();
+    """) == [["Base", "Base"]]
+
+
+def test_super_in_nested_scopes(run):
+    # `super` is found by walking out the scope chain, so anything that opens a
+    # scope between the use and the method body has to be counted -- a block, a
+    # loop body, and a nested function all sit in the way
+    assert run("""
+        class A { m() { return 1; } }
+        class B < A {
+            blocky() { { { return super.m(); } } }
+            loopy() { for (var i = 0; i < 1; i = i + 1) { return super.m(); } }
+            nested() { fun f() { fun g() { return super.m(); } return g(); } return f(); }
+        }
+        var b = B();
+        print b.blocky(), b.loopy(), b.nested();
+    """) == [[1.0, 1.0, 1.0]]
+
+
+def test_nested_class_binds_its_own_super(run):
+    # a subclass declared inside another subclass's method gets its own `super`
+    # scope, and the inner one wins for its own methods
+    assert run("""
+        class Outer { m() { return "Outer"; } }
+        class Inner { m() { return "Inner"; } }
+        class B < Outer {
+            make() {
+                class C < Inner { m() { return super.m(); } }
+                return C().m();
+            }
+            own() { return super.m(); }
+        }
+        print B().make(), B().own();
+    """) == [["Inner", "Outer"]]
+
+
+def test_inherited_fields_are_per_instance(run):
+    # inheritance shares methods, never state: two instances of a subclass
+    # still carry their own field tables
+    assert run("""
+        class A { init(v) { this.v = v; } get_() { return this.v; } }
+        class B < A {}
+        print B(1).get_(), B(2).get_();
+    """) == [[1.0, 2.0]]
+
+
+def test_superclass_is_captured_at_declaration(run):
+    # the superclass is the value the name held when the subclass was declared,
+    # so rebinding the name afterwards leaves the subclass untouched
+    assert run("""
+        class A { m() { return 1; } }
+        var Super_ = A;
+        class B < Super_ {}
+        Super_ = nil;
+        print B().m();
+    """) == [[1.0]]
 
 
 # A representative call for each native, by name. The test below asserts
@@ -1405,3 +1600,56 @@ def test_method_error_stack(run, error_stack, source, expected):
     with pytest.raises(InterpreterError) as excinfo:
         run(source)
     assert error_stack(excinfo.value) == expected
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # the superclass is an ordinary expression at runtime, so anything may
+        # be named there -- only a class may actually be inherited from
+        ("var x = 1; class B < x {}", (1, 22)),
+        ('var s = "s"; class B < s {}', (1, 24)),
+        ("var n = nil; class B < n {}", (1, 24)),
+        # a function is callable but is not a class
+        ("fun f() {} class B < f {}", (1, 22)),
+        ("class B < clock {}", (1, 11)),
+        # nor is an instance of one: a class inherits from a class, not an
+        # object built by it
+        ("class A {} var a = A(); class B < a {}", (1, 35)),
+    ],
+)
+def test_superclass_not_a_class_error(run, error_position, source, position):
+    with pytest.raises(InterpreterError) as excinfo:
+        run(source)
+    assert str(excinfo.value) == "Superclass must be a class"
+    assert error_position(excinfo.value) == position
+
+
+def test_undefined_super_method_error(run, error_stack):
+    # a `super` lookup searches the superclass chain and nothing else, so a
+    # name the chain does not hold is an error at the method name itself --
+    # even when the *subclass* defines it
+    with pytest.raises(InterpreterError) as excinfo:
+        run("class A {} class B < A { m() { super.nope(); } } B().m();")
+    assert str(excinfo.value) == "Undefined property 'nope'"
+    assert error_stack(excinfo.value) == [(1, 55), (1, 38)]
+
+    with pytest.raises(InterpreterError) as excinfo:
+        run("class A {} class B < A { m() { super.m(); } } B().m();")
+    assert str(excinfo.value) == "Undefined property 'm'"
+
+
+def test_super_error_stack(run, error_stack):
+    # a super call is a call: it puts its own frame on the stack, so an error
+    # in the superclass's body reports the whole chain, outermost first
+    with pytest.raises(InterpreterError) as excinfo:
+        run("class A { m() { x; } } class B < A { m() { super.m(); } } B().m();")
+    assert error_stack(excinfo.value) == [(1, 64), (1, 51), (1, 17)]
+
+
+def test_superclass_is_evaluated_before_the_body_runs(run):
+    # the superclass is resolved when the declaration executes, not when the
+    # class is first used, so a bad one fails even if nothing instantiates it
+    with pytest.raises(InterpreterError) as excinfo:
+        run("var x = 1; class B < x { m() { return 1; } }")
+    assert str(excinfo.value) == "Superclass must be a class"

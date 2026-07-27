@@ -45,6 +45,7 @@ class Stmt(ABC):
 @dataclass(frozen=True)
 class Class(Stmt):
     name: Token
+    superclass: "Variable | None"
     methods: list["Function"]
 
     def accept[R](self, visitor: Stmt.Visitor[R]) -> R:
@@ -162,6 +163,8 @@ class Expr(ABC):
         @abstractmethod
         def visit_literal(self, e: "Literal") -> R: ...
         @abstractmethod
+        def visit_super(self, e: "Super") -> R: ...
+        @abstractmethod
         def visit_this(self, e: "This") -> R: ...
         @abstractmethod
         def visit_variable(self, e: "Variable") -> R: ...
@@ -267,6 +270,27 @@ class Literal(Expr):
 
     def accept[R](self, visitor: Expr.Visitor[R]) -> R:
         return visitor.visit_literal(self)
+
+
+@dataclass(frozen=True)
+class Super(Expr):
+    keyword: Token
+    method: Token
+
+    _meta: dict[str, Any] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
+
+    def get_distance(self) -> int | None:
+        return cast(int | None, self._meta.get("distance"))
+
+    def set_distance(self, value: int | None) -> None:
+        self._meta["distance"] = value
+
+    def accept[R](self, visitor: Expr.Visitor[R]) -> R:
+        return visitor.visit_super(self)
 
 
 @dataclass(frozen=True)

@@ -2,11 +2,14 @@ import dataclasses
 
 import pytest
 
-from plox.ast import Assign, Expr, Stmt, This, Variable
+from plox.ast import Assign, Expr, Stmt, Super, This, Variable
 from plox.resolver import Resolver, ResolverError
 
 # the node types the resolver writes a scope distance onto
-_RESOLVED = (Variable, Assign, This)
+_RESOLVED = (Variable, Assign, This, Super)
+
+# the ones naming themselves with a keyword rather than an identifier
+_KEYWORD_NAMED = (This, Super)
 
 
 def _walk(node):
@@ -27,11 +30,13 @@ def _walk(node):
 def _resolved_name(node):
     """Give the name a resolved node was looked up under.
 
-    `this` is a keyword rather than an identifier, so `This` carries its lexeme
-    as `keyword` where `Variable`/`Assign` carry theirs as `name`. It resolves
-    through the same scope machinery either way, which is the point.
+    `this` and `super` are keywords rather than identifiers, so `This`/`Super`
+    carry their lexeme as `keyword` where `Variable`/`Assign` carry theirs as
+    `name`. They resolve through the same scope machinery either way, which is
+    the point. `Super` also holds the method name, but that is looked up on the
+    superclass at runtime, so it has no scope distance and does not appear.
     """
-    return (node.keyword if isinstance(node, This) else node.name).lexeme
+    return (node.keyword if isinstance(node, _KEYWORD_NAMED) else node.name).lexeme
 
 
 @pytest.fixture
@@ -53,12 +58,12 @@ def distances(resolve):
     """Return a helper listing each resolved name and its scope distance.
 
     Distances are what the resolver produces: they are written onto the
-    `Variable`, `Assign` and `This` nodes themselves, so the helper walks the
-    resolved tree and pairs every such node's lexeme with its distance, in
-    traversal order. `None` means the name was not found in any enclosing local
-    scope and is therefore assumed global. Declarations (`var a = 1;`,
-    `fun f() {}`, `class A {}`) are not uses, so they do not appear -- only
-    *uses* of a name do.
+    `Variable`, `Assign`, `This` and `Super` nodes themselves, so the helper
+    walks the resolved tree and pairs every such node's lexeme with its
+    distance, in traversal order. `None` means the name was not found in any
+    enclosing local scope and is therefore assumed global. Declarations
+    (`var a = 1;`, `fun f() {}`, `class A {}`) are not uses, so they do not
+    appear -- only *uses* of a name do.
     """
 
     def _distances(source):
@@ -172,6 +177,38 @@ def test_this_distance(distances, source, expected):
 @pytest.mark.parametrize(
     "source, expected",
     [
+        # a subclass opens one scope more than a base class does: the `super`
+        # binding sits just outside the `this` binding, so from a method body
+        # `super` is always one step further out than `this`
+        ("class B < A { m() { super.m(); } }", [("A", None), ("super", 2)]),
+        (
+            "class B < A { m() { print this; super.m(); } }",
+            [("A", None), ("this", 1), ("super", 2)],
+        ),
+        # parameters share the body's scope, so they shift nothing
+        ("class B < A { m(a) { super.m(a); } }", [("A", None), ("super", 2), ("a", 0)]),
+        # a block inside the method adds a scope, pushing `super` further out
+        ("class B < A { m() { { super.m(); } } }", [("A", None), ("super", 3)]),
+        # a function declared in a method closes over `super` the same way it
+        # closes over `this`, so a callback can still reach the superclass
+        ("class B < A { m() { fun f() { super.m(); } } }", [("A", None), ("super", 3)]),
+        # the method name after the dot is looked up on the superclass at
+        # runtime, so only the keyword carries a distance -- `m` never appears
+        ("class B < A { m() { super.other(); } }", [("A", None), ("super", 2)]),
+        # a nested subclass binds its own `super`, and the inner one wins
+        (
+            "class B < A { m() { class C < A { n() { super.n(); } } } }",
+            [("A", None), ("A", None), ("super", 2)],
+        ),
+    ],
+)
+def test_super_distance(distances, source, expected):
+    assert distances(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
         # a class declared at the top level is a global like any other name
         ("class A {} var a = A();", [("A", None)]),
         # ...and a local one resolves to the scope it was declared in
@@ -189,6 +226,30 @@ def test_this_distance(distances, source, expected):
     ],
 )
 def test_class_name_distance(distances, source, expected):
+    assert distances(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # the superclass name is resolved where the class is declared, before
+        # any of the class's own scopes are opened -- it is an ordinary use
+        ("class A {} class B < A {}", [("A", None)]),
+        ("{ class A {} class B < A {} }", [("A", 0)]),
+        ("{ class A {} { class B < A {} } }", [("A", 1)]),
+        # ...so it is looked up like any other name, and a local shadows
+        ("{ class A {} { class A {} class B < A {} } }", [("A", 0)]),
+        # reaching an enclosing local from a method body of a *subclass* costs
+        # one step more than from a base class, because of the `super` scope
+        (
+            "{ var g = 1; class A {} class B < A { m() { print g; } } }",
+            [("A", 0), ("g", 3)],
+        ),
+        # a method may name its own superclass, crossing the same scopes
+        ("{ class A {} class B < A { m() { return A; } } }", [("A", 0), ("A", 3)]),
+    ],
+)
+def test_superclass_name_distance(distances, source, expected):
     assert distances(source) == expected
 
 
@@ -398,6 +459,87 @@ def test_this_outside_class_error(resolve_errors, error_position, source, positi
     ],
 )
 def test_this_allowed(resolve, source):
+    resolve(source)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # a class cannot be its own superclass: the name is already declared
+        # when the superclass is resolved, so this would otherwise inherit from
+        # the half-built class itself
+        ("class A < A {}", (1, 11)),
+        ("{ class A < A {} }", (1, 13)),
+        # the check compares names, so a nested class shadowing an outer one of
+        # the same name is caught too
+        ("class A { m() { class B < B {} } }", (1, 27)),
+    ],
+)
+def test_inherit_from_itself_error(resolve_errors, error_position, source, position):
+    (error,) = resolve_errors(source)
+    assert str(error) == "A class can't inherit from itself"
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # `super` needs a surrounding class to have a superclass at all, so
+        # outside any class it is rejected at the keyword
+        ("super.m();", (1, 1)),
+        ("print super.m();", (1, 7)),
+        ("{ super.m(); }", (1, 3)),
+        # a plain function is not a method, however it is later called
+        ("fun f() { super.m(); }", (1, 11)),
+        ("class A {} fun f() { super.m(); }", (1, 22)),
+    ],
+)
+def test_super_outside_class_error(resolve_errors, error_position, source, position):
+    (error,) = resolve_errors(source)
+    assert str(error) == "Can't use super outside of class"
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source, position",
+    [
+        # inside a class is not enough -- there has to be a superclass to
+        # reach, which is a different error from being outside a class
+        ("class A { m() { super.m(); } }", (1, 17)),
+        ("class A { init() { super.init(); } }", (1, 20)),
+        # the innermost class decides: a base class nested inside a subclass's
+        # method does not inherit its enclosing class's superclass
+        ("class B < A { m() { class C { n() { super.n(); } } } }", (1, 37)),
+    ],
+)
+def test_super_without_superclass_error(
+    resolve_errors, error_position, source, position
+):
+    (error,) = resolve_errors(source)
+    assert str(error) == "Can't use super in class with no superclass"
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class B < A { m() { super.m(); } }",
+        # `super` is in scope for the whole class, not just one method
+        "class B < A { init() { super.init(); } m() { return super.m(); } }",
+        # reading the method without calling it is a use like any other
+        "class B < A { m() { var f = super.m; } }",
+        # a function declared inside a method closes over the method's `super`
+        "class B < A { m() { fun f() { super.m(); } } }",
+        # so does a nested subclass's method, over its own `super`
+        "class B < A { m() { class C < A { n() { super.n(); } } } }",
+        # the innermost class decides here too: leaving a nested base class
+        # puts the enclosing subclass's superclass back in reach
+        "class B < A { m() { class C {} super.m(); } }",
+        # `super` may appear anywhere an expression may
+        "class B < A { m() { if (super.m()) while (false) print super.m(); } }",
+    ],
+)
+def test_super_allowed(resolve, source):
     resolve(source)  # must not raise
 
 

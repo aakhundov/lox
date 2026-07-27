@@ -596,6 +596,14 @@ def test_loop_jump_error(parse_errors, error_position, source, message, position
         # a class is a declaration, so it nests wherever one may
         ("{ class A {} }", "(blk (class A))"),
         ("fun f() { class A {} }", "(fun f () (class A))"),
+        # `<` names a superclass, which renders after the class's own name
+        ("class B < A {}", "(class B A)"),
+        ("class B < A { m() {} }", "(class B A (fun m ()))"),
+        # the superclass is an identifier, not an arbitrary expression, so
+        # whether it names a class at all is a runtime question
+        ("class B < undeclared {}", "(class B undeclared)"),
+        # a subclass nests like any other declaration
+        ("{ class B < A {} }", "(blk (class B A))"),
     ],
 )
 def test_class_declaration(show_one, source, expected):
@@ -614,6 +622,15 @@ def test_class_declaration(show_one, source, expected):
         # a method's signature is checked like a function's, but reports "method"
         ("class A { m {} }", "Expect '(' after method name", (1, 13)),
         ("class A { m(1) {} }", "Expect parameter name", (1, 13)),
+        # `<` must be followed by the superclass's name...
+        ("class B < {}", "Expect superclass name", (1, 11)),
+        # ...which is an identifier, not any other token
+        ("class B < 1 {}", "Expect superclass name", (1, 11)),
+        ("class B < this {}", "Expect superclass name", (1, 11)),
+        # only one superclass may be named: Lox has no multiple inheritance
+        ("class C < A, B {}", "Expect '{' before class body", (1, 12)),
+        # and the `<` is not optional -- without it the name is not a superclass
+        ("class B A {}", "Expect '{' before class body", (1, 9)),
     ],
 )
 def test_class_error(parse_errors, error_position, source, message, position):
@@ -830,6 +847,48 @@ def test_this_expression(show_expr):
     # is a resolver question, not a grammatical one
     assert show_expr("this;") == "this"
     assert show_expr("f(this);") == "(call f this)"
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # `super.name` is one primary: the grammar admits no bare `super`, so
+        # the method name is folded into the node rather than hung off it
+        ("super.m;", "super.m"),
+        ("super.m();", "(call super.m)"),
+        ("super.m(1, 2);", "(call super.m 1 2)"),
+        # like `this`, it parses wherever a primary may appear -- whether the
+        # enclosing class actually has a superclass is a resolver question
+        ("super.m() + 1;", "(+ (call super.m) 1)"),
+        ("f(super.m);", "(call f super.m)"),
+        # the result of a super call is an ordinary value, so access continues
+        # off it as a normal property chain
+        ("super.m().x;", "(get x (call super.m))"),
+    ],
+)
+def test_super_expression(show_expr, source, expected):
+    assert show_expr(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source, message, position",
+    [
+        # `super` alone is not an expression: a method name must follow
+        ("super;", "Expect '.' after super", (1, 6)),
+        ("super();", "Expect '.' after super", (1, 6)),
+        # a super method is a lookup, never an assignment target -- it names
+        # something on the superclass, which holds no fields to write
+        ("super.m = 1;", "Invalid assignment target", (1, 9)),
+        # the name after the dot must be an identifier
+        ("super.;", "Expect superclass method name", (1, 7)),
+        ("super.1;", "Expect superclass method name", (1, 7)),
+        ("super.this;", "Expect superclass method name", (1, 7)),
+    ],
+)
+def test_super_error(parse_errors, error_position, source, message, position):
+    (error,) = parse_errors(source)
+    assert str(error) == message
+    assert error_position(error) == position
 
 
 @pytest.mark.parametrize(

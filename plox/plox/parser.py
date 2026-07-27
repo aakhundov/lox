@@ -25,6 +25,7 @@ from plox.ast import (
     Call,
     Get,
     Literal,
+    Super,
     This,
     Variable,
     Grouping,
@@ -71,6 +72,16 @@ class Parser:
             TT.IDENTIFIER,
             "Expect class name",
         )
+
+        superclass = None
+        if self._match(TT.LESS):
+            superclass = Variable(
+                self._consume(
+                    TT.IDENTIFIER,
+                    "Expect superclass name",
+                )
+            )
+
         self._consume(
             TT.LEFT_BRACE,
             "Expect '{' before class body",
@@ -85,7 +96,7 @@ class Parser:
             "Expect '}' after class body",
         )
 
-        return Class(name, methods)
+        return Class(name, superclass, methods)
 
     def _function(self, kind: str) -> Function:
         name = self._consume(
@@ -412,8 +423,25 @@ class Parser:
 
         if self._match(TT.NUMBER, TT.STRING):
             return Literal(self._previous().literal)
+
+        if self._match(TT.SUPER):
+            keyword = self._previous()
+
+            self._consume(
+                TT.DOT,
+                "Expect '.' after super",
+            )
+
+            method = self._consume(
+                TT.IDENTIFIER,
+                "Expect superclass method name",
+            )
+
+            return Super(keyword, method)
+
         if self._match(TT.THIS):
             return This(self._previous())
+
         if self._match(TT.IDENTIFIER):
             return Variable(self._previous())
 

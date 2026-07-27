@@ -9,6 +9,7 @@ from plox.ast import (
     Unary,
     Call,
     Get,
+    Super,
     This,
     Variable,
     Assign,
@@ -93,6 +94,18 @@ def test_nested(show):
 def test_variable(show):
     assert show(Variable(ident("x"))) == "x"
     assert show(Variable(ident("foo"))) == "foo"
+
+
+def test_super(show):
+    # the keyword and the method name after the dot are one unit of syntax --
+    # `super` is never an expression on its own -- so they render together
+    # rather than as an object with a property hung off it
+    keyword = Token(TT.SUPER, "super", None, 0)
+    assert show(Super(keyword, ident("m"))) == "super.m"
+    assert show(Super(keyword, ident("init"))) == "super.init"
+    # so a super call wraps the pair whole, where `this.m()` nests a `get`
+    node = Call(Super(keyword, ident("m")), op(")", TT.RIGHT_PAREN), [Literal(1.0)])
+    assert show(node) == "(call super.m 1)"
 
 
 def test_this(show):
@@ -212,13 +225,14 @@ def test_get(show):
 
 def test_class_statement(show):
     # a class with no methods has no children
-    assert show(Class(ident("A"), [])) == "(class A)"
+    assert show(Class(ident("A"), None, [])) == "(class A)"
     # methods render as the function statements they are
-    node = Class(ident("A"), [Function(ident("m"), [], [])])
+    node = Class(ident("A"), None, [Function(ident("m"), [], [])])
     assert show(node) == "(class A (fun m ()))"
     # several methods render as successive children
     node = Class(
         ident("A"),
+        None,
         [
             Function(ident("init"), [ident("a")], [Print([Variable(ident("a"))])]),
             Function(
@@ -227,6 +241,16 @@ def test_class_statement(show):
         ],
     )
     assert show(node) == "(class A (fun init (a) (print a)) (fun m () (return)))"
+
+
+def test_class_statement_with_superclass(show):
+    # a superclass is named in the head, after the class's own name, so a
+    # subclass declaration is distinguishable from a base one
+    superclass = Variable(ident("A"))
+    assert show(Class(ident("B"), superclass, [])) == "(class B A)"
+    # the methods stay children, as they are without a superclass
+    node = Class(ident("B"), superclass, [Function(ident("m"), [], [])])
+    assert show(node) == "(class B A (fun m ()))"
 
 
 def test_function_statement(show):

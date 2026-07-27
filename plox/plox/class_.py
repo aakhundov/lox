@@ -9,8 +9,14 @@ if TYPE_CHECKING:
 
 
 class LoxClass(LoxObject, LoxCallable):
-    def __init__(self, name: str, methods: dict[str, "LoxFunction"]) -> None:
+    def __init__(
+        self,
+        name: str,
+        superclass: "LoxClass | None",
+        methods: dict[str, "LoxFunction"],
+    ) -> None:
         self._name = name
+        self._superclass = superclass
         self._methods = methods
 
     def call(self, arguments: list[LoxValue], interpreter: "Interpreter") -> LoxValue:
@@ -22,7 +28,13 @@ class LoxClass(LoxObject, LoxCallable):
         return instance
 
     def find_method(self, name: str) -> "LoxFunction | None":
-        return self._methods.get(name)
+        if name in self._methods:
+            return self._methods[name]
+
+        if self._superclass is not None:
+            return self._superclass.find_method(name)
+
+        return None
 
     @property
     def name(self) -> str:
@@ -36,4 +48,6 @@ class LoxClass(LoxObject, LoxCallable):
         return 0
 
     def __str__(self) -> str:
+        if self._superclass is not None:
+            return f"<class {self._name} ({self._superclass.name})>"
         return f"<class {self._name}>"

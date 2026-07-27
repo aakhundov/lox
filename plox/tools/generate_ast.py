@@ -17,6 +17,7 @@ _METADATA: dict[
     "Stmt": {
         "Class": {
             "name": "Token",
+            "superclass": '"Variable | None"',
             "methods": 'list["Function"]',
         },
         "Function": {
@@ -103,6 +104,13 @@ _METADATA: dict[
         },
         "Literal": {
             "value": "LoxValue",
+        },
+        "Super": {
+            "keyword": "Token",
+            "method": "Token",
+            "_meta": {
+                "distance": "int",
+            },
         },
         "This": {
             "keyword": "Token",

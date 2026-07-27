@@ -27,6 +27,7 @@ from plox.ast import (
     Call,
     Get,
     Literal,
+    Super,
     This,
     Variable,
     Grouping,
@@ -122,13 +123,26 @@ class Interpreter(
         # class inside its own methods
         self._env.define(name, None)
 
-        methods: dict[str, LoxFunction] = {}
-        for fn in s.methods:
-            methods[fn.name.lexeme] = LoxFunction(
-                fn, self._env, is_init=(fn.name.lexeme == "init")
-            )
+        superclass = None
+        if s.superclass is not None:
+            superclass = self._evaluate(s.superclass)
+            if not isinstance(superclass, LoxClass):
+                self._raise("Superclass must be a class", s.superclass.name)
+        if superclass is not None:
+            # mypy can't figure out from the above
+            assert isinstance(superclass, LoxClass)
 
-        class_ = LoxClass(name, methods)
+        with self._nested_env(enabled=(s.superclass is not None)) as super_env:
+            if super_env is not None:
+                super_env.define("super", superclass)
+
+            methods: dict[str, LoxFunction] = {}
+            for fn in s.methods:
+                methods[fn.name.lexeme] = LoxFunction(
+                    fn, self._env, is_init=(fn.name.lexeme == "init")
+                )
+
+        class_ = LoxClass(name, superclass, methods)
         self._env.assign(s.name, class_)
 
     def visit_function(self, s: Function) -> None:
@@ -331,6 +345,23 @@ class Interpreter(
     def visit_literal(self, e: Literal) -> LoxValue:
         return e.value
 
+    def visit_super(self, e: Super) -> LoxValue:
+        distance = e.get_distance()
+        assert distance is not None  # by construction
+        superclass = self._env.get_at(distance, "super")
+        assert isinstance(superclass, LoxClass)  # by construction
+
+        # hack: we exploit the env nesting structure
+        instance = self._env.get_at(distance - 1, "this")
+        assert isinstance(instance, LoxInstance)
+
+        method = superclass.find_method(e.method.lexeme)
+
+        if method is None:
+            self._raise(f"Undefined property '{e.method.lexeme}'", e.method)
+
+        return method.bind(instance)
+
     def visit_this(self, e: This) -> LoxValue:
         return self._look_up_variable(e.keyword, e)
 
@@ -376,10 +407,10 @@ class Interpreter(
         new_env: Environment | None = None,
         *,
         enabled: bool = True,
-    ) -> Generator[Environment]:
+    ) -> Generator[Environment | None]:
         if not enabled:
             # when not enabled, this is a no op
-            yield self._env
+            yield None
             return
 
         # keep the previous env
