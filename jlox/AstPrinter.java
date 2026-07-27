@@ -3,6 +3,10 @@ package jlox;
 import java.util.ArrayList;
 import java.util.List;
 
+// Note: this class is not shown in the book beyond chapter 5, where it
+// only handles Binary, Grouping, Literal and Unary expressions. The extra
+// visit methods exist so that it keeps implementing the full visitor
+// interfaces.
 public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   String print(Stmt stmt) {
     if (stmt == null) {
@@ -19,18 +23,18 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
-  public String visitAssign(Expr.Assign expr) {
+  public String visitAssignExpr(Expr.Assign expr) {
     Expr name = new Expr.Variable(expr.name);
     return parenthesize("=", name, expr.value);
   }
 
   @Override
-  public String visitBinary(Expr.Binary expr) {
+  public String visitBinaryExpr(Expr.Binary expr) {
     return parenthesize(expr.operator.lexeme, expr.left, expr.right);
   }
 
   @Override
-  public String visitCall(Expr.Call expr) {
+  public String visitCallExpr(Expr.Call expr) {
     List<Expr> exprs = new ArrayList<>();
     exprs.add(expr.callee);
     exprs.addAll(expr.arguments);
@@ -38,17 +42,17 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
-  public String visitGet(Expr.Get expr) {
+  public String visitGetExpr(Expr.Get expr) {
     return parenthesize("get", expr.object, expr.name);
   }
 
   @Override
-  public String visitGrouping(Expr.Grouping expr) {
+  public String visitGroupingExpr(Expr.Grouping expr) {
     return parenthesize("group", expr.expression);
   }
 
   @Override
-  public String visitLiteral(Expr.Literal expr) {
+  public String visitLiteralExpr(Expr.Literal expr) {
     if (expr.value == null)
       return "nil";
     if (expr.value instanceof String)
@@ -57,42 +61,42 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
-  public String visitLogical(Expr.Logical expr) {
+  public String visitLogicalExpr(Expr.Logical expr) {
     return parenthesize(expr.operator.lexeme, expr.left, expr.right);
   }
 
   @Override
-  public String visitSet(Expr.Set expr) {
+  public String visitSetExpr(Expr.Set expr) {
     return parenthesize("set", expr.object, expr.name, expr.value);
   }
 
   @Override
-  public String visitSuper(Expr.Super expr) {
+  public String visitSuperExpr(Expr.Super expr) {
     return parenthesize("super", expr.method);
   }
 
   @Override
-  public String visitThis(Expr.This expr) {
+  public String visitThisExpr(Expr.This expr) {
     return "this";
   }
 
   @Override
-  public String visitUnary(Expr.Unary expr) {
+  public String visitUnaryExpr(Expr.Unary expr) {
     return parenthesize(expr.operator.lexeme, expr.right);
   }
 
   @Override
-  public String visitVariable(Expr.Variable expr) {
+  public String visitVariableExpr(Expr.Variable expr) {
     return expr.name.lexeme;
   }
 
   @Override
-  public String visitBlock(Stmt.Block stmt) {
+  public String visitBlockStmt(Stmt.Block stmt) {
     return parenthesize("block", stmt.statements.toArray());
   }
 
   @Override
-  public String visitClass(Stmt.Class stmt) {
+  public String visitClassStmt(Stmt.Class stmt) {
     List<Object> parts = new ArrayList<>();
     parts.add(stmt.name);
     if (stmt.superclass != null) {
@@ -103,12 +107,12 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
-  public String visitExpression(Stmt.Expression stmt) {
+  public String visitExpressionStmt(Stmt.Expression stmt) {
     return parenthesize("stmt", stmt.expression);
   }
 
   @Override
-  public String visitFunction(Stmt.Function stmt) {
+  public String visitFunctionStmt(Stmt.Function stmt) {
     List<String> paramNames = new ArrayList<>();
     for (Token param : stmt.params)
       paramNames.add(param.lexeme);
@@ -118,29 +122,24 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
-  public String visitIf(Stmt.If stmt) {
+  public String visitIfStmt(Stmt.If stmt) {
     if (stmt.elseBranch == null)
       return parenthesize("if", stmt.condition, stmt.thenBranch);
     return parenthesize("if", stmt.condition, stmt.thenBranch, stmt.elseBranch);
   }
 
   @Override
-  public String visitLoopEvent(Stmt.LoopEvent stmt) {
-    return parenthesize(stmt.statement.lexeme);
+  public String visitPrintStmt(Stmt.Print stmt) {
+    return parenthesize("print", stmt.expression);
   }
 
   @Override
-  public String visitPrint(Stmt.Print stmt) {
-    return parenthesize("print", stmt.values.toArray());
-  }
-
-  @Override
-  public String visitReturn(Stmt.Return stmt) {
+  public String visitReturnStmt(Stmt.Return stmt) {
     return parenthesize("return", stmt.value);
   }
 
   @Override
-  public String visitVar(Stmt.Var stmt) {
+  public String visitVarStmt(Stmt.Var stmt) {
     Expr name = new Expr.Variable(stmt.name);
     if (stmt.initializer != null) {
       return parenthesize("var", name, stmt.initializer);
@@ -149,7 +148,7 @@ public class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 
   @Override
-  public String visitWhile(Stmt.While stmt) {
+  public String visitWhileStmt(Stmt.While stmt) {
     return parenthesize("while", stmt.condition, stmt.body);
   }
 
