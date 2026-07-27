@@ -1,1 +1,1 @@
-A playground following the ["Crafting Interpreters"](https://craftinginterpreters.com/) book by Robert Nystrom.
+Inspured by ["Crafting Interpreters"](https://craftinginterpreters.com/) by Robert Nystrom.
