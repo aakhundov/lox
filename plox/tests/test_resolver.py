@@ -661,6 +661,68 @@ def test_class_redeclaration_allowed(resolve, source):
 
 
 @pytest.mark.parametrize(
+    "source, position",
+    [
+        # the methods of a class share one table keyed by name, so a repeat
+        # would silently overwrite the earlier definition; the error points at
+        # the redefinition, not at the first one
+        ("class A { m() {} m() {} }", (1, 18)),
+        # an initializer is a method like any other, and collides under the
+        # same wording rather than a message of its own
+        ("class A { init() {} init() {} }", (1, 21)),
+        # the names seen so far outlive the methods between them
+        ("class A { init() {} m() {} init() {} }", (1, 28)),
+        # a subclass body is checked the same way, `super` scope and all
+        ("class A {} class B < A { m() {} m() {} }", (1, 33)),
+    ],
+)
+def test_duplicate_method_error(resolve_errors, error_position, source, position):
+    (error,) = resolve_errors(source)
+    assert str(error) == "Already a method with this name in this class"
+    assert error_position(error) == position
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # distinct names in one class are the ordinary case
+        "class A { m() {} n() {} }",
+        # each class has its own method table, so siblings do not collide...
+        "class A { m() {} } class B { m() {} }",
+        # ...and neither does an override, which is the point of inheritance
+        "class A { m() {} } class B < A { m() {} }",
+        # a class nested in a method body is a separate class too
+        "class A { m() { class B { m() {} } } }",
+        # the method table is not a scope: a method may take the class's own
+        # name, or a parameter named after a sibling method
+        "class A { A() {} }",
+        "class A { m() {} n(m) { return m; } }",
+    ],
+)
+def test_duplicate_method_allowed(resolve, source):
+    resolve(source)  # must not raise
+
+
+def test_every_duplicate_method_reported(resolve_errors, error_position):
+    # reporting does not stop at the first repeat: each name is checked against
+    # every one seen before it, so a third `m` collides just as the second did
+    errors = resolve_errors("class A { m() {} m() {} m() {} n() {} n() {} }")
+    assert {str(e) for e in errors} == {"Already a method with this name in this class"}
+    assert [error_position(e) for e in errors] == [(1, 18), (1, 25), (1, 39)]
+
+
+def test_duplicate_method_body_still_resolved(resolve_errors, error_position):
+    # the duplicate is reported and then resolved anyway, so the errors inside
+    # its body are found too rather than being masked by the name clash
+    errors = resolve_errors("class A { m() {} m() { break; } }")
+    assert [str(e) for e in errors] == [
+        "Already a method with this name in this class",
+        "break allowed only inside loop body",
+    ]
+    assert [error_position(e) for e in errors] == [(1, 18), (1, 24)]
+
+
+@pytest.mark.parametrize(
     "source, message, position",
     [
         # a jump outside any loop body is rejected, at the keyword itself

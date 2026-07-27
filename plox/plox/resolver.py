@@ -102,7 +102,15 @@ class Resolver(
                     assert this_scope is not None
                     this_scope["this"] = True
 
+                    method_names = set()
                     for method in s.methods:
+                        if method.name.lexeme in method_names:
+                            self._error(
+                                "Already a method with this name in this class",
+                                method.name,
+                            )
+                        method_names.add(method.name.lexeme)
+
                         self._resolve_function(
                             method,
                             FunctionType.INIT
