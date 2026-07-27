@@ -1,7 +1,6 @@
 .vscode
 .claude
 .lox.history
-bin
 __pycache__
 *_cache
 *.class
