@@ -35,7 +35,7 @@ $(LIB_OBJECTS): $(BIN_DIR)/%.o: $(SRC_DIR)/%.c
 
 clean:
 	rm -rf $(BIN_DIR)
-	rm -rf jlox/*.class
+	rm -rf jlox/build
 
 .PHONY: clean
 
