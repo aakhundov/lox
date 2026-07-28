@@ -26,7 +26,7 @@ from plox.ast import (
     Variable,
     Grouping,
 )
-from plox.common import to_str
+from plox.common import to_repr
 
 
 class AstPrinter(
@@ -123,7 +123,7 @@ class AstPrinter(
         return self._parens(f"get {e.name.lexeme}", e.object)
 
     def visit_literal(self, e: Literal) -> str:
-        return f'"{e.value}"' if isinstance(e.value, str) else to_str(e.value)
+        return to_repr(e.value)
 
     def visit_super(self, e: Super) -> str:
         return f"{e.keyword.lexeme}.{e.method.lexeme}"

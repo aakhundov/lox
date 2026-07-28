@@ -11,7 +11,8 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
 from plox.ast_printer import AstPrinter
-from plox.common import to_str
+from plox.code_printer import CodePrinter
+from plox.common import to_repr
 from plox.errors import InterpreterError, LoxError
 from plox.interpreter import Interpreter
 from plox.lexer import LoxLexer
@@ -76,6 +77,7 @@ class _FilteredHistory(FileHistory):
 class _RunConfig:
     tokens: bool = False
     ast: bool = False
+    code: bool = False
 
 
 @contextmanager
@@ -121,6 +123,13 @@ def _run_code(
             for i, statement in enumerate(program.statements):
                 s_expr = AstPrinter().print(statement)
                 print(f"{i + 1:04}  {s_expr}")
+        print()
+
+    if config.code:
+        metadata_shown = True
+        with _padded_borders("code"):
+            code = CodePrinter().print(program)
+            print(code)
         print()
 
     Resolver().resolve(program)
@@ -245,8 +254,7 @@ def _handle_command(
         case ["env" | "globals"]:
             # print the interpreter's globals
             for name, val in interpreter.globals.items():
-                s = f'"{val}"' if isinstance(val, str) else to_str(val)
-                print(f"{name} = {s}")
+                print(f"{name} = {to_repr(val)}")
             print_config = False
         case ["help" | "h"]:
             # print the recognized commands

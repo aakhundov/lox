@@ -1,5 +1,7 @@
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
@@ -155,3 +157,11 @@ def to_str(val: LoxValue) -> str:
     if val is None:
         return "nil"
     return str(val)
+
+
+def to_repr(val: LoxValue) -> str:
+    if isinstance(val, str):
+        return f'"{val}"'
+    if isinstance(val, float) and math.isfinite(val) and not val.is_integer():
+        return format(Decimal(repr(val)), "f")
+    return to_str(val)

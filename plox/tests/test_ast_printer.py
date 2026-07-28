@@ -54,6 +54,9 @@ def show():
         (True, "true"),
         (False, "false"),
         (None, "nil"),
+        # literals render as the Lox source they came from, so a small number
+        # keeps its positional form rather than Python's `1e-07`
+        (0.0000001, "0.0000001"),
     ],
 )
 def test_literal(show, value, expected):
