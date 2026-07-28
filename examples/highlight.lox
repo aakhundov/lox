@@ -1,0 +1,30 @@
+// every token type the scanner emits, in one screen
+var EPS = 0.125;
+var banner = "a string
+that spans lines";
+
+class Shape {
+  init(n) { this.n = n; }
+  kind() { return this.n < 3 ? "degenerate" : "polygon"; }
+}
+
+class Rect < Shape {
+  init(w, h) { super.init(4); this.w = w; this.h = h; }
+  area() { return this.w * this.h; }
+  square() { return !(this.w != this.h); }
+}
+
+fun fib(n) { if (n <= 1) return n; return fib(n - 1) + fib(n - 2); }
+
+var r = Rect(3, 4.5);
+print banner, r.kind(), r.area(), r.square(), nil;
+
+for (var i = 0; i < 12; i = i + 1) {
+  if (i == 0 or i == 1) continue;
+  if (i > 8 and i / 2 >= 4) break;
+  print i, fib(i), i >= 5 ? "big" : "small";
+}
+
+var c = 3;
+while (true) { c = c - 1; if (c <= 0) break; }
+if (c == 0) print "settled at", c, EPS; else print "early", false;

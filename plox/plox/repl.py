@@ -14,6 +14,7 @@ from plox.ast_printer import AstPrinter
 from plox.common import to_str
 from plox.errors import InterpreterError, LoxError
 from plox.interpreter import Interpreter
+from plox.lexer import LoxLexer
 from plox.parser import Parser
 from plox.resolver import Resolver
 from plox.scanner import Scanner
@@ -278,9 +279,14 @@ def _run_repl() -> int:
     multiline_hint = HTML(f"{prompt}<{HINT_COLOR}>{MULTILINE_HINT}</{HINT_COLOR}>")
     prompt_line = HTML(prompt)
 
+    lexer = LoxLexer()
     history = _FilteredHistory(str(HISTORY_PATH))
-    single_line = PromptSession[str](history=history)
+    single_line = PromptSession[str](
+        lexer=lexer,
+        history=history,
+    )
     multi_line = PromptSession[str](
+        lexer=lexer,
         history=history,
         multiline=True,
         key_bindings=_make_multiline_bindings(),

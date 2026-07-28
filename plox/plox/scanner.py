@@ -24,8 +24,10 @@ class Scanner:
         "while": TT.WHILE,
     }
 
-    def __init__(self, source: str) -> None:
+    def __init__(self, source: str, *, ignore_errors: bool = False) -> None:
         self._source: str = source
+        self._ignore_errors = ignore_errors
+
         self._tokens: list[Token] = []
         self._start: int = 0
         self._current: int = 0
@@ -44,7 +46,7 @@ class Scanner:
         self._add_token(TT.EOF)
         self._add_line_metadata()
 
-        if self._errors:
+        if self._errors and not self._ignore_errors:
             raise ExceptionGroup("Scanner errors", self._errors)
 
         return list(self._tokens)

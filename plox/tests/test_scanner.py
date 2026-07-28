@@ -541,3 +541,93 @@ def test_unterminated_block_comment(scan_errors, error_position, source, positio
 def test_multiple_errors(scan_errors, error_position, source, expected):
     errors = scan_errors(source)
     assert [(str(e), error_position(e)) for e in errors] == expected
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # the rejected character yields no token; the ones around it survive
+        (
+            "var @ = 1;",
+            [
+                (TT.VAR, "var", None),
+                (TT.EQUAL, "=", None),
+                (TT.NUMBER, "1", 1.0),
+                (TT.SEMICOLON, ";", None),
+            ],
+        ),
+        # an unterminated string runs to end-of-input, so it yields nothing
+        (
+            'var s = "abc',
+            [
+                (TT.VAR, "var", None),
+                (TT.IDENTIFIER, "s", None),
+                (TT.EQUAL, "=", None),
+            ],
+        ),
+        # ... and it consumes the rest of the input looking for its closing
+        # quote, so nothing after the opening one survives, lines included
+        (
+            'var s = "abc\nprint 1;',
+            [
+                (TT.VAR, "var", None),
+                (TT.IDENTIFIER, "s", None),
+                (TT.EQUAL, "=", None),
+            ],
+        ),
+        # the same for an unterminated block comment
+        ("1 /* open", [(TT.NUMBER, "1", 1.0)]),
+        # several errors in one source are all passed over
+        ("@ 1 #", [(TT.NUMBER, "1", 1.0)]),
+    ],
+)
+def test_ignore_errors_keeps_the_tokens_around_them(source, expected):
+    """With `ignore_errors`, a broken source scans to whatever it did produce.
+
+    The REPL's highlighter re-scans on every keystroke, where most inputs are
+    half-typed; it needs the tokens either side of the incomplete part rather
+    than an exception.
+    """
+    tokens = Scanner(source, ignore_errors=True).scan()
+    assert [(t.type, t.lexeme, t.literal) for t in tokens] == expected + [EOF]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "",
+        "1 + 2;",
+        'print "ok";',
+        "// just a comment",
+    ],
+)
+def test_ignore_errors_leaves_clean_sources_alone(scan, source):
+    """A source with no errors scans identically either way."""
+    tokens = Scanner(source, ignore_errors=True).scan()
+    assert [(t.type, t.lexeme, t.literal) for t in tokens] == scan(source)
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        # the error swallows no position: what follows is still placed
+        ("@\nvar x;", [(2, 1), (2, 5), (2, 6), (2, 7)]),
+        ("1 @ 2;", [(1, 1), (1, 5), (1, 6), (1, 7)]),
+    ],
+)
+def test_ignore_errors_still_positions_tokens(source, expected):
+    tokens = Scanner(source, ignore_errors=True).scan()
+    assert [(t.line_num, t.col_num) for t in tokens] == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "var @ = 1;",
+        'var s = "abc',
+        "1 /* open",
+    ],
+)
+def test_errors_are_raised_without_the_flag(scan_errors, source):
+    """The flag is opt-in: the default stays fail-loud."""
+    assert scan_errors(source)
