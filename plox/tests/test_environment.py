@@ -1,6 +1,6 @@
 import pytest
 
-from plox.common import Token, TokenType as TT
+from plox.common import Source, Token, TokenType as TT
 from plox.environment import Environment
 from plox.errors import InterpreterError
 
@@ -10,9 +10,19 @@ def name(lexeme, line=1, col=1):
 
     `Environment` looks up variables by the token's lexeme and, on failure,
     raises an `InterpreterError` located at the token, so the position matters
-    for the error-location assertions.
+    for the error-location assertions. The source is synthesized to hold the
+    lexeme at exactly that line and column, so the token can report a Location
+    with a real source line the way a scanned one does.
     """
-    return Token(TT.IDENTIFIER, lexeme, None, line_num=line, col_num=col)
+    code = "\n" * (line - 1) + " " * (col - 1) + lexeme
+    return Token(
+        TT.IDENTIFIER,
+        lexeme,
+        None,
+        Source.create(code, "<test>"),
+        line_num=line,
+        col_num=col,
+    )
 
 
 def test_define_and_get():

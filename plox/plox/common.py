@@ -9,6 +9,32 @@ if TYPE_CHECKING:
     from plox.interpreter import Interpreter
 
 
+@dataclass(frozen=True)
+class Location:
+    name: str
+    line: str
+    line_num: int
+    col_num: int
+
+
+@dataclass(frozen=True, eq=False)
+class Source:
+    name: str
+    code: str
+    lines: tuple[str, ...]
+
+    @classmethod
+    def create(cls, code: str, name: str | None = None) -> "Source":
+        if name is None:
+            name = "<anon>"
+        lines = tuple(code.split("\n"))
+        return cls(name, code, lines)
+
+    def get_location(self, line_num: int, col_num: int) -> Location:
+        line = self.lines[line_num - 1]
+        return Location(self.name, line, line_num, col_num)
+
+
 class TokenType(Enum):
     # single-char
     LEFT_PAREN = auto()
@@ -71,10 +97,18 @@ class Token:
     lexeme: str
     literal: float | str | None
 
+    # source code
+    source: Source
+
     # source position
     offset: int | None = None
     line_num: int | None = None
     col_num: int | None = None
+
+    def get_location(self) -> Location:
+        assert self.line_num is not None
+        assert self.col_num is not None
+        return self.source.get_location(self.line_num, self.col_num)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Token):

@@ -41,15 +41,17 @@ def collect_errors():
 def error_position():
     """Return a helper giving the single source position an error points at.
 
-    `get_line_info` yields one (line, col) pair per reported position. Only the
-    interpreter reports more than one -- a runtime error collects a position per
-    call it unwound through -- so for every other phase the unpack doubles as an
-    assertion that there is exactly one.
+    `locations` yields one Location per reported position, of which these
+    helpers keep only the (line, col) pair -- the name and source line an error
+    renders with are the reporting layer's concern, tested in test_common.py.
+    Only the interpreter reports more than one position -- a runtime error
+    collects one per call it unwound through -- so for every other phase the
+    unpack doubles as an assertion that there is exactly one.
     """
 
     def _error_position(error):
-        (position,) = error.get_line_info()
-        return position
+        (loc,) = error.locations
+        return loc.line_num, loc.col_num
 
     return _error_position
 
@@ -63,7 +65,7 @@ def error_stack():
     """
 
     def _error_stack(error):
-        return list(error.get_line_info())
+        return [(loc.line_num, loc.col_num) for loc in error.locations]
 
     return _error_stack
 

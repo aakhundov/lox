@@ -1,4 +1,4 @@
-from plox.common import Token, TokenType as TT
+from plox.common import Source, Token, TokenType as TT
 from plox.errors import ScannerError
 
 
@@ -24,8 +24,15 @@ class Scanner:
         "while": TT.WHILE,
     }
 
-    def __init__(self, source: str, *, ignore_errors: bool = False) -> None:
+    def __init__(
+        self,
+        source: str,
+        *,
+        ignore_errors: bool = False,
+        name: str | None = None,
+    ) -> None:
         self._source: str = source
+        self._code = Source.create(source, name)
         self._ignore_errors = ignore_errors
 
         self._tokens: list[Token] = []
@@ -155,7 +162,7 @@ class Scanner:
 
     def _add_token(self, type_: TT, literal: float | str | None = None) -> None:
         lexeme = self._source[self._start : self._current]
-        token = Token(type_, lexeme, literal, self._start)
+        token = Token(type_, lexeme, literal, self._code, offset=self._start)
         self._tokens.append(token)
 
     def _is_at_end(self) -> bool:
@@ -196,7 +203,7 @@ class Scanner:
     def _error(self, msg: str, offset: int | None = None) -> None:
         if offset is None:
             offset = self._start
-        self._errors.append(ScannerError(msg, self._source, offset))
+        self._errors.append(ScannerError(msg, self._code, offset))
 
     def _add_line_metadata(self) -> None:
         token_offsets = {t.offset for t in self._tokens}

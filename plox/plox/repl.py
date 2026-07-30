@@ -102,11 +102,12 @@ def _padded_borders(
 
 def _run_code(
     source: str,
+    name: str,
     interpreter: Interpreter,
     config: _RunConfig,
 ) -> None:
     metadata_shown = False
-    tokens = Scanner(source).scan()
+    tokens = Scanner(source, name=name).scan()
 
     if config.tokens:
         metadata_shown = True
@@ -138,28 +139,29 @@ def _run_code(
         interpreter.interpret(program)
 
 
-def _print_error(e: LoxError, source: str) -> None:
-    line_info = tuple(e.get_line_info())
-    source_lines = source.split("\n")
+def _print_error(e: LoxError) -> None:
+    locations = e.locations
     stack_lines: list[str] = []
 
-    if len(line_info) > PRINTED_STACK_CAP:
-        skipped = len(line_info) - PRINTED_STACK_CAP
+    if len(locations) > PRINTED_STACK_CAP:
+        skipped = len(locations) - PRINTED_STACK_CAP
         suffix = "s" if skipped != 1 else ""
         stack_lines.append(f"... ({skipped} stack frame{suffix} skipped)\n")
-        line_info = line_info[-PRINTED_STACK_CAP:]
+        locations = locations[-PRINTED_STACK_CAP:]
 
-    for line_num, col_num in line_info:
+    positions = []
+    for loc in locations:
+        positions.append(f"{loc.name} [{loc.line_num}:{loc.col_num}]")
+    max_pos_len = max(len(p) for p in positions) if positions else 0
+
+    for pos, loc in zip(positions, locations):
         # line / col position is one-based
-        source_line = source_lines[line_num - 1]
-        prefix = source_line[: col_num - 1]  # part before the error
+        prefix = loc.line[: loc.col_num - 1]  # part before the error
         # this is to print possible tabs from the source as they are
         padding = "".join(c if c == "\t" else " " for c in prefix)
 
-        pos = f"[{line_num}:{col_num}]"
-        source_line_with_pos = f"{pos:<8} | {source_line}"
-        shift = len(source_line_with_pos) - len(source_line)
-        caret_line = f"{' ' * (shift - 3)} | {padding}^"
+        source_line_with_pos = f"{pos:<{max_pos_len}} | {loc.line}"
+        caret_line = f"{'':<{max_pos_len}} | {padding}^"
         stack_lines.extend((source_line_with_pos, caret_line))
 
     error_msg = f"[{type(e).__name__}] {e}"
@@ -171,16 +173,15 @@ def _print_error(e: LoxError, source: str) -> None:
 
 def _print_errors(
     e: LoxError | ExceptionGroup[LoxError],
-    source: str,
     num_errors: int = 0,
     first_call: bool = True,
 ) -> int:
     if isinstance(e, ExceptionGroup):
         for nested_e in e.exceptions:
-            num_errors = _print_errors(nested_e, source, num_errors, first_call=False)
+            num_errors = _print_errors(nested_e, num_errors, first_call=False)
     else:
         if num_errors < PRINTED_ERROR_CAP:
-            _print_error(e, source)
+            _print_error(e)
         num_errors += 1
 
     if first_call and num_errors > PRINTED_ERROR_CAP:
@@ -191,9 +192,10 @@ def _print_errors(
     return num_errors
 
 
-def _run_file(path: str) -> int:
+def _run_file(path_to_file: str) -> int:
     try:
-        source = Path(path).read_text(encoding="utf-8")
+        path = Path(path_to_file)
+        source = path.read_text(encoding="utf-8")
     except OSError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 66  # EX_NOINPUT
@@ -202,14 +204,15 @@ def _run_file(path: str) -> int:
     try:
         _run_code(
             source=source,
+            name=path.name,
             interpreter=Interpreter(),  # fresh interpreter
             config=_RunConfig(),  # default config
         )
     except* InterpreterError as eg:
-        _print_errors(eg, source)
+        _print_errors(eg)
         exit_code = 70  # EX_SOFTWARE (runtime error)
     except* LoxError as eg:
-        _print_errors(eg, source)
+        _print_errors(eg)
         exit_code = 65  # EX_DATAERR (scan/parse error)
 
     return exit_code
@@ -305,6 +308,7 @@ def _run_repl() -> int:
     # persist for the whole session duration
     interpreter = Interpreter()
     cfg = _RunConfig()
+    seq = 1
 
     while True:
         try:
@@ -331,11 +335,14 @@ def _run_repl() -> int:
         try:
             _run_code(
                 source=text,
+                name=f"repl:{seq}",
                 interpreter=interpreter,
                 config=cfg,
             )
         except* LoxError as eg:
-            _print_errors(eg, text)
+            _print_errors(eg)
+
+        seq += 1
 
     return 0  # EX_OK
 

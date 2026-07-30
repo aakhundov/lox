@@ -26,17 +26,21 @@ from plox.ast import (
     Block,
 )
 from plox.ast_printer import AstPrinter
-from plox.common import Token, TokenType as TT
+from plox.common import Source, Token, TokenType as TT
+
+# every token here is built by hand rather than scanned, and the printer reads
+# only lexemes, so they can all share one empty source
+SOURCE = Source.create("", "<test>")
 
 
 def op(lexeme, token_type=TT.MINUS):
     """Build an operator token; only the lexeme affects the printer."""
-    return Token(token_type, lexeme, None, 0)
+    return Token(token_type, lexeme, None, SOURCE, offset=0)
 
 
 def ident(lexeme):
     """Build an identifier token; only the lexeme affects the printer."""
-    return Token(TT.IDENTIFIER, lexeme, None, 0)
+    return Token(TT.IDENTIFIER, lexeme, None, SOURCE, offset=0)
 
 
 @pytest.fixture
@@ -103,7 +107,7 @@ def test_super(show):
     # the keyword and the method name after the dot are one unit of syntax --
     # `super` is never an expression on its own -- so they render together
     # rather than as an object with a property hung off it
-    keyword = Token(TT.SUPER, "super", None, 0)
+    keyword = Token(TT.SUPER, "super", None, SOURCE, offset=0)
     assert show(Super(keyword, ident("m"))) == "super.m"
     assert show(Super(keyword, ident("init"))) == "super.init"
     # so a super call wraps the pair whole, where `this.m()` nests a `get`
@@ -113,7 +117,7 @@ def test_super(show):
 
 def test_this(show):
     # `this` renders as its bare keyword, like a variable does
-    assert show(This(Token(TT.THIS, "this", None, 0))) == "this"
+    assert show(This(Token(TT.THIS, "this", None, SOURCE, offset=0))) == "this"
 
 
 def test_assign(show):
@@ -131,7 +135,7 @@ def test_set(show):
     assert show(nested) == "(set c (get b a) 2)"
     # so is the value
     node = Set(
-        This(Token(TT.THIS, "this", None, 0)),
+        This(Token(TT.THIS, "this", None, SOURCE, offset=0)),
         ident("x"),
         Binary(Literal(1.0), op("+", TT.PLUS), Literal(2.0)),
     )
@@ -199,8 +203,11 @@ def test_for_statement(show):
 
 def test_loop_jump_statement(show):
     # a loop jump renders as its bare keyword
-    assert show(LoopJump(Token(TT.BREAK, "break", None, 0))) == "(break)"
-    assert show(LoopJump(Token(TT.CONTINUE, "continue", None, 0))) == "(continue)"
+    assert show(LoopJump(Token(TT.BREAK, "break", None, SOURCE, offset=0))) == "(break)"
+    assert (
+        show(LoopJump(Token(TT.CONTINUE, "continue", None, SOURCE, offset=0)))
+        == "(continue)"
+    )
 
 
 def test_call(show):
@@ -239,7 +246,9 @@ def test_class_statement(show):
         [
             Function(ident("init"), [ident("a")], [Print([Variable(ident("a"))])]),
             Function(
-                ident("m"), [], [Return(Token(TT.RETURN, "return", None, 0), None)]
+                ident("m"),
+                [],
+                [Return(Token(TT.RETURN, "return", None, SOURCE, offset=0), None)],
             ),
         ],
     )
@@ -272,7 +281,7 @@ def test_function_statement(show):
 
 
 def test_return_statement(show):
-    keyword = Token(TT.RETURN, "return", None, 0)
+    keyword = Token(TT.RETURN, "return", None, SOURCE, offset=0)
     # a bare `return` omits the value; the keyword token is carried for error
     # reporting but does not affect the rendering
     assert show(Return(keyword, None)) == "(return)"
