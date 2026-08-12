@@ -1,0 +1,12 @@
+-std=c17
+-pedantic-errors
+-Wall
+-Wextra
+-Wno-unused-parameter
+-Wshadow
+-Wconversion
+-Wsign-conversion
+-Wstrict-prototypes
+-Wmissing-prototypes
+-Wwrite-strings
+-fsanitize=address,undefined
