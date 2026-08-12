@@ -1,0 +1,6 @@
+// clox op codes defined by an X-macro
+// add new op codes to the list below
+
+X(CONSTANT)
+X(CONSTANT_LONG)
+X(RETURN)
