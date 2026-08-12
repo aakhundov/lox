@@ -27,7 +27,7 @@ OBJS := $(SRCS:$(SRC)/%.c=$(BUILD)/%.o)
 DEPS := $(OBJS:%=%.d)
 EXEC := $(BUILD)/$(APP)
 
-BUILD_FLAGS := $(CC) $(CFLAGS) $(LDFLAGS) $(LDLIBS)
+BUILD_FLAGS := $(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(LDLIBS)
 FLAGS_STAMP := $(BUILD)/.flags
 
 .PHONY: run doctor clean format tidy force
@@ -36,7 +36,7 @@ $(EXEC): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $(EXEC)
 
 $(BUILD)/%.o: $(SRC)/%.c $(FLAGS_STAMP) | $(BUILD)
-	$(CC) $(CFLAGS) -MMD -MP -MF $@.d -c $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) -MMD -MP -MF $@.d -c $< -o $@
 
 $(FLAGS_STAMP): force | $(BUILD)
 	@echo '$(BUILD_FLAGS)' | cmp -s - $@ || echo '$(BUILD_FLAGS)' > $@

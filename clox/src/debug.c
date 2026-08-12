@@ -11,18 +11,21 @@
 #define PAD_SIZE 40
 #define POS_SIZE 11
 
-static size_t const_instruction(const clox_chunk_t *chunk, size_t offset) {
-  clox_value_t value;
-  offset = clox_read_constant(chunk, offset, &value);
+static size_t const_instruction(const clox_chunk_t *chunk, clox_op_code_t opcode, size_t offset) {
+  const clox_byte_t *ip = chunk->code + offset + 1; // skip the opcode
+  clox_value_t value = clox_read_constant(chunk, opcode, &ip);
+  assert(ip > chunk->code + offset + 1); // ip has moved
 
   printf("[");
   clox_print_value(value);
   printf("]");
 
-  return offset; // shifted by the call
+  // cast is safe: assert above
+  return (size_t)(ip - chunk->code);
 }
 
-static size_t disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
+size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
+  assert(offset < chunk->length);
   clox_byte_t byte = chunk->code[offset];
   clox_pos_t pos = chunk->positions[offset];
 
@@ -40,12 +43,17 @@ static size_t disassemble_instruction(const clox_chunk_t *chunk, size_t offset) 
     printf("%-18s ", clox_op_code_names[opcode]);
 
     switch (opcode) {
+    case OP_ADD:
+    case OP_SUBTRACT:
+    case OP_MULTIPLY:
+    case OP_DIVIDE:
+    case OP_NEGATE:
     case OP_RETURN:
       offset++; // just opcode
       break;
     case OP_CONSTANT:
     case OP_CONSTANT_LONG:
-      offset = const_instruction(chunk, offset);
+      offset = const_instruction(chunk, opcode, offset);
       break;
     case OP_CODE_COUNT:
       assert(0 && "unreachable");
@@ -70,7 +78,7 @@ void clox_disassemble_chunk(const clox_chunk_t *chunk, const char *name) {
 
   for (size_t offset = 0; offset < chunk->length;) {
     // offset is incremented by the call below
-    offset = disassemble_instruction(chunk, offset);
+    offset = clox_disassemble_instruction(chunk, offset);
   }
 
   // skip the new line char from the printed char count
