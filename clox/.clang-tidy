@@ -11,7 +11,8 @@ Checks: >
   -readability-implicit-bool-conversion,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 
-HeaderFilterRegex: '.*'
+# our own headers only: vendored third-party code is not ours to lint
+HeaderFilterRegex: '.*/clox/src/.*'
 FormatStyle: file
 
 CheckOptions:

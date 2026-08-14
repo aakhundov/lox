@@ -1,5 +1,6 @@
 #include <limits.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,12 +8,18 @@
 #include <sysexits.h>
 #include <unistd.h>
 
+#include <isocline.h>
+
 #include "chunk.h"
 #include "compiler.h"
 #include "error.h"
 
 #define ERROR_BUFFER_SIZE 1024
-#define REPL_BUFFER_SIZE 2048
+#define HISTORY_FILE ".clox.history"
+#define HISTORY_PATH_SIZE 1024
+#define HISTORY_ENTRIES 1000
+#define PROMPT_MARKER ">>> "
+#define CONTINUATION_MARKER "... "
 
 static void print_error(const char *restrict fmt, ...) {
   char message[ERROR_BUFFER_SIZE];
@@ -53,23 +60,64 @@ out:
   return ret;
 }
 
+// Decides when the editor should submit rather than open another line. A
+// lone enter on an empty prompt starts a multi-line block, which then runs
+// on a blank line: two newlines in a row. Single-line input is unaffected.
+static bool input_is_complete(const char *input, void *ctx) {
+  (void)ctx; // no context argument needed
+
+  size_t len = strlen(input);
+  if (len == 0) {
+    return false; // empty prompt: open a multi-line block
+  }
+  if (strchr(input, '\n') == NULL) {
+    return true; // still on the first line: enter submits
+  }
+  return len >= 2 && input[len - 1] == '\n' && input[len - 2] == '\n';
+}
+
+static void setup_ic_history(void) {
+  const char *home = getenv("HOME");
+  if (home == NULL) {
+    ic_set_history(NULL, -1); // no home: keep history for this session only
+    return;
+  }
+
+  char path[HISTORY_PATH_SIZE];
+  int written = snprintf(path, sizeof(path), "%s/%s", home, HISTORY_FILE);
+  if (written < 0 || (size_t)written >= sizeof(path)) {
+    ic_set_history(NULL, -1); // path too long: same fallback
+    return;
+  }
+
+  ic_set_history(path, HISTORY_ENTRIES);
+}
+
 static void run_repl(void) {
-  char source[REPL_BUFFER_SIZE];
+  ic_set_prompt_marker(PROMPT_MARKER, CONTINUATION_MARKER);
+  ic_enable_multiline(true); // the completeness hook is ignored without it
+  ic_set_is_complete(input_is_complete, NULL);
+  setup_ic_history();
 
   while (1) {
-    printf("> ");
-    if (!fgets(source, sizeof(source), stdin)) {
-      // Ctrl-D or read error: exit REPL
-      printf("\n");
-      break;
+    char *text = ic_readline(NULL); // alloc
+    if (text == NULL) {
+      break; // Ctrl-D, Ctrl-C or read error: exit REPL
     }
 
+    // drop the blank lines that opened and terminated a multi-line block,
+    // so the first line the user typed is line 1 of the program
+    char *source = text;
+    while (*source == '\n') {
+      source++;
+    }
     size_t len = strlen(source);
-    if (len > 0 && source[len - 1] == '\n') {
-      source[len - 1] = '\0'; // drop the newline
+    while (len > 0 && source[len - 1] == '\n') {
+      source[--len] = '\0';
     }
 
     run_code(source);
+    ic_free(text); // free
   }
 }
 

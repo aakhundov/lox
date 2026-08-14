@@ -19,24 +19,44 @@ RUN_ENV  := ASAN_OPTIONS=$(LEAK_OPT)detect_stack_use_after_return=1 \
 
 APP := clox
 SRC := $(HERE)src
+VENDOR := $(HERE)vendor
 BUILD := $(HERE)build
 
 SRCS := $(wildcard $(SRC)/*.c)
 HDRS := $(wildcard $(SRC)/*.h)
 OBJS := $(SRCS:$(SRC)/%.c=$(BUILD)/%.o)
-DEPS := $(OBJS:%=%.d)
 EXEC := $(BUILD)/$(APP)
 
-BUILD_FLAGS := $(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(LDLIBS)
+# Third-party code, one entry per library. Sources are listed explicitly
+# rather than globbed: isocline's src/isocline.c is a unity build that
+# #includes its siblings, so globbing would compile them a second time.
+VENDOR_SRCS := $(VENDOR)/isocline/src/isocline.c
+VENDOR_OBJS := $(VENDOR_SRCS:$(VENDOR)/%.c=$(BUILD)/vendor/%.o)
+
+# vendored headers are found by every translation unit, ours and theirs
+override CPPFLAGS += -I$(VENDOR)/isocline/include
+
+# Vendored code is not ours to keep warning-clean, so it builds outside the
+# project's strict set: no -W..., no -pedantic-errors. Everything else is
+# inherited, so sanitizers and debug info still cover the whole binary.
+VENDOR_CFLAGS := $(filter-out -W% -pedantic-errors,$(CFLAGS))
+
+DEPS := $(OBJS:%=%.d) $(VENDOR_OBJS:%=%.d)
+
+BUILD_FLAGS := $(CC) $(CFLAGS) $(VENDOR_CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(LDLIBS)
 FLAGS_STAMP := $(BUILD)/.flags
 
 .PHONY: run doctor clean format tidy force
 
-$(EXEC): $(OBJS)
+$(EXEC): $(OBJS) $(VENDOR_OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $(EXEC)
 
 $(BUILD)/%.o: $(SRC)/%.c $(FLAGS_STAMP) | $(BUILD)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -MMD -MP -MF $@.d -c $< -o $@
+
+$(BUILD)/vendor/%.o: $(VENDOR)/%.c $(FLAGS_STAMP) | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(CC) $(VENDOR_CFLAGS) $(CPPFLAGS) -MMD -MP -MF $@.d -c $< -o $@
 
 $(FLAGS_STAMP): force | $(BUILD)
 	@echo '$(BUILD_FLAGS)' | cmp -s - $@ || echo '$(BUILD_FLAGS)' > $@

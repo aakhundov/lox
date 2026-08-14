@@ -1,0 +1,49 @@
+Add ic_history_save() to persist programmatic history changes.
+
+The history file is written when ic_readline() returns, and nothing else in
+the public API can write it. ic_history_add(), ic_history_remove_last() and
+ic_history_clear() therefore only mutate the in-memory list: the change is
+visible to the current session but is undone by the next automatic save, or
+lost entirely if the program exits first.
+
+clox hits this when dropping REPL commands from the history -- the entry is
+already on disk by the time ic_readline() hands the line back, so removing it
+in memory is not enough.
+
+This exposes the existing history_save() as ic_history_save(). Purely
+additive: no existing behaviour changes, and the automatic save on the
+ic_readline() path is untouched.
+
+Upstream: https://github.com/daanx/isocline at tag v1.1.0
+Apply with: git apply -p1  # from clox/vendor/isocline/, after 0001
+
+--- a/include/isocline.h
++++ b/include/isocline.h
+@@ -140,6 +140,13 @@
+ /// Add an entry to the history
+ void ic_history_add( const char* entry );
+ 
++/// Save the history to the file set with `ic_set_history()`.
++/// The history is saved automatically when `ic_readline()` returns, so this is
++/// only needed to persist changes made programmatically with `ic_history_add()`,
++/// `ic_history_remove_last()`, or `ic_history_clear()`.
++/// Does nothing if no history file was set.
++void ic_history_save(void);
++
+ /// \}
+ 
+ //--------------------------------------------------------------
+--- a/src/isocline.c
++++ b/src/isocline.c
+@@ -228,6 +228,11 @@
+   history_clear(env->history);
+ }
+ 
++ic_public void ic_history_save(void) {
++  ic_env_t* env = ic_get_env(); if (env==NULL) return;
++  history_save(env->history);
++}
++
+ ic_public bool ic_enable_auto_tab( bool enable ) {
+   ic_env_t* env = ic_get_env(); if (env==NULL) return false;
+   bool prev = env->complete_autotab;

@@ -10,3 +10,4 @@
 -Wmissing-prototypes
 -Wwrite-strings
 -fsanitize=address,undefined
+-Ivendor/isocline/include

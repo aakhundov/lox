@@ -1,0 +1,83 @@
+Add an application callback deciding when multi-line input is complete.
+
+Upstream isocline accepts the input as soon as enter is pressed, unless the
+line happens to end with the multiline_eol character ('\\'). A REPL needs to
+decide completeness by its own rules instead -- clox continues input until a
+blank line terminates the block.
+
+This adds ic_set_is_complete(fun, arg). When a callback is set and multi-line
+input is enabled, an enter that would have accepted an input the callback
+calls incomplete inserts a newline and keeps editing. With no callback set the
+behaviour is exactly as before. The existing multiline_eol path is untouched
+and still takes precedence.
+
+Kept deliberately generic (the policy lives in the application, not here) so
+it can be offered upstream as-is.
+
+Upstream: https://github.com/daanx/isocline at tag v1.1.0
+Apply with: git apply -p1  # from clox/vendor/isocline/
+
+--- a/include/isocline.h
++++ b/include/isocline.h
+@@ -333,7 +333,20 @@
+ /// Disable or enable multi-line input (enabled by default).
+ /// Returns the previous setting.
+ bool ic_enable_multiline( bool enable );
++
++/// A callback that decides whether the current `input` is complete.
++/// Return `false` to insert a newline and keep editing instead of accepting
++/// the input when the user presses enter.
++typedef bool (ic_is_complete_fun_t)(const char* input, void* arg);
+ 
++/// Set a callback that decides when multi-line input is complete.
++/// This lets an application, like a REPL, continue input on a new line for as
++/// long as its own rules consider the input unfinished. There can only be one
++/// such function, setting it again disables the previous one; passing `NULL`
++/// restores the default where enter always accepts the input.
++/// Ignored when multi-line input is disabled.
++void ic_set_is_complete( ic_is_complete_fun_t* is_complete, void* arg );
++
+ /// Disable or enable sound (enabled by default).
+ /// A beep is used when tab cannot find any completion for example.
+ /// Returns the previous setting.
+--- a/src/env.h
++++ b/src/env.h
+@@ -33,6 +33,8 @@
+   const char*     cprompt_marker;   // prompt marker for continuation lines (defaults to `prompt_marker`)
+   ic_highlight_fun_t* highlighter;  // highlight callback
+   void*           highlighter_arg;  // user state for the highlighter.
++  ic_is_complete_fun_t* is_complete; // callback deciding if multiline input is complete (NULL if unset)
++  void*           is_complete_arg;  // user state for the is_complete callback.
+   const char*     match_braces;     // matching braces, e.g "()[]{}"
+   const char*     auto_braces;      // auto insertion braces, e.g "()[]{}\"\"''"
+   char            multiline_eol;    // character used for multiline input ("\") (set to 0 to disable)
+--- a/src/isocline.c
++++ b/src/isocline.c
+@@ -185,6 +185,12 @@
+   bool prev = env->singleline_only;
+   env->singleline_only = !enable;
+   return !prev;
++}
++
++ic_public void ic_set_is_complete( ic_is_complete_fun_t* is_complete, void* arg ) {
++  ic_env_t* env = ic_get_env(); if (env==NULL) return;
++  env->is_complete = is_complete;
++  env->is_complete_arg = arg;
+ }
+ 
+ ic_public bool ic_enable_beep( bool enable ) {
+--- a/src/editline.c
++++ b/src/editline.c
+@@ -928,6 +928,12 @@
+       {
+         // replace line-continuation with newline
+         edit_multiline_eol(env,&eb);        
++      }
++      else if (!env->singleline_only && env->is_complete != NULL &&
++                !(*env->is_complete)(sbuf_string(eb.input), env->is_complete_arg))
++      {
++        // the application considers the input unfinished: continue on a new line
++        edit_insert_char(env,&eb,'\n');
+       }
+       else {
+         // otherwise done
