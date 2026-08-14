@@ -1,0 +1,49 @@
+// single-character tokens
+X(LEFT_PAREN)
+X(RIGHT_PAREN)
+X(LEFT_BRACE)
+X(RIGHT_BRACE)
+X(COMMA)
+X(DOT)
+X(MINUS)
+X(PLUS)
+X(SEMICOLON)
+X(SLASH)
+X(STAR)
+
+// one or two character tokens
+X(BANG)
+X(BANG_EQUAL)
+X(EQUAL)
+X(EQUAL_EQUAL)
+X(GREATER)
+X(GREATER_EQUAL)
+X(LESS)
+X(LESS_EQUAL)
+
+// literals
+X(IDENTIFIER)
+X(STRING)
+X(NUMBER)
+
+// keywords
+X(AND)
+X(CLASS)
+X(ELSE)
+X(FALSE)
+X(FOR)
+X(FUN)
+X(IF)
+X(NIL)
+X(OR)
+X(PRINT)
+X(RETURN)
+X(SUPER)
+X(THIS)
+X(TRUE)
+X(VAR)
+X(WHILE)
+
+// other
+X(ERROR)
+X(EOF)

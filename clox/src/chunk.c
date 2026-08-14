@@ -11,7 +11,7 @@
 #include "value.h"
 
 const char *const clox_op_code_names[] = {
-#define X(opcode) "OP_" #opcode,
+#define X(name) "OP_" #name,
 #include "opcodes.def"
 #undef X
 };
@@ -19,7 +19,7 @@ const char *const clox_op_code_names[] = {
 _Static_assert(CLOX_ARRAY_SIZE(clox_op_code_names) == OP_CODE_COUNT,
                "op code names array size mismatch");
 
-static size_t clox_add_constant(clox_chunk_t *chunk, clox_value_t value) {
+static size_t add_constant(clox_chunk_t *chunk, clox_value_t value) {
   size_t index = chunk->constants.length; // where new value will land
   clox_write_value_array(&chunk->constants, value);
   return index;
@@ -59,13 +59,14 @@ void clox_free_chunk(clox_chunk_t *chunk) {
   clox_free_value_array(&chunk->constants);
 }
 
+// at least three bytes of long constant index in size_t
 _Static_assert(sizeof(size_t) >= 3, "sizeof(size_t) < 3");
 
 #define THREE_BYTE_MAX                                                                             \
   (((size_t)UCHAR_MAX << (2 * CHAR_BIT)) | ((size_t)UCHAR_MAX << CHAR_BIT) | UCHAR_MAX)
 
 void clox_write_constant(clox_chunk_t *chunk, clox_value_t value, clox_pos_t pos) {
-  size_t index = clox_add_constant(chunk, value);
+  size_t index = add_constant(chunk, value);
 
   if (index <= UCHAR_MAX) {
     // 1-byte index

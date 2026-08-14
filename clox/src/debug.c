@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "chunk.h"
+#include "common.h"
 #include "value.h"
 
 #define PAD_SIZE 40
@@ -30,7 +31,7 @@ size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
   clox_pos_t pos = chunk->positions[offset];
 
   char pos_str[POS_SIZE + 1];
-  if (snprintf(pos_str, sizeof(pos_str), "%u:%u", pos.line, pos.column) > POS_SIZE) {
+  if (snprintf(pos_str, sizeof(pos_str), "%zu:%zu", pos.line, pos.col) > POS_SIZE) {
     // add trailing ellipsis ... on trimming
     memset(pos_str + (POS_SIZE - 3), '.', 3);
   }

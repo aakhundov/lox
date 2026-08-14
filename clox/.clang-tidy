@@ -8,7 +8,12 @@ Checks: >
   readability-*,
   -bugprone-easily-swappable-parameters,
   -readability-identifier-length,
+  -readability-implicit-bool-conversion,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 
 HeaderFilterRegex: '.*'
 FormatStyle: file
+
+CheckOptions:
+  # fileno() is declared in a private Darwin header pulled in by <stdio.h>
+  misc-include-cleaner.IgnoreHeaders: '.*/_stdio\.h'

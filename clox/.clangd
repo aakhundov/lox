@@ -1,6 +1,9 @@
 Diagnostics:
   MissingIncludes: Strict
   UnusedIncludes: Strict
+  Includes:
+    # fileno() is declared in a private Darwin header pulled in by <stdio.h>
+    IgnoreHeader: ['.*/_stdio\.h']
 
 InlayHints:
   Enabled: No

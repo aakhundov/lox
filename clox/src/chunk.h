@@ -3,10 +3,11 @@
 
 #include <stddef.h>
 
+#include "common.h"
 #include "value.h"
 
 typedef enum {
-#define X(opcode) OP_##opcode,
+#define X(name) OP_##name,
 #include "opcodes.def"
 #undef X
   OP_CODE_COUNT,
@@ -15,11 +16,6 @@ typedef enum {
 extern const char *const clox_op_code_names[];
 
 typedef unsigned char clox_byte_t;
-
-typedef struct {
-  unsigned int line;
-  unsigned int column;
-} clox_pos_t;
 
 typedef struct {
   size_t length;

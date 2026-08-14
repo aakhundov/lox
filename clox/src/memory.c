@@ -4,9 +4,9 @@
 
 #include "error.h"
 
-// TODO: remove when the `old_capacity` starts being used
-// NOLINTNEXTLINE(misc-unused-parameters,clang-diagnostic-unused-parameter)
 void *clox_reallocate(void *pointer, size_t old_bytes, size_t new_bytes) {
+  (void)old_bytes; // not used yet
+
   if (new_bytes == 0) {
     free(pointer);
     return NULL;
