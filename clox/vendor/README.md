@@ -35,6 +35,7 @@ applied, in filename order:
 |---|---|
 | `0001-add-is-complete-callback.patch` | Adds `ic_set_is_complete()`, letting the application decide when multi-line input is finished. Upstream accepts on enter unless the line ends with `\`, which is not a rule a REPL can use. |
 | `0002-add-history-save.patch` | Adds `ic_history_save()`. The history file is only written when `ic_readline()` returns, so `ic_history_add()`, `ic_history_remove_last()` and `ic_history_clear()` cannot persist anything on their own. |
+| `0003-configurable-short-history-entries.patch` | Adds `ic_enable_history_short_entries()`. Upstream silently drops any accepted input of one character or less, which makes a one-character program unrecallable and leaves an application unable to tell whether the entry it wants to remove was ever recorded. |
 
 Each patch is a diff against the tree with the preceding ones applied, so they
 apply in filename order.

@@ -367,6 +367,11 @@ bool ic_enable_color( bool enable );
 /// Returns the previous setting.
 bool ic_enable_history_duplicates( bool enable );
 
+/// Disable or enable single-character entries in the history (disabled by default).
+/// Empty entries are never added to the history regardless of this setting.
+/// Returns the previous setting.
+bool ic_enable_history_short_entries( bool enable );
+
 /// Disable or enable automatic tab completion after a completion 
 /// to expand as far as possible if the completions are unique. (disabled by default).
 /// Returns the previous setting.

@@ -22,6 +22,7 @@ struct history_s {
   const char*  fname;         // history file
   alloc_t* mem;
   bool     allow_duplicates;   // allow duplicate entries?
+  bool     allow_short;        // allow single-character entries?
 };
 
 ic_private history_t* history_new(alloc_t* mem) {
@@ -47,6 +48,16 @@ ic_private bool history_enable_duplicates( history_t* h, bool enable ) {
   bool prev = h->allow_duplicates;
   h->allow_duplicates = enable;
   return prev;
+}
+
+ic_private bool history_enable_short( history_t* h, bool enable ) {
+  bool prev = h->allow_short;
+  h->allow_short = enable;
+  return prev;
+}
+
+ic_private bool history_allows_short( const history_t* h ) {
+  return h->allow_short;
 }
 
 ic_private ssize_t  history_count(const history_t* h) {

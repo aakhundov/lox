@@ -17,9 +17,9 @@
 #define ERROR_BUFFER_SIZE 1024
 #define HISTORY_FILE ".clox.history"
 #define HISTORY_PATH_SIZE 1024
-#define HISTORY_ENTRIES 1000
 #define PROMPT_MARKER ">>> "
 #define CONTINUATION_MARKER "... "
+#define REPL_QUIT_COMMAND "q"
 
 static void print_error(const char *restrict fmt, ...) {
   char message[ERROR_BUFFER_SIZE];
@@ -90,13 +90,18 @@ static void setup_ic_history(void) {
     return;
   }
 
-  ic_set_history(path, HISTORY_ENTRIES);
+  ic_set_history(path, -1);
+}
+
+static void handle_repl_command(const char *command) {
+  print_error("Unrecognized command: \"%s\"", command);
 }
 
 static void run_repl(void) {
   ic_set_prompt_marker(PROMPT_MARKER, CONTINUATION_MARKER);
   ic_enable_multiline(true); // the completeness hook is ignored without it
   ic_set_is_complete(input_is_complete, NULL);
+  ic_enable_history_short_entries(true);
   setup_ic_history();
 
   while (1) {
@@ -116,7 +121,24 @@ static void run_repl(void) {
       source[--len] = '\0';
     }
 
-    run_code(source);
+    // leading whitespace makes it a non-command
+    if (len > 0 && source[0] == ':') {
+      // commands are not saved in history
+      ic_history_remove_last();
+      ic_history_save();
+
+      if (len > 1) {
+        char *command = source + 1; // skip :
+        if (strcmp(command, REPL_QUIT_COMMAND) == 0) {
+          ic_free(text); // free before break
+          break;
+        }
+        handle_repl_command(command);
+      }
+    } else {
+      run_code(source);
+    }
+
     ic_free(text); // free
   }
 }

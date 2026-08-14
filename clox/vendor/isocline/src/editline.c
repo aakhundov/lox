@@ -1130,7 +1130,8 @@ static char* edit_line( ic_env_t* env, const char* prompt_text )
 
   // update history
   history_update(env->history, sbuf_string(eb.input));
-  if (res == NULL || sbuf_len(eb.input) <= 1) { ic_history_remove_last(); } // no empty or single-char entries
+  const ssize_t min_history_len = (history_allows_short(env->history) ? 1 : 2);
+  if (res == NULL || sbuf_len(eb.input) < min_history_len) { ic_history_remove_last(); } // no empty (or single-char) entries
   history_save(env->history);
 
   // free resources 

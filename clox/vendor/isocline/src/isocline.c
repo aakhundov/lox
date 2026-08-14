@@ -208,6 +208,11 @@ ic_public bool ic_enable_history_duplicates( bool enable ) {
   return history_enable_duplicates(env->history, enable);
 }
 
+ic_public bool ic_enable_history_short_entries( bool enable ) {
+  ic_env_t* env = ic_get_env(); if (env==NULL) return false;
+  return history_enable_short(env->history, enable);
+}
+
 ic_public void ic_set_history(const char* fname, long max_entries ) {
   ic_env_t* env = ic_get_env(); if (env==NULL) return;
   history_load_from(env->history, fname, max_entries );

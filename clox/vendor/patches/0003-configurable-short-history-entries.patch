@@ -1,0 +1,98 @@
+Make single-character history entries configurable.
+
+edit_line drops any accepted input of one character or less from the history,
+bundling two policies into one condition: never record an empty input, and
+never record a single character. The second is not always wanted -- in a REPL
+a one-character line can be a legitimate program, and an application that
+removes its own entries cannot tell whether the entry it wants to remove was
+recorded in the first place.
+
+This splits them, following ic_enable_history_duplicates exactly: a flag on
+history_t, a private setter and getter, and a public toggle. The call site
+becomes a minimum length rather than a constant, so empty input is still never
+recorded.
+
+Purely additive: the flag zero-initializes to false, so the default behaviour
+is unchanged.
+
+Upstream: https://github.com/daanx/isocline at tag v1.1.0
+Apply with: git apply -p1  # from clox/vendor/isocline/, after 0002
+
+--- a/include/isocline.h
++++ b/include/isocline.h
+@@ -367,6 +367,11 @@
+ /// Returns the previous setting.
+ bool ic_enable_history_duplicates( bool enable );
+ 
++/// Disable or enable single-character entries in the history (disabled by default).
++/// Empty entries are never added to the history regardless of this setting.
++/// Returns the previous setting.
++bool ic_enable_history_short_entries( bool enable );
++
+ /// Disable or enable automatic tab completion after a completion 
+ /// to expand as far as possible if the completions are unique. (disabled by default).
+ /// Returns the previous setting.
+--- a/src/isocline.c
++++ b/src/isocline.c
+@@ -208,6 +208,11 @@
+   return history_enable_duplicates(env->history, enable);
+ }
+ 
++ic_public bool ic_enable_history_short_entries( bool enable ) {
++  ic_env_t* env = ic_get_env(); if (env==NULL) return false;
++  return history_enable_short(env->history, enable);
++}
++
+ ic_public void ic_set_history(const char* fname, long max_entries ) {
+   ic_env_t* env = ic_get_env(); if (env==NULL) return;
+   history_load_from(env->history, fname, max_entries );
+--- a/src/editline.c
++++ b/src/editline.c
+@@ -1130,7 +1130,8 @@
+ 
+   // update history
+   history_update(env->history, sbuf_string(eb.input));
+-  if (res == NULL || sbuf_len(eb.input) <= 1) { ic_history_remove_last(); } // no empty or single-char entries
++  const ssize_t min_history_len = (history_allows_short(env->history) ? 1 : 2);
++  if (res == NULL || sbuf_len(eb.input) < min_history_len) { ic_history_remove_last(); } // no empty (or single-char) entries
+   history_save(env->history);
+ 
+   // free resources 
+--- a/src/history.c
++++ b/src/history.c
+@@ -22,6 +22,7 @@
+   const char*  fname;         // history file
+   alloc_t* mem;
+   bool     allow_duplicates;   // allow duplicate entries?
++  bool     allow_short;        // allow single-character entries?
+ };
+ 
+ ic_private history_t* history_new(alloc_t* mem) {
+@@ -49,6 +50,16 @@
+   return prev;
+ }
+ 
++ic_private bool history_enable_short( history_t* h, bool enable ) {
++  bool prev = h->allow_short;
++  h->allow_short = enable;
++  return prev;
++}
++
++ic_private bool history_allows_short( const history_t* h ) {
++  return h->allow_short;
++}
++
+ ic_private ssize_t  history_count(const history_t* h) {
+   return h->count;
+ }
+--- a/src/history.h
++++ b/src/history.h
+@@ -21,6 +21,8 @@
+ ic_private void     history_free(history_t* h);
+ ic_private void     history_clear(history_t* h);
+ ic_private bool     history_enable_duplicates( history_t* h, bool enable );
++ic_private bool     history_enable_short( history_t* h, bool enable );
++ic_private bool     history_allows_short( const history_t* h );
+ ic_private ssize_t  history_count(const history_t* h);
+ 
+ ic_private void     history_load_from(history_t* h, const char* fname, long max_entries);
