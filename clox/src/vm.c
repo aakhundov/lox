@@ -8,7 +8,7 @@
 #include "error.h"
 #include "value.h"
 
-#if CLOX_DEBUG_TRACE
+#if CLOX_DEBUG_EXECUTION
 static void print_stack(const clox_vm_t *vm) {
   assert(vm->stack_top >= vm->stack);
   // cast is safe: assert above
@@ -31,7 +31,7 @@ static void reset_stack(clox_vm_t *vm) {
 
 static inline void push_stack(clox_vm_t *vm, clox_value_t value) {
   if (vm->stack_top >= vm->stack + CLOX_STACK_SIZE) {
-    CLOX_FATAL_ERROR("stack overflow", 1);
+    CLOX_FATAL_ERROR("stack overflow", CLOX_EX_SOFTWARE);
   }
 
   *vm->stack_top = value;
@@ -60,7 +60,7 @@ static clox_interpret_result_t run(clox_vm_t *vm) {
     assert(vm->ip >= vm->chunk->code);
     assert(vm->ip < vm->chunk->code + vm->chunk->length);
 
-#if CLOX_DEBUG_TRACE
+#if CLOX_DEBUG_EXECUTION
     print_stack(vm);
     clox_disassemble_instruction(vm->chunk, (size_t)(vm->ip - vm->chunk->code));
 #endif

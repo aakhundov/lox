@@ -79,7 +79,7 @@ void clox_write_constant(clox_chunk_t *chunk, clox_value_t value, clox_pos_t pos
     clox_write_chunk(chunk, (clox_byte_t)(index >> CHAR_BIT), pos);
     clox_write_chunk(chunk, (clox_byte_t)index, pos);
   } else {
-    CLOX_FATAL_ERROR("constant limit exceeded", 1);
+    CLOX_FATAL_ERROR("constant limit exceeded", CLOX_EX_SOFTWARE);
   }
 }
 

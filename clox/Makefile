@@ -81,6 +81,6 @@ format:
 	$(CLANG_FORMAT) -i $(SRCS) $(HDRS)
 
 tidy:
-	$(CLANG_TIDY) $(SRCS) -- $(CFLAGS)
+	$(CLANG_TIDY) $(SRCS) -- $(CFLAGS) $(CPPFLAGS)
 
 -include $(DEPS)

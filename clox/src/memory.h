@@ -5,8 +5,10 @@
 
 #define CLOX_INITIAL_SIZE 8
 
+// in the macros below, overflow isn't feasible:
+// allocator will fail earlier than SIZE_MAX is hit
+
 #define CLOX_GROW_SIZE(size)                                                                       \
-  /* overflow here isn't feasible: realloc will fail much earlier than SIZE_MAX */                 \
   ((size) < CLOX_INITIAL_SIZE ? CLOX_INITIAL_SIZE : (size) * 2) // doubling
 
 #define CLOX_GROW_ARRAY(type, pointer, old_size, new_size)                                         \

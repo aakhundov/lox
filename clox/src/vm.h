@@ -1,8 +1,6 @@
 #ifndef CLOX_VM_H
 #define CLOX_VM_H
 
-#include <assert.h>
-
 #include "chunk.h"
 #include "value.h"
 

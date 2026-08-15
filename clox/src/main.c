@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sysexits.h>
 #include <unistd.h>
 
 #include <isocline.h>
@@ -26,7 +25,7 @@ static void print_error(const char *restrict fmt, ...) {
 
   va_list ap;
   va_start(ap, fmt);
-  (void)vsnprintf(message, ERROR_BUFFER_SIZE, fmt, ap);
+  (void)vsnprintf(message, sizeof(message), fmt, ap);
   va_end(ap);
 
   if (isatty(fileno(stderr))) {
@@ -42,8 +41,8 @@ static void print_clox_error(clox_error_info_t e, const char *source) {
   print_error("Error [at %zu:%zu]: %s", e.pos.line, e.pos.col, e.message);
 }
 
-static int run_code(const char *source) {
-  int ret = EX_OK;
+static clox_exit_code_t run_code(const char *source) {
+  clox_exit_code_t ret = CLOX_EX_OK;
 
   clox_chunk_t chunk;
   clox_init_chunk(&chunk);
@@ -51,7 +50,7 @@ static int run_code(const char *source) {
   clox_compile_result_t result = clox_compile(source, &chunk);
   if (result.status != CLOX_COMPILE_OK) {
     print_clox_error(result.error, source);
-    ret = EX_DATAERR;
+    ret = CLOX_EX_DATAERR;
     goto out;
   }
 
@@ -110,10 +109,11 @@ static void run_repl(void) {
       break; // Ctrl-D, Ctrl-C or read error: exit REPL
     }
 
-    // drop the blank lines that opened and terminated a multi-line block,
-    // so the first line the user typed is line 1 of the program
+    // drop the blank line that opened and lines that terminated
+    // a multi-line block, so the first line after multi-line break
+    // is line 1 of the program
     char *source = text;
-    while (*source == '\n') {
+    if (*source == '\n') {
       source++;
     }
     size_t len = strlen(source);
@@ -127,6 +127,7 @@ static void run_repl(void) {
       ic_history_remove_last();
       ic_history_save();
 
+      // bare : is silently ignored
       if (len > 1) {
         char *command = source + 1; // skip :
         if (strcmp(command, REPL_QUIT_COMMAND) == 0) {
@@ -150,14 +151,14 @@ static char *read_file(const char *path) {
   FILE *file = fopen(path, "rb");
   if (file == NULL) {
     print_error("Error opening file: %s", path);
-    exit(EX_IOERR);
+    exit(CLOX_EX_NOINPUT);
   }
 
   (void)fseek(file, 0L, SEEK_END);
   long ret_size = ftell(file);
   if (ret_size < 0) {
     print_error("Error reading file size: %s", path);
-    exit(EX_IOERR);
+    exit(CLOX_EX_IOERR);
   }
   size_t file_size = (size_t)ret_size;
   (void)fseek(file, 0L, SEEK_SET); // rewind
@@ -166,13 +167,13 @@ static char *read_file(const char *path) {
   char *buffer = malloc(file_size + 1);
   if (buffer == NULL) {
     print_error("Not enough memory to read file: %s", path);
-    exit(EX_IOERR);
+    exit(CLOX_EX_OSERR);
   }
   size_t bytes_read = fread(buffer, sizeof(char), file_size, file);
   if (bytes_read < file_size) {
     print_error("Error reading file: %s", path);
     free(buffer);
-    exit(EX_IOERR);
+    exit(CLOX_EX_IOERR);
   }
   // the write is safe: buffer is file_size + 1 bytes large
   buffer[bytes_read] = '\0'; // NOLINT(clang-analyzer-security.ArrayBound)
@@ -183,11 +184,11 @@ static char *read_file(const char *path) {
 
 static void run_file(const char *path) {
   char *source = read_file(path); // alloc
-  int result = run_code(source);
+  clox_exit_code_t result = run_code(source);
   free(source); // free
 
-  if (result != EX_OK) {
-    exit(result);
+  if (result != CLOX_EX_OK) {
+    exit((int)result);
   }
 }
 
@@ -198,8 +199,8 @@ int main(int argc, char *argv[]) {
     run_file(argv[1]);
   } else {
     (void)fprintf(stderr, "Usage: clox [path]\n");
-    exit(EX_USAGE);
+    exit(CLOX_EX_USAGE);
   }
 
-  return EX_OK;
+  return CLOX_EX_OK;
 }

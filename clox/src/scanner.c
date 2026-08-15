@@ -27,6 +27,7 @@ static inline bool is_alpha(char c) {
 static inline clox_token_type_t check_keyword(const clox_scanner_t *s, size_t prefix_len,
                                               size_t rest_len, const char *rest,
                                               clox_token_type_t type) {
+  assert(type < TOKEN_TYPE_COUNT);
   // cast is safe by construction
   if ((size_t)(s->current - s->start) == prefix_len + rest_len && // total length match
       memcmp(s->start + prefix_len, rest, rest_len) == 0) {       // rest content match
@@ -66,6 +67,7 @@ static inline char peek_next(const clox_scanner_t *s) {
 }
 
 static inline clox_token_t make_token(const clox_scanner_t *s, clox_token_type_t type) {
+  assert(type < TOKEN_TYPE_COUNT);
   return (clox_token_t){
       .type = type,
       .start = s->start,
