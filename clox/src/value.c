@@ -1,5 +1,6 @@
 #include "value.h"
 
+#include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
 
@@ -20,6 +21,14 @@ void clox_write_value_array(clox_value_array_t *arr, clox_value_t value) {
 
   arr->values[arr->length] = value;
   arr->length++;
+}
+
+clox_value_t clox_pop_value_array(clox_value_array_t *arr) {
+  assert(arr->length > 0);
+
+  arr->length--;
+  clox_value_t value = arr->values[arr->length];
+  return value;
 }
 
 void clox_free_value_array(clox_value_array_t *arr) {

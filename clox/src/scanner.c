@@ -8,7 +8,7 @@
 #include "common.h"
 
 const char *const clox_token_type_names[] = {
-#define X(name) "TOKEN_" #name,
+#define X(name, ...) [TOKEN_##name] = "TOKEN_" #name,
 #include "tokens.def"
 #undef X
 };

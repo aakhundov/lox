@@ -18,6 +18,8 @@ typedef struct {
   clox_pos_t pos;
 } clox_error_info_t;
 
+typedef void clox_error_handler_t(clox_error_info_t error, void *ctx);
+
 #define CLOX_FATAL_ERROR(msg, code) clox_fatal_error((msg), (code), __FILE__, __LINE__)
 
 _Noreturn void clox_fatal_error(const char *message, clox_exit_code_t code, const char *file,

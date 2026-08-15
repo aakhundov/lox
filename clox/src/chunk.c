@@ -2,16 +2,16 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "common.h"
-#include "error.h"
 #include "memory.h"
 #include "value.h"
 
 const char *const clox_op_code_names[] = {
-#define X(name) "OP_" #name,
+#define X(name) [OP_##name] = "OP_" #name,
 #include "opcodes.def"
 #undef X
 };
@@ -23,6 +23,10 @@ static size_t add_constant(clox_chunk_t *chunk, clox_value_t value) {
   size_t index = chunk->constants.length; // where new value will land
   clox_write_value_array(&chunk->constants, value);
   return index;
+}
+
+static clox_value_t pop_constant(clox_chunk_t *chunk) {
+  return clox_pop_value_array(&chunk->constants);
 }
 
 void clox_init_chunk(clox_chunk_t *chunk) {
@@ -65,22 +69,27 @@ _Static_assert(sizeof(size_t) >= 3, "sizeof(size_t) < 3");
 #define THREE_BYTE_MAX                                                                             \
   (((size_t)UCHAR_MAX << (2 * CHAR_BIT)) | ((size_t)UCHAR_MAX << CHAR_BIT) | UCHAR_MAX)
 
-void clox_write_constant(clox_chunk_t *chunk, clox_value_t value, clox_pos_t pos) {
+bool clox_write_constant(clox_chunk_t *chunk, clox_value_t value, clox_pos_t pos) {
   size_t index = add_constant(chunk, value);
 
   if (index <= UCHAR_MAX) {
     // 1-byte index
     clox_write_chunk(chunk, OP_CONSTANT, pos);
     clox_write_chunk(chunk, (clox_byte_t)index, pos);
-  } else if (index <= THREE_BYTE_MAX) {
+    return true;
+  }
+  if (index <= THREE_BYTE_MAX) {
     // 3-byte index
     clox_write_chunk(chunk, OP_CONSTANT_LONG, pos);
     clox_write_chunk(chunk, (clox_byte_t)(index >> (2 * CHAR_BIT)), pos);
     clox_write_chunk(chunk, (clox_byte_t)(index >> CHAR_BIT), pos);
     clox_write_chunk(chunk, (clox_byte_t)index, pos);
-  } else {
-    CLOX_FATAL_ERROR("constant limit exceeded", CLOX_EX_SOFTWARE);
+    return true;
   }
+
+  // failure: constant limit exceeded
+  pop_constant(chunk); // leave chunk intact
+  return false;
 }
 
 clox_value_t clox_read_constant(const clox_chunk_t *chunk, clox_op_code_t opcode,

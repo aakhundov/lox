@@ -1,6 +1,7 @@
 #include "vm.h"
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "chunk.h"
@@ -46,7 +47,7 @@ static inline clox_value_t pop_stack(clox_vm_t *vm) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static clox_interpret_result_t run(clox_vm_t *vm) {
+static bool run(clox_vm_t *vm) {
 #define READ_BYTE() (*vm->ip++)
 #define READ_CONSTANT(opcode) clox_read_constant(vm->chunk, (opcode), &vm->ip)
 #define BINARY_OP(op)                                                                              \
@@ -94,7 +95,7 @@ static clox_interpret_result_t run(clox_vm_t *vm) {
         clox_print_value(pop_stack(vm));
         printf("\n");
       }
-      return CLOX_INTERPRET_OK;
+      return true;
     case OP_CODE_COUNT:
       assert(0 && "unreachable");
     }
@@ -112,10 +113,17 @@ void clox_init_vm(clox_vm_t *vm) {
 void clox_free_vm(clox_vm_t *vm) {
 }
 
-clox_interpret_result_t clox_interpret(clox_vm_t *vm, const clox_chunk_t *chunk) {
+bool clox_interpret(clox_vm_t *vm, const clox_chunk_t *chunk) {
+  // init
   vm->chunk = chunk;
   vm->ip = chunk->code;
-  reset_stack(vm);
 
-  return run(vm);
+  reset_stack(vm);
+  bool result = run(vm);
+
+  // cleanup
+  vm->chunk = NULL;
+  vm->ip = NULL;
+
+  return result;
 }

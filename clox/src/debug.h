@@ -5,6 +5,10 @@
 
 #include "chunk.h"
 
+#ifndef CLOX_DEBUG_COMPILATION
+#define CLOX_DEBUG_COMPILATION 1
+#endif
+
 #ifndef CLOX_DEBUG_EXECUTION
 #define CLOX_DEBUG_EXECUTION 1
 #endif

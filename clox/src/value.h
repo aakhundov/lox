@@ -13,6 +13,7 @@ typedef struct {
 
 void clox_init_value_array(clox_value_array_t *arr);
 void clox_write_value_array(clox_value_array_t *arr, clox_value_t value);
+clox_value_t clox_pop_value_array(clox_value_array_t *arr);
 void clox_free_value_array(clox_value_array_t *arr);
 
 void clox_print_value(clox_value_t value);

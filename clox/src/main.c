@@ -12,6 +12,7 @@
 #include "chunk.h"
 #include "compiler.h"
 #include "error.h"
+#include "vm.h"
 
 #define ERROR_BUFFER_SIZE 1024
 #define HISTORY_FILE ".clox.history"
@@ -36,21 +37,30 @@ static void print_error(const char *restrict fmt, ...) {
   }
 }
 
-static void print_clox_error(clox_error_info_t e, const char *source) {
-  (void)source; // not used yet
-  print_error("Error [at %zu:%zu]: %s", e.pos.line, e.pos.col, e.message);
+typedef struct {
+  const char *domain;
+  const char *source;
+} clox_error_ctx_t;
+
+static void print_clox_error(clox_error_info_t e, void *ctx) {
+  clox_error_ctx_t *error_ctx = ctx;
+  print_error("%s error [at %zu:%zu]: %s", error_ctx->domain, e.pos.line, e.pos.col, e.message);
 }
 
-static clox_exit_code_t run_code(const char *source) {
+static clox_exit_code_t run_code(clox_vm_t *vm, char *source) {
   clox_exit_code_t ret = CLOX_EX_OK;
 
   clox_chunk_t chunk;
   clox_init_chunk(&chunk);
 
-  clox_compile_result_t result = clox_compile(source, &chunk);
-  if (result.status != CLOX_COMPILE_OK) {
-    print_clox_error(result.error, source);
+  clox_error_ctx_t compile_ctx = {.domain = "Compilation", .source = source};
+  if (!clox_compile(source, &chunk, print_clox_error, &compile_ctx)) {
     ret = CLOX_EX_DATAERR;
+    goto out;
+  }
+
+  if (!clox_interpret(vm, &chunk)) {
+    ret = CLOX_EX_SOFTWARE;
     goto out;
   }
 
@@ -103,6 +113,9 @@ static void run_repl(void) {
   ic_enable_history_short_entries(true);
   setup_ic_history();
 
+  clox_vm_t vm;
+  clox_init_vm(&vm);
+
   while (1) {
     char *text = ic_readline(NULL); // alloc
     if (text == NULL) {
@@ -137,11 +150,13 @@ static void run_repl(void) {
         handle_repl_command(command);
       }
     } else {
-      run_code(source);
+      run_code(&vm, source);
     }
 
     ic_free(text); // free
   }
+
+  clox_free_vm(&vm);
 }
 
 // ftell returns long, need one more byte for NUL in file buffer
@@ -184,7 +199,12 @@ static char *read_file(const char *path) {
 
 static void run_file(const char *path) {
   char *source = read_file(path); // alloc
-  clox_exit_code_t result = run_code(source);
+
+  clox_vm_t vm;
+  clox_init_vm(&vm);
+  clox_exit_code_t result = run_code(&vm, source);
+  clox_free_vm(&vm);
+
   free(source); // free
 
   if (result != CLOX_EX_OK) {

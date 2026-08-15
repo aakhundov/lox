@@ -6,7 +6,7 @@
 #include "common.h"
 
 typedef enum {
-#define X(name) TOKEN_##name,
+#define X(name, ...) TOKEN_##name,
 #include "tokens.def"
 #undef X
   TOKEN_TYPE_COUNT,

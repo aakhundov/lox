@@ -1,6 +1,7 @@
 #ifndef CLOX_CHUNK_H
 #define CLOX_CHUNK_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "common.h"
@@ -29,7 +30,7 @@ void clox_init_chunk(clox_chunk_t *chunk);
 void clox_write_chunk(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos);
 void clox_free_chunk(clox_chunk_t *chunk);
 
-void clox_write_constant(clox_chunk_t *chunk, clox_value_t value, clox_pos_t pos);
+bool clox_write_constant(clox_chunk_t *chunk, clox_value_t value, clox_pos_t pos);
 clox_value_t clox_read_constant(const clox_chunk_t *chunk, clox_op_code_t opcode,
                                 const clox_byte_t **ipp);
 
