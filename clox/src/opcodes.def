@@ -1,11 +1,23 @@
-// clox op codes defined by an X-macro
-// add new op codes to the list below
+/*
+all clox opcode names defined by an X-macro
+to introduce new opcodes, add them to the list below
+*/
 
 X(CONSTANT)
 X(CONSTANT_LONG)
+X(NIL)
+X(TRUE)
+X(FALSE)
+X(EQUAL)
+X(NOT_EQUAL)
+X(GREATER)
+X(GREATER_EQUAL)
+X(LESS)
+X(LESS_EQUAL)
 X(ADD)
 X(SUBTRACT)
 X(MULTIPLY)
 X(DIVIDE)
+X(NOT)
 X(NEGATE)
 X(RETURN)

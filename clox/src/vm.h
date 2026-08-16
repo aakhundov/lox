@@ -4,19 +4,31 @@
 #include <stdbool.h>
 
 #include "chunk.h"
+#include "error.h"
 #include "value.h"
 
 #define CLOX_STACK_SIZE 1024
+
+typedef void clox_print_fn_t(clox_value_t value, void *ctx);
 
 typedef struct {
   const clox_chunk_t *chunk;
   const clox_byte_t *ip;
   clox_value_t *stack_top;
   clox_value_t stack[CLOX_STACK_SIZE];
+  clox_error_handler_t *error_handler;
+  void *error_ctx;
+  clox_print_fn_t *print_fn;
+  void *print_ctx;
 } clox_vm_t;
 
 void clox_init_vm(clox_vm_t *vm);
 void clox_free_vm(clox_vm_t *vm);
+
+void clox_set_vm_error_handler(clox_vm_t *vm, clox_error_handler_t *error_handler, void *error_ctx);
+void clox_set_vm_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx);
+void clox_reset_vm_error_handler(clox_vm_t *vm);
+void clox_reset_vm_print_fn(clox_vm_t *vm);
 
 bool clox_interpret(clox_vm_t *vm, const clox_chunk_t *chunk);
 

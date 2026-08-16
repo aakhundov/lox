@@ -2,19 +2,21 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "chunk.h"
-#include "common.h"
 #include "debug.h"
 #include "error.h"
+#include "memory.h"
 #include "scanner.h"
 #include "value.h"
 
 #define MAX_PARSER_DEPTH 20000
+#define ERROR_MESSAGE_SIZE 512
 
 typedef struct {
   clox_chunk_t *const chunk;
@@ -28,13 +30,21 @@ typedef struct {
   size_t parser_depth;
 } clox_compiler_t;
 
-static inline void error(clox_compiler_t *c, const clox_token_t *token, const char *message) {
+__attribute__((format(printf, 3, 4))) static inline void
+error(clox_compiler_t *c, const clox_token_t *token, const char *fmt, ...) {
   // do nothing in panic mode
   if (!c->panic_mode) {
     c->panic_mode = true;
     c->had_error = true;
 
     if (c->error_handler != NULL) {
+      char message[ERROR_MESSAGE_SIZE];
+
+      va_list ap;
+      va_start(ap, fmt);
+      (void)vsnprintf(message, sizeof(message), fmt, ap);
+      va_end(ap);
+
       // report the error
       c->error_handler(
           (clox_error_info_t){
@@ -55,7 +65,7 @@ static inline void advance(clox_compiler_t *c) {
       break;
     }
     // scanner error messages are in the token
-    error(c, &c->current, c->current.start);
+    error(c, &c->current, "%s", c->current.start);
   }
 }
 
@@ -66,7 +76,7 @@ static inline void consume(clox_compiler_t *c, clox_token_type_t type, const cha
     return;
   }
 
-  error(c, &c->current, error_msg);
+  error(c, &c->current, "%s", error_msg);
 }
 
 static inline void emit_byte(const clox_compiler_t *c, clox_byte_t byte,
@@ -178,6 +188,24 @@ static void binary(clox_compiler_t *c) {
   case TOKEN_SLASH:
     emit_byte(c, OP_DIVIDE, &op);
     break;
+  case TOKEN_EQUAL_EQUAL:
+    emit_byte(c, OP_EQUAL, &op);
+    break;
+  case TOKEN_BANG_EQUAL:
+    emit_byte(c, OP_NOT_EQUAL, &op);
+    break;
+  case TOKEN_GREATER:
+    emit_byte(c, OP_GREATER, &op);
+    break;
+  case TOKEN_GREATER_EQUAL:
+    emit_byte(c, OP_GREATER_EQUAL, &op);
+    break;
+  case TOKEN_LESS:
+    emit_byte(c, OP_LESS, &op);
+    break;
+  case TOKEN_LESS_EQUAL:
+    emit_byte(c, OP_LESS_EQUAL, &op);
+    break;
   default:
     assert(0 && "unreachable");
   }
@@ -190,6 +218,9 @@ static void unary(clox_compiler_t *c) {
   parse(c, PREC_UNARY);
 
   switch (op.type) {
+  case TOKEN_BANG:
+    emit_byte(c, OP_NOT, &op);
+    break;
   case TOKEN_MINUS:
     emit_byte(c, OP_NEGATE, &op);
     break;
@@ -199,22 +230,39 @@ static void unary(clox_compiler_t *c) {
 }
 
 static void number(clox_compiler_t *c) {
-  // temporarily modify const string with restore at the end
   char *term = (char *)c->previous.start + c->previous.length;
   char prev_char = *term;
-  *term = '\0'; // modify
 
   errno = 0;
   char *parse_end;
-  clox_value_t val = strtod(c->previous.start, &parse_end);
+  *term = '\0'; // temp modify
+  double value = strtod(c->previous.start, &parse_end);
+  *term = prev_char; // restore
+
   assert(parse_end == term); // must parse the whole string
   if (errno != ERANGE) {
-    emit_constant(c, val, &c->previous);
+    emit_constant(c, CLOX_NUMBER(value), &c->previous);
   } else {
     error(c, &c->previous, "number out of range");
   }
+}
 
-  *term = prev_char; // restore
+static void literal(clox_compiler_t *c) {
+  clox_token_t token = c->previous;
+
+  switch (token.type) {
+  case TOKEN_NIL:
+    emit_byte(c, OP_NIL, &token);
+    break;
+  case TOKEN_TRUE:
+    emit_byte(c, OP_TRUE, &token);
+    break;
+  case TOKEN_FALSE:
+    emit_byte(c, OP_FALSE, &token);
+    break;
+  default:
+    assert(0 && "unreachable");
+  }
 }
 
 static const clox_parse_rule_t parse_rules[] = {

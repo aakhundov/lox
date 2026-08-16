@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -14,37 +15,83 @@
 #include "error.h"
 #include "vm.h"
 
-#define ERROR_BUFFER_SIZE 1024
+#define MAX_ERROR_MSG_LEN 1024
 #define HISTORY_FILE ".clox.history"
 #define HISTORY_PATH_SIZE 1024
 #define PROMPT_MARKER ">>> "
 #define CONTINUATION_MARKER "... "
 #define REPL_QUIT_COMMAND "q"
 
-static void print_error(const char *restrict fmt, ...) {
-  char message[ERROR_BUFFER_SIZE];
+__attribute__((format(printf, 1, 2))) static int print_error(const char *restrict fmt, ...) {
+  char message[MAX_ERROR_MSG_LEN + 1];
 
   va_list ap;
   va_start(ap, fmt);
-  (void)vsnprintf(message, sizeof(message), fmt, ap);
+  int len = vsnprintf(message, sizeof(message), fmt, ap);
+  if (len > MAX_ERROR_MSG_LEN) {
+    // truncate incomplete error message with with ...
+    memset(message + (MAX_ERROR_MSG_LEN - 3), '.', 3);
+    len = MAX_ERROR_MSG_LEN;
+  }
   va_end(ap);
 
+  int result;
   if (isatty(fileno(stderr))) {
-    (void)fprintf(stderr, "\033[31m%s\033[0m\n", message);
+    result = fprintf(stderr, "\033[31m%s\033[0m\n", message);
   } else {
     // no colors in non-tty output
-    (void)fprintf(stderr, "%s\n", message);
+    result = fprintf(stderr, "%s\n", message);
   }
+
+  return (result >= 0) ? len : -1;
 }
 
 typedef struct {
   const char *domain;
-  const char *source;
+  char *source;
 } clox_error_ctx_t;
+
+#define DASHES /* 256 dashes */                                                                    \
+  "----------------------------------------------------------------"                               \
+  "----------------------------------------------------------------"                               \
+  "----------------------------------------------------------------"                               \
+  "----------------------------------------------------------------"
 
 static void print_clox_error(clox_error_info_t e, void *ctx) {
   clox_error_ctx_t *error_ctx = ctx;
-  print_error("%s error [at %zu:%zu]: %s", error_ctx->domain, e.pos.line, e.pos.col, e.message);
+  assert(e.pos.line > 0);
+  assert(e.pos.col > 0);
+
+  int printed =
+      print_error("%s error [at %zu:%zu]: %s", error_ctx->domain, e.pos.line, e.pos.col, e.message);
+
+  if (printed <= 0) {
+    return;
+  }
+
+  // pos line / col are 1-based
+  size_t line = e.pos.line - 1;
+  size_t col = e.pos.col - 1;
+
+  // assume source is NUL-terminated
+  char *line_start = error_ctx->source;
+  size_t current_line = 0;
+  while (current_line < line) {
+    if (*line_start++ == '\n') {
+      current_line++;
+    }
+  }
+  char *line_end = line_start;
+  while (*line_end != '\n' && *line_end != '\0') {
+    line_end++;
+  }
+  char prev_line_end = *line_end;
+
+  print_error("%.*s", printed, DASHES); // underline
+  *line_end = '\0';                     // temp modify
+  print_error("%s", line_start);        // error line
+  *line_end = prev_line_end;            // restore
+  print_error("%*s^", (int)col, "");    // spaces + caret
 }
 
 static clox_exit_code_t run_code(clox_vm_t *vm, char *source) {
@@ -59,12 +106,15 @@ static clox_exit_code_t run_code(clox_vm_t *vm, char *source) {
     goto out;
   }
 
+  clox_error_ctx_t interpret_ctx = {.domain = "Runtime", .source = source};
+  clox_set_vm_error_handler(vm, print_clox_error, &interpret_ctx);
   if (!clox_interpret(vm, &chunk)) {
     ret = CLOX_EX_SOFTWARE;
     goto out;
   }
 
 out:
+  clox_reset_vm_error_handler(vm);
   clox_free_chunk(&chunk);
   return ret;
 }

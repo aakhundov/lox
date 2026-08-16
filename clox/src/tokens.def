@@ -1,3 +1,13 @@
+/*
+all clox tokens defined by an X-macro
+to introduce new tokens, add them to the list below
+fields:
+  - token name
+  - prefix parser fn
+  - infix parser fn
+  - infix precedence
+*/
+
 // single-character tokens
 X(LEFT_PAREN,    grouping, NULL,   PREC_NONE)
 X(RIGHT_PAREN,   NULL,     NULL,   PREC_NONE)
@@ -12,35 +22,35 @@ X(SLASH,         NULL,     binary, PREC_FACTOR)
 X(STAR,          NULL,     binary, PREC_FACTOR)
 
 // one or two character tokens
-X(BANG,          NULL,     NULL,   PREC_NONE)
-X(BANG_EQUAL,    NULL,     NULL,   PREC_NONE)
+X(BANG,          unary,    NULL,   PREC_NONE)
+X(BANG_EQUAL,    NULL,     binary,   PREC_EQUALITY)
 X(EQUAL,         NULL,     NULL,   PREC_NONE)
-X(EQUAL_EQUAL,   NULL,     NULL,   PREC_NONE)
-X(GREATER,       NULL,     NULL,   PREC_NONE)
-X(GREATER_EQUAL, NULL,     NULL,   PREC_NONE)
-X(LESS,          NULL,     NULL,   PREC_NONE)
-X(LESS_EQUAL,    NULL,     NULL,   PREC_NONE)
+X(EQUAL_EQUAL,   NULL,     binary,   PREC_EQUALITY)
+X(GREATER,       NULL,     binary,   PREC_COMPARISON)
+X(GREATER_EQUAL, NULL,     binary,   PREC_COMPARISON)
+X(LESS,          NULL,     binary,   PREC_COMPARISON)
+X(LESS_EQUAL,    NULL,     binary,   PREC_COMPARISON)
 
 // literals
 X(IDENTIFIER,    NULL,     NULL,   PREC_NONE)
 X(STRING,        NULL,     NULL,   PREC_NONE)
 X(NUMBER,        number,   NULL,   PREC_NONE)
+X(NIL,           literal,  NULL,   PREC_NONE)
+X(TRUE,          literal,  NULL,   PREC_NONE)
+X(FALSE,         literal,  NULL,   PREC_NONE)
 
 // keywords
 X(AND,           NULL,     NULL,   PREC_NONE)
 X(CLASS,         NULL,     NULL,   PREC_NONE)
 X(ELSE,          NULL,     NULL,   PREC_NONE)
-X(FALSE,         NULL,     NULL,   PREC_NONE)
 X(FOR,           NULL,     NULL,   PREC_NONE)
 X(FUN,           NULL,     NULL,   PREC_NONE)
 X(IF,            NULL,     NULL,   PREC_NONE)
-X(NIL,           NULL,     NULL,   PREC_NONE)
 X(OR,            NULL,     NULL,   PREC_NONE)
 X(PRINT,         NULL,     NULL,   PREC_NONE)
 X(RETURN,        NULL,     NULL,   PREC_NONE)
 X(SUPER,         NULL,     NULL,   PREC_NONE)
 X(THIS,          NULL,     NULL,   PREC_NONE)
-X(TRUE,          NULL,     NULL,   PREC_NONE)
 X(VAR,           NULL,     NULL,   PREC_NONE)
 X(WHILE,         NULL,     NULL,   PREC_NONE)
 

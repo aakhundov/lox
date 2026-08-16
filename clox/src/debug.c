@@ -44,10 +44,20 @@ size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
     printf("%-18s ", clox_op_code_names[opcode]);
 
     switch (opcode) {
+    case OP_NIL:
+    case OP_TRUE:
+    case OP_FALSE:
+    case OP_EQUAL:
+    case OP_NOT_EQUAL:
+    case OP_GREATER:
+    case OP_GREATER_EQUAL:
+    case OP_LESS:
+    case OP_LESS_EQUAL:
     case OP_ADD:
     case OP_SUBTRACT:
     case OP_MULTIPLY:
     case OP_DIVIDE:
+    case OP_NOT:
     case OP_NEGATE:
     case OP_RETURN:
       offset++; // just opcode

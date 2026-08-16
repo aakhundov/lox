@@ -8,6 +8,4 @@ typedef struct {
   size_t col;
 } clox_pos_t;
 
-#define CLOX_ARRAY_SIZE(arr) (sizeof((arr)) / sizeof(*(arr)))
-
 #endif

@@ -5,6 +5,8 @@
 
 #define CLOX_INITIAL_SIZE 8
 
+#define CLOX_ARRAY_SIZE(arr) (sizeof((arr)) / sizeof(*(arr)))
+
 // in the macros below, overflow isn't feasible:
 // allocator will fail earlier than SIZE_MAX is hit
 
