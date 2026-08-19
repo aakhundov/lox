@@ -19,26 +19,26 @@ const char *const clox_op_code_names[] = {
 _Static_assert(CLOX_ARRAY_SIZE(clox_op_code_names) == OP_CODE_COUNT,
                "op code names array size mismatch");
 
-static size_t add_constant(clox_chunk_t *chunk, clox_value_t value) {
+static size_t add_constant(clox_chunk_t *chunk, clox_value_t val) {
   size_t index = chunk->constants.length; // where new value will land
-  clox_write_value_array(&chunk->constants, value);
+  clox_value_array_write(&chunk->constants, val);
   return index;
 }
 
 static clox_value_t pop_constant(clox_chunk_t *chunk) {
-  return clox_pop_value_array(&chunk->constants);
+  return clox_value_array_pop(&chunk->constants);
 }
 
-void clox_init_chunk(clox_chunk_t *chunk) {
+void clox_chunk_init(clox_chunk_t *chunk) {
   chunk->code = NULL;
   chunk->positions = NULL;
   chunk->capacity = 0;
   chunk->length = 0;
 
-  clox_init_value_array(&chunk->constants);
+  clox_value_array_init(&chunk->constants);
 }
 
-void clox_write_chunk(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos) {
+void clox_chunk_write(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos) {
   if (chunk->length == chunk->capacity) {
     size_t new_capacity = CLOX_GROW_SIZE(chunk->capacity);
     chunk->code = CLOX_GROW_ARRAY(clox_byte_t, chunk->code, chunk->capacity, new_capacity);
@@ -51,7 +51,7 @@ void clox_write_chunk(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos) {
   chunk->length++;
 }
 
-void clox_free_chunk(clox_chunk_t *chunk) {
+void clox_chunk_free(clox_chunk_t *chunk) {
   CLOX_FREE_ARRAY(clox_byte_t, chunk->code, chunk->capacity);
   CLOX_FREE_ARRAY(clox_pos_t, chunk->positions, chunk->capacity);
 
@@ -60,7 +60,7 @@ void clox_free_chunk(clox_chunk_t *chunk) {
   chunk->capacity = 0;
   chunk->length = 0;
 
-  clox_free_value_array(&chunk->constants);
+  clox_value_array_free(&chunk->constants);
 }
 
 // at least three bytes of long constant index in size_t
@@ -69,21 +69,21 @@ _Static_assert(sizeof(size_t) >= 3, "sizeof(size_t) < 3");
 #define THREE_BYTE_MAX                                                                             \
   (((size_t)UCHAR_MAX << (2 * CHAR_BIT)) | ((size_t)UCHAR_MAX << CHAR_BIT) | UCHAR_MAX)
 
-bool clox_write_constant(clox_chunk_t *chunk, clox_value_t value, clox_pos_t pos) {
-  size_t index = add_constant(chunk, value);
+bool clox_write_constant(clox_chunk_t *chunk, clox_value_t val, clox_pos_t pos) {
+  size_t index = add_constant(chunk, val);
 
   if (index <= UCHAR_MAX) {
     // 1-byte index
-    clox_write_chunk(chunk, OP_CONSTANT, pos);
-    clox_write_chunk(chunk, (clox_byte_t)index, pos);
+    clox_chunk_write(chunk, OP_CONSTANT, pos);
+    clox_chunk_write(chunk, (clox_byte_t)index, pos);
     return true;
   }
   if (index <= THREE_BYTE_MAX) {
     // 3-byte index
-    clox_write_chunk(chunk, OP_CONSTANT_LONG, pos);
-    clox_write_chunk(chunk, (clox_byte_t)(index >> (2 * CHAR_BIT)), pos);
-    clox_write_chunk(chunk, (clox_byte_t)(index >> CHAR_BIT), pos);
-    clox_write_chunk(chunk, (clox_byte_t)index, pos);
+    clox_chunk_write(chunk, OP_CONSTANT_LONG, pos);
+    clox_chunk_write(chunk, (clox_byte_t)(index >> (2 * CHAR_BIT)), pos);
+    clox_chunk_write(chunk, (clox_byte_t)(index >> CHAR_BIT), pos);
+    clox_chunk_write(chunk, (clox_byte_t)index, pos);
     return true;
   }
 

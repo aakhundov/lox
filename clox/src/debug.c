@@ -14,11 +14,11 @@
 
 static size_t const_instruction(const clox_chunk_t *chunk, clox_op_code_t opcode, size_t offset) {
   const clox_byte_t *ip = chunk->code + offset + 1; // skip the opcode
-  clox_value_t value = clox_read_constant(chunk, opcode, &ip);
+  clox_value_t val = clox_read_constant(chunk, opcode, &ip);
   assert(ip > chunk->code + offset + 1); // ip has moved
 
   printf("[");
-  clox_print_value(value);
+  clox_value_print(val);
   printf("]");
 
   // cast is safe: assert above

@@ -13,6 +13,7 @@
 #include "chunk.h"
 #include "compiler.h"
 #include "error.h"
+#include "object.h"
 #include "vm.h"
 
 #define MAX_ERROR_MSG_LEN 1024
@@ -21,6 +22,23 @@
 #define PROMPT_MARKER ">>> "
 #define CONTINUATION_MARKER "... "
 #define REPL_QUIT_COMMAND "q"
+
+#define DASHES /* 256 dashes */                                                                    \
+  "----------------------------------------------------------------"                               \
+  "----------------------------------------------------------------"                               \
+  "----------------------------------------------------------------"                               \
+  "----------------------------------------------------------------"
+
+typedef struct {
+  const char *domain;
+  char *source;
+} clox_error_ctx_t;
+
+typedef struct {
+  clox_allocator_t allocator;
+  clox_compiler_t compiler;
+  clox_vm_t vm;
+} clox_harness_t;
 
 __attribute__((format(printf, 1, 2))) static int print_error(const char *restrict fmt, ...) {
   char message[MAX_ERROR_MSG_LEN + 1];
@@ -45,17 +63,6 @@ __attribute__((format(printf, 1, 2))) static int print_error(const char *restric
 
   return (result >= 0) ? len : -1;
 }
-
-typedef struct {
-  const char *domain;
-  char *source;
-} clox_error_ctx_t;
-
-#define DASHES /* 256 dashes */                                                                    \
-  "----------------------------------------------------------------"                               \
-  "----------------------------------------------------------------"                               \
-  "----------------------------------------------------------------"                               \
-  "----------------------------------------------------------------"
 
 static void print_clox_error(clox_error_info_t e, void *ctx) {
   clox_error_ctx_t *error_ctx = ctx;
@@ -94,28 +101,42 @@ static void print_clox_error(clox_error_info_t e, void *ctx) {
   print_error("%*s^", (int)col, "");    // spaces + caret
 }
 
-static clox_exit_code_t run_code(clox_vm_t *vm, char *source) {
+static void clox_harness_setup(clox_harness_t *harness) {
+  clox_allocator_init(&harness->allocator);
+  clox_compiler_init(&harness->compiler, &harness->allocator);
+  clox_vm_init(&harness->vm, &harness->allocator);
+}
+
+static void clox_harness_teardown(clox_harness_t *harness) {
+  clox_vm_free(&harness->vm);
+  clox_compiler_free(&harness->compiler);
+  clox_allocator_free(&harness->allocator);
+}
+
+static clox_exit_code_t run_code(clox_harness_t *h, char *source) {
   clox_exit_code_t ret = CLOX_EX_OK;
 
   clox_chunk_t chunk;
-  clox_init_chunk(&chunk);
+  clox_chunk_init(&chunk);
 
   clox_error_ctx_t compile_ctx = {.domain = "Compilation", .source = source};
-  if (!clox_compile(source, &chunk, print_clox_error, &compile_ctx)) {
+  clox_compiler_set_error_handler(&h->compiler, print_clox_error, &compile_ctx);
+  if (!clox_compile(&h->compiler, source, &chunk)) {
     ret = CLOX_EX_DATAERR;
     goto out;
   }
 
   clox_error_ctx_t interpret_ctx = {.domain = "Runtime", .source = source};
-  clox_set_vm_error_handler(vm, print_clox_error, &interpret_ctx);
-  if (!clox_interpret(vm, &chunk)) {
+  clox_vm_set_error_handler(&h->vm, print_clox_error, &interpret_ctx);
+  if (!clox_interpret(&h->vm, &chunk)) {
     ret = CLOX_EX_SOFTWARE;
     goto out;
   }
 
 out:
-  clox_reset_vm_error_handler(vm);
-  clox_free_chunk(&chunk);
+  clox_compiler_reset_error_handler(&h->compiler);
+  clox_vm_reset_error_handler(&h->vm);
+  clox_chunk_free(&chunk);
   return ret;
 }
 
@@ -163,8 +184,8 @@ static void run_repl(void) {
   ic_enable_history_short_entries(true);
   setup_ic_history();
 
-  clox_vm_t vm;
-  clox_init_vm(&vm);
+  clox_harness_t harness;
+  clox_harness_setup(&harness);
 
   while (1) {
     char *text = ic_readline(NULL); // alloc
@@ -200,13 +221,13 @@ static void run_repl(void) {
         handle_repl_command(command);
       }
     } else {
-      run_code(&vm, source);
+      run_code(&harness, source);
     }
 
     ic_free(text); // free
   }
 
-  clox_free_vm(&vm);
+  clox_harness_teardown(&harness);
 }
 
 // ftell returns long, need one more byte for NUL in file buffer
@@ -250,10 +271,10 @@ static char *read_file(const char *path) {
 static void run_file(const char *path) {
   char *source = read_file(path); // alloc
 
-  clox_vm_t vm;
-  clox_init_vm(&vm);
-  clox_exit_code_t result = run_code(&vm, source);
-  clox_free_vm(&vm);
+  clox_harness_t harness;
+  clox_harness_setup(&harness);
+  clox_exit_code_t result = run_code(&harness, source);
+  clox_harness_teardown(&harness);
 
   free(source); // free
 

@@ -9,6 +9,7 @@
 #include "common.h"
 #include "debug.h"
 #include "error.h"
+#include "object.h"
 #include "value.h"
 
 #define ERROR_MESSAGE_SIZE 512
@@ -21,7 +22,7 @@ static void print_stack(const clox_vm_t *vm) {
 
   printf("[ ");
   for (size_t i = 0; i < size; i++) {
-    clox_print_value(*(vm->stack + i));
+    clox_value_print(*(vm->stack + i));
     if (i < size - 1) {
       printf(" | ");
     }
@@ -30,9 +31,9 @@ static void print_stack(const clox_vm_t *vm) {
 }
 #endif
 
-static void default_print_fn(clox_value_t value, void *ctx) {
+static void default_print_fn(clox_value_t val, void *ctx) {
   (void)ctx; // unused
-  clox_print_value(value);
+  clox_value_print(val);
   printf("\n");
 }
 
@@ -68,12 +69,12 @@ static inline clox_value_t peek_stack(const clox_vm_t *vm, size_t distance) {
   return vm->stack_top[-1 - (int)distance];
 }
 
-static inline bool push_stack(clox_vm_t *vm, clox_value_t value) {
+static inline bool push_stack(clox_vm_t *vm, clox_value_t val) {
   if (vm->stack_top >= vm->stack + CLOX_STACK_SIZE) {
     return false; // stack overflow
   }
 
-  *vm->stack_top = value;
+  *vm->stack_top = val;
   vm->stack_top++;
   return true;
 }
@@ -145,13 +146,13 @@ static bool run(clox_vm_t *vm) {
     case OP_EQUAL: {
       clox_value_t b = POP();
       clox_value_t a = POP();
-      PUSH(CLOX_BOOL(clox_is_equal(a, b)));
+      PUSH(CLOX_BOOL(clox_value_equals(a, b)));
       break;
     }
     case OP_NOT_EQUAL: {
       clox_value_t b = POP();
       clox_value_t a = POP();
-      PUSH(CLOX_BOOL(!clox_is_equal(a, b)));
+      PUSH(CLOX_BOOL(!clox_value_equals(a, b)));
       break;
     }
     case OP_GREATER:
@@ -166,9 +167,20 @@ static bool run(clox_vm_t *vm) {
     case OP_LESS_EQUAL:
       BINARY_OP(<=, CLOX_BOOL);
       break;
-    case OP_ADD:
-      BINARY_OP(+, CLOX_NUMBER);
+    case OP_ADD: {
+      if (CLOX_IS_NUMBER(PEEK(0)) && CLOX_IS_NUMBER(PEEK(1))) {
+        double right = CLOX_AS_NUMBER(POP());
+        double left = CLOX_AS_NUMBER(POP());
+        PUSH(CLOX_NUMBER(left + right));
+      } else if (CLOX_IS_STRING(PEEK(0)) && CLOX_IS_STRING(PEEK(1))) {
+        clox_value_t right = POP();
+        clox_value_t left = POP();
+        PUSH(clox_string_concat(vm->allocator, left, right));
+      } else {
+        ERROR("operands must be two numbers or two strings");
+      }
       break;
+    }
     case OP_SUBTRACT:
       BINARY_OP(-, CLOX_NUMBER);
       break;
@@ -179,7 +191,7 @@ static bool run(clox_vm_t *vm) {
       BINARY_OP(/, CLOX_NUMBER);
       break;
     case OP_NOT:
-      PUSH(CLOX_BOOL(!clox_is_truthy(POP())));
+      PUSH(CLOX_BOOL(!clox_value_is_truthy(POP())));
       break;
     case OP_NEGATE:
       if (!CLOX_IS_NUMBER(PEEK(0))) {
@@ -207,42 +219,51 @@ static bool run(clox_vm_t *vm) {
 #undef BINARY_OP
 }
 
-void clox_init_vm(clox_vm_t *vm) {
-  clox_reset_vm_error_handler(vm);
-  clox_reset_vm_print_fn(vm);
+void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
+  vm->ip = NULL;
+  vm->chunk = NULL;
+  vm->allocator = alloc;
+  clox_vm_reset_error_handler(vm);
+  clox_vm_reset_print_fn(vm);
   reset_stack(vm);
 }
 
-void clox_free_vm(clox_vm_t *vm) {
+void clox_vm_free(clox_vm_t *vm) {
+  vm->ip = NULL;
+  vm->chunk = NULL;
+  vm->allocator = NULL;
+  clox_vm_reset_error_handler(vm);
+  clox_vm_reset_print_fn(vm);
+  reset_stack(vm);
 }
 
-void clox_set_vm_error_handler(clox_vm_t *vm, clox_error_handler_t *error_handler,
+void clox_vm_set_error_handler(clox_vm_t *vm, clox_error_handler_t *error_handler,
                                void *error_ctx) {
   vm->error_handler = error_handler;
   vm->error_ctx = error_ctx;
 }
 
-void clox_set_vm_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx) {
+void clox_vm_set_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx) {
   vm->print_fn = print_fn;
   vm->print_ctx = print_ctx;
 }
 
-void clox_reset_vm_print_fn(clox_vm_t *vm) {
-  vm->print_fn = default_print_fn;
-  vm->print_ctx = NULL;
-}
-
-void clox_reset_vm_error_handler(clox_vm_t *vm) {
+void clox_vm_reset_error_handler(clox_vm_t *vm) {
   vm->error_handler = NULL;
   vm->error_ctx = NULL;
+}
+
+void clox_vm_reset_print_fn(clox_vm_t *vm) {
+  vm->print_fn = default_print_fn;
+  vm->print_ctx = NULL;
 }
 
 bool clox_interpret(clox_vm_t *vm, const clox_chunk_t *chunk) {
   // init
   vm->chunk = chunk;
   vm->ip = chunk->code;
-
   reset_stack(vm);
+
   bool result = run(vm);
 
   // cleanup

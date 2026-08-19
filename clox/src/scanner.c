@@ -213,14 +213,19 @@ static clox_token_t identifier(clox_scanner_t *s) {
   return make_token(s, identifier_type(s));
 }
 
-void clox_init_scanner(clox_scanner_t *s, const char *source) {
+void clox_scanner_init(clox_scanner_t *s, const char *source) {
   s->start = source;
   s->current = s->start;
   s->start_pos = (clox_pos_t){.line = 1, .col = 1};
   s->current_pos = s->start_pos;
 }
 
-clox_token_t clox_scan_token(clox_scanner_t *s) {
+void clox_scanner_free(clox_scanner_t *s) {
+  s->start = NULL;
+  s->current = NULL;
+}
+
+clox_token_t clox_scan(clox_scanner_t *s) {
   skip_whitespace(s);
 
   s->start = s->current;

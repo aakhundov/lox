@@ -33,7 +33,7 @@ X(LESS_EQUAL,    NULL,     binary,   PREC_COMPARISON)
 
 // literals
 X(IDENTIFIER,    NULL,     NULL,   PREC_NONE)
-X(STRING,        NULL,     NULL,   PREC_NONE)
+X(STRING,        string,   NULL,   PREC_NONE)
 X(NUMBER,        number,   NULL,   PREC_NONE)
 X(NIL,           literal,  NULL,   PREC_NONE)
 X(TRUE,          literal,  NULL,   PREC_NONE)

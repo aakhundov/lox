@@ -28,7 +28,8 @@ typedef struct {
   clox_pos_t current_pos;
 } clox_scanner_t;
 
-void clox_init_scanner(clox_scanner_t *scanner, const char *source);
-clox_token_t clox_scan_token(clox_scanner_t *scanner);
+void clox_scanner_init(clox_scanner_t *scanner, const char *source);
+void clox_scanner_free(clox_scanner_t *scanner);
+clox_token_t clox_scan(clox_scanner_t *scanner);
 
 #endif

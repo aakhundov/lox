@@ -26,11 +26,11 @@ typedef struct {
   clox_value_array_t constants;
 } clox_chunk_t;
 
-void clox_init_chunk(clox_chunk_t *chunk);
-void clox_write_chunk(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos);
-void clox_free_chunk(clox_chunk_t *chunk);
+void clox_chunk_init(clox_chunk_t *chunk);
+void clox_chunk_write(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos);
+void clox_chunk_free(clox_chunk_t *chunk);
 
-bool clox_write_constant(clox_chunk_t *chunk, clox_value_t value, clox_pos_t pos);
+bool clox_write_constant(clox_chunk_t *chunk, clox_value_t val, clox_pos_t pos);
 clox_value_t clox_read_constant(const clox_chunk_t *chunk, clox_op_code_t opcode,
                                 const clox_byte_t **ipp);
 

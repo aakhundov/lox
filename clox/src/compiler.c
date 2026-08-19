@@ -12,23 +12,12 @@
 #include "debug.h"
 #include "error.h"
 #include "memory.h"
+#include "object.h"
 #include "scanner.h"
 #include "value.h"
 
 #define MAX_PARSER_DEPTH 20000
 #define ERROR_MESSAGE_SIZE 512
-
-typedef struct {
-  clox_chunk_t *const chunk;
-  clox_scanner_t *const scanner;
-  clox_token_t previous;
-  clox_token_t current;
-  bool had_error;
-  bool panic_mode;
-  clox_error_handler_t *const error_handler;
-  void *const error_ctx;
-  size_t parser_depth;
-} clox_compiler_t;
 
 __attribute__((format(printf, 3, 4))) static inline void
 error(clox_compiler_t *c, const clox_token_t *token, const char *fmt, ...) {
@@ -59,7 +48,7 @@ error(clox_compiler_t *c, const clox_token_t *token, const char *fmt, ...) {
 static inline void advance(clox_compiler_t *c) {
   c->previous = c->current;
   while (1) {
-    c->current = clox_scan_token(c->scanner);
+    c->current = clox_scan(&c->scanner);
     if (c->current.type != TOKEN_ERROR) {
       // scanned a legal token
       break;
@@ -81,12 +70,11 @@ static inline void consume(clox_compiler_t *c, clox_token_type_t type, const cha
 
 static inline void emit_byte(const clox_compiler_t *c, clox_byte_t byte,
                              const clox_token_t *token) {
-  clox_write_chunk(c->chunk, byte, token->pos);
+  clox_chunk_write(c->chunk, byte, token->pos);
 }
 
-static inline void emit_constant(clox_compiler_t *c, clox_value_t value,
-                                 const clox_token_t *token) {
-  if (!clox_write_constant(c->chunk, value, token->pos)) {
+static inline void emit_constant(clox_compiler_t *c, clox_value_t val, const clox_token_t *token) {
+  if (!clox_write_constant(c->chunk, val, token->pos)) {
     error(c, token, "constant limit exceeded");
   }
 }
@@ -230,21 +218,32 @@ static void unary(clox_compiler_t *c) {
 }
 
 static void number(clox_compiler_t *c) {
-  char *term = (char *)c->previous.start + c->previous.length;
+  clox_token_t token = c->previous;
+
+  char *term = (char *)token.start + token.length;
   char prev_char = *term;
 
   errno = 0;
   char *parse_end;
   *term = '\0'; // temp modify
-  double value = strtod(c->previous.start, &parse_end);
+  double val = strtod(token.start, &parse_end);
   *term = prev_char; // restore
 
   assert(parse_end == term); // must parse the whole string
   if (errno != ERANGE) {
-    emit_constant(c, CLOX_NUMBER(value), &c->previous);
+    emit_constant(c, CLOX_NUMBER(val), &token);
   } else {
-    error(c, &c->previous, "number out of range");
+    error(c, &token, "number out of range");
   }
+}
+
+static void string(clox_compiler_t *c) {
+  clox_token_t token = c->previous;
+
+  const char *chars = token.start + 1; // skip leading "
+  size_t length = token.length - 2;    // skip both "s
+
+  emit_constant(c, CLOX_STRING_COPY(c->allocator, chars, length), &token);
 }
 
 static void literal(clox_compiler_t *c) {
@@ -278,27 +277,45 @@ static clox_parse_rule_t get_rule(clox_token_type_t type) {
   return parse_rules[type];
 }
 
-bool clox_compile(char *source, clox_chunk_t *chunk, clox_error_handler_t *error_handler,
-                  void *error_ctx) {
-  clox_scanner_t scanner;
-  clox_init_scanner(&scanner, source);
+void clox_compiler_init(clox_compiler_t *compiler, clox_allocator_t *alloc) {
+  compiler->allocator = alloc;
+  clox_compiler_reset_error_handler(compiler);
+}
 
-  clox_compiler_t compiler = {
-      .chunk = chunk,
-      .scanner = &scanner,
-      .had_error = false,
-      .panic_mode = false,
-      .error_handler = error_handler,
-      .error_ctx = error_ctx,
-      .parser_depth = 0,
-  };
+void clox_compiler_free(clox_compiler_t *compiler) {
+  compiler->allocator = NULL;
+  clox_compiler_reset_error_handler(compiler);
+}
 
-  advance(&compiler);    // scan the first token
-  expression(&compiler); // compile single expression
-  consume(&compiler, TOKEN_EOF, "expect end of expression");
-  end_compiler(&compiler);
+void clox_compiler_set_error_handler(clox_compiler_t *compiler, clox_error_handler_t *error_handler,
+                                     void *error_ctx) {
+  compiler->error_handler = error_handler;
+  compiler->error_ctx = error_ctx;
+}
 
-  assert(compiler.parser_depth == 0);
+void clox_compiler_reset_error_handler(clox_compiler_t *compiler) {
+  compiler->error_handler = NULL;
+  compiler->error_ctx = NULL;
+}
 
-  return !compiler.had_error;
+bool clox_compile(clox_compiler_t *compiler, char *source, clox_chunk_t *chunk) {
+  // init
+  clox_scanner_init(&compiler->scanner, source);
+  compiler->chunk = chunk;
+  compiler->had_error = false;
+  compiler->panic_mode = false;
+  compiler->parser_depth = 0;
+
+  advance(compiler);    // scan the first token
+  expression(compiler); // compile single expression
+  consume(compiler, TOKEN_EOF, "expect end of expression");
+  end_compiler(compiler);
+
+  assert(compiler->parser_depth == 0);
+
+  // cleanup
+  clox_scanner_free(&compiler->scanner);
+  compiler->chunk = NULL;
+
+  return !compiler->had_error;
 }
