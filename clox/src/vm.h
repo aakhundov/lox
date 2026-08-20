@@ -27,9 +27,9 @@ typedef struct {
 void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc);
 void clox_vm_free(clox_vm_t *vm);
 void clox_vm_set_error_handler(clox_vm_t *vm, clox_error_handler_t *error_handler, void *error_ctx);
-void clox_vm_set_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx);
 void clox_vm_reset_error_handler(clox_vm_t *vm);
-void clox_vm_reset_print_fn(clox_vm_t *vm);
+void clox_vm_set_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx);
+void clox_vm_set_default_print_fn(clox_vm_t *vm);
 
 bool clox_interpret(clox_vm_t *vm, const clox_chunk_t *chunk);
 

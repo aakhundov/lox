@@ -17,7 +17,6 @@
 #include "value.h"
 
 #define MAX_PARSER_DEPTH 20000
-#define ERROR_MESSAGE_SIZE 512
 
 __attribute__((format(printf, 3, 4))) static inline void
 error(clox_compiler_t *c, const clox_token_t *token, const char *fmt, ...) {
@@ -27,11 +26,10 @@ error(clox_compiler_t *c, const clox_token_t *token, const char *fmt, ...) {
     c->had_error = true;
 
     if (c->error_handler != NULL) {
-      char message[ERROR_MESSAGE_SIZE];
-
       va_list ap;
       va_start(ap, fmt);
-      (void)vsnprintf(message, sizeof(message), fmt, ap);
+      char message[MAX_ERROR_LENGTH + 1];
+      clox_format_error(&message, fmt, ap);
       va_end(ap);
 
       // report the error

@@ -12,8 +12,6 @@
 #include "object.h"
 #include "value.h"
 
-#define ERROR_MESSAGE_SIZE 512
-
 #if CLOX_DEBUG_EXECUTION
 static void print_stack(const clox_vm_t *vm) {
   assert(vm->stack_top >= vm->stack);
@@ -39,11 +37,12 @@ static void default_print_fn(clox_value_t val, void *ctx) {
 
 __attribute__((format(printf, 2, 3))) static inline void error(const clox_vm_t *vm, const char *fmt,
                                                                ...) {
-  char message[ERROR_MESSAGE_SIZE];
+  assert(vm->error_handler != NULL);
 
   va_list ap;
   va_start(ap, fmt);
-  (void)vsnprintf(message, sizeof(message), fmt, ap);
+  char message[MAX_ERROR_LENGTH + 1];
+  clox_format_error(&message, fmt, ap);
   va_end(ap);
 
   // ip is incremented before processing instruction
@@ -225,7 +224,7 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
   vm->chunk = NULL;
   vm->allocator = alloc;
   clox_vm_reset_error_handler(vm);
-  clox_vm_reset_print_fn(vm);
+  clox_vm_set_default_print_fn(vm);
   reset_stack(vm);
 }
 
@@ -234,7 +233,7 @@ void clox_vm_free(clox_vm_t *vm) {
   vm->chunk = NULL;
   vm->allocator = NULL;
   clox_vm_reset_error_handler(vm);
-  clox_vm_reset_print_fn(vm);
+  clox_vm_set_default_print_fn(vm);
   reset_stack(vm);
 }
 
@@ -244,17 +243,17 @@ void clox_vm_set_error_handler(clox_vm_t *vm, clox_error_handler_t *error_handle
   vm->error_ctx = error_ctx;
 }
 
-void clox_vm_set_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx) {
-  vm->print_fn = print_fn;
-  vm->print_ctx = print_ctx;
-}
-
 void clox_vm_reset_error_handler(clox_vm_t *vm) {
   vm->error_handler = NULL;
   vm->error_ctx = NULL;
 }
 
-void clox_vm_reset_print_fn(clox_vm_t *vm) {
+void clox_vm_set_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx) {
+  vm->print_fn = print_fn;
+  vm->print_ctx = print_ctx;
+}
+
+void clox_vm_set_default_print_fn(clox_vm_t *vm) {
   vm->print_fn = default_print_fn;
   vm->print_ctx = NULL;
 }
