@@ -40,21 +40,25 @@ void clox_value_array_free(clox_value_array_t *arr) {
   arr->length = 0;
 }
 
-void clox_value_print(clox_value_t val) {
+void clox_value_fprintf(FILE *stream, clox_value_t val) {
   switch (val.type) {
   case VAL_BOOL:
-    printf(CLOX_AS_BOOL(val) ? "true" : "false");
+    (void)fprintf(stream, CLOX_AS_BOOL(val) ? "true" : "false");
     break;
   case VAL_NIL:
-    printf("nil");
+    (void)fprintf(stream, "nil");
     break;
   case VAL_NUMBER:
-    printf("%g", CLOX_AS_NUMBER(val));
+    (void)fprintf(stream, "%g", CLOX_AS_NUMBER(val));
     break;
   case VAL_OBJECT:
-    clox_object_print(val);
+    clox_object_fprintf(stream, val);
     break;
   }
+}
+
+void clox_value_printf(clox_value_t val) {
+  clox_value_fprintf(stdout, val);
 }
 
 bool clox_value_is_truthy(clox_value_t val) {
@@ -65,8 +69,8 @@ bool clox_value_is_truthy(clox_value_t val) {
     return false;
   case VAL_NUMBER:
     return CLOX_AS_NUMBER(val) != 0.0;
-  default:
-    return true;
+  case VAL_OBJECT:
+    return clox_object_is_truthy(val);
   }
 }
 

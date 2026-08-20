@@ -1,1 +1,1 @@
-Inspired by ["Crafting Interpreters"](https://craftinginterpreters.com/) by Robert Nystrom.
+Inspired by Robert Nystrom's ["Crafting Interpreters"](https://craftinginterpreters.com/).

@@ -20,7 +20,7 @@ static void print_stack(const clox_vm_t *vm) {
 
   printf("---- STCK [ ");
   for (size_t i = 0; i < size; i++) {
-    clox_value_print(*(vm->stack + i));
+    clox_value_printf(*(vm->stack + i));
     if (i < size - 1) {
       printf(" | ");
     }
@@ -31,7 +31,7 @@ static void print_stack(const clox_vm_t *vm) {
 
 static void default_print_fn(clox_value_t val, void *ctx) {
   (void)ctx; // unused
-  clox_value_print(val);
+  clox_value_printf(val);
   printf("\n");
 }
 

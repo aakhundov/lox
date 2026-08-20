@@ -1,0 +1,15 @@
+# Tests inherit the project's checks, minus four. The first three fire inside
+# utest.h's macro expansions rather than in the test code -- every finding of
+# them was traced to the header. The fourth is about the tests themselves: a
+# test is a table of literal inputs and expected outputs, and naming each one
+# would hide what the case actually says.
+InheritParentConfig: true
+
+Checks: >
+  -cert-err33-c,
+  -misc-unused-parameters,
+  -readability-function-cognitive-complexity,
+  -readability-magic-numbers
+
+# our own test headers as well as the sources
+HeaderFilterRegex: '.*/clox/(src|tests)/.*'

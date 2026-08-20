@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 typedef unsigned char clox_byte_t;
 typedef uint32_t clox_hash_t;
@@ -54,6 +55,7 @@ void clox_value_array_free(clox_value_array_t *arr);
 
 bool clox_value_is_truthy(clox_value_t val);
 bool clox_value_equals(clox_value_t a, clox_value_t b);
-void clox_value_print(clox_value_t val);
+void clox_value_fprintf(FILE *stream, clox_value_t val);
+void clox_value_printf(clox_value_t val);
 
 #endif

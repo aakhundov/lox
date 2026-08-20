@@ -11,3 +11,5 @@
 -Wwrite-strings
 -fsanitize=address,undefined
 -Ivendor/isocline/include
+-Isrc
+-Ivendor/utest

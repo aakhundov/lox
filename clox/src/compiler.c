@@ -84,7 +84,6 @@ static inline void end_compiler(const clox_compiler_t *c) {
 #if CLOX_DEBUG_COMPILATION
   if (!c->had_error) {
     clox_disassemble_chunk(c->chunk, "CODE");
-    printf("\n");
   }
 #endif
 }

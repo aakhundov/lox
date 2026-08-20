@@ -12,20 +12,22 @@
 #define PAD_SIZE 40
 #define POS_SIZE 11
 
-static size_t const_instruction(const clox_chunk_t *chunk, clox_op_code_t opcode, size_t offset) {
+static size_t const_instruction(FILE *stream, const clox_chunk_t *chunk, clox_op_code_t opcode,
+                                size_t offset) {
   const clox_byte_t *ip = chunk->code + offset + 1; // skip the opcode
   clox_value_t val = clox_read_constant(chunk, opcode, &ip);
   assert(ip > chunk->code + offset + 1); // ip has moved
 
-  printf("[");
-  clox_value_print(val);
-  printf("]");
+  (void)fprintf(stream, "[");
+  clox_value_fprintf(stream, val);
+  (void)fprintf(stream, "]");
 
   // cast is safe: assert above
   return (size_t)(ip - chunk->code);
 }
 
-size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
+size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *chunk,
+                                            size_t offset) {
   assert(offset < chunk->length);
   clox_byte_t byte = chunk->code[offset];
   clox_pos_t pos = chunk->positions[offset];
@@ -35,13 +37,13 @@ size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
     // add trailing ellipsis ... on trimming
     memset(pos_str + (POS_SIZE - 3), '.', 3);
   }
-  printf("%04zu %-7s ", offset, pos_str);
+  (void)fprintf(stream, "%04zu %-7s ", offset, pos_str);
 
   if (byte < OP_CODE_COUNT) {
     // safe to cast: range check above
     clox_op_code_t opcode = (clox_op_code_t)byte;
     // legal opcode: name is available by construction
-    printf("%-18s ", clox_op_code_names[opcode]);
+    (void)fprintf(stream, "%-18s ", clox_op_code_names[opcode]);
 
     switch (opcode) {
     case OP_NIL:
@@ -64,32 +66,36 @@ size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
       break;
     case OP_CONSTANT:
     case OP_CONSTANT_LONG:
-      offset = const_instruction(chunk, opcode, offset);
+      offset = const_instruction(stream, chunk, opcode, offset);
       break;
     case OP_CODE_COUNT:
       assert(0 && "unreachable");
     }
   } else {
-    printf("Unknown opcode: %#04x", byte);
+    (void)fprintf(stream, "Unknown opcode: %#04x", byte);
     offset++; // skip this byte
   }
 
-  printf("\n");
+  (void)fprintf(stream, "\n");
   return offset;
 }
 
 void clox_disassemble_chunk(const clox_chunk_t *chunk, const char *name) {
+  clox_disassemble_chunk_fprintf(stdout, chunk, name);
+}
+
+void clox_disassemble_chunk_fprintf(FILE *stream, const clox_chunk_t *chunk, const char *name) {
   char pad[PAD_SIZE + 1];
   size_t name_len = strlen(name) + 2; // two spaces on the sides
   size_t pad_len = (name_len > PAD_SIZE ? 0 : PAD_SIZE - name_len) / 2;
-  memset(pad, '=', pad_len);
+  memset(pad, '-', pad_len);
   pad[pad_len] = '\0';
 
-  int printed = printf("%s %s %s\n", pad, name, pad);
+  int printed = fprintf(stream, "%s %s %s\n", pad, name, pad);
 
   for (size_t offset = 0; offset < chunk->length;) {
     // offset is incremented by the call below
-    offset = clox_disassemble_instruction(chunk, offset);
+    offset = clox_disassemble_instruction_fprintf(stream, chunk, offset);
   }
 
   // skip the new line char from the printed char count
@@ -97,8 +103,12 @@ void clox_disassemble_chunk(const clox_chunk_t *chunk, const char *name) {
   if (bottom_pad_len > PAD_SIZE) {
     bottom_pad_len = PAD_SIZE;
   }
-  memset(pad, '=', bottom_pad_len);
+  memset(pad, '-', bottom_pad_len);
   pad[bottom_pad_len] = '\0';
 
-  printf("%s\n", pad);
+  (void)fprintf(stream, "%s\n", pad);
+}
+
+size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
+  return clox_disassemble_instruction_fprintf(stdout, chunk, offset);
 }

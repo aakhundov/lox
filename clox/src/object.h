@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 #include "table.h"
 #include "value.h"
@@ -43,8 +44,10 @@ typedef struct clox_string_t {
 void clox_allocator_init(clox_allocator_t *alloc);
 void clox_allocator_free(clox_allocator_t *alloc);
 
+bool clox_object_is_truthy(clox_value_t val);
 bool clox_object_equals(clox_value_t a, clox_value_t b);
-void clox_object_print(clox_value_t val);
+void clox_object_fprintf(FILE *stream, clox_value_t val);
+void clox_object_printf(clox_value_t val);
 
 // (chars) points to at least (length) chars with no NUL among them
 const clox_string_t *clox_string_copy(clox_allocator_t *alloc, const char *chars, size_t length);
