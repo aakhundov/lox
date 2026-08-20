@@ -19,13 +19,13 @@ const char *const clox_op_code_names[] = {
 _Static_assert(CLOX_ARRAY_SIZE(clox_op_code_names) == OP_CODE_COUNT,
                "op code names array size mismatch");
 
-static size_t add_constant(clox_chunk_t *chunk, clox_value_t val) {
+static inline size_t add_constant(clox_chunk_t *chunk, clox_value_t val) {
   size_t index = chunk->constants.length; // where new value will land
   clox_value_array_write(&chunk->constants, val);
   return index;
 }
 
-static clox_value_t pop_constant(clox_chunk_t *chunk) {
+static inline clox_value_t pop_constant(clox_chunk_t *chunk) {
   return clox_value_array_pop(&chunk->constants);
 }
 

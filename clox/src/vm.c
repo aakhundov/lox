@@ -20,7 +20,7 @@ static void print_stack(const clox_vm_t *vm) {
   // cast is safe: assert above
   size_t size = (size_t)(vm->stack_top - vm->stack);
 
-  printf("[ ");
+  printf("---- STCK [ ");
   for (size_t i = 0; i < size; i++) {
     clox_value_print(*(vm->stack + i));
     if (i < size - 1) {
@@ -122,6 +122,7 @@ static bool run(clox_vm_t *vm) {
 
 #if CLOX_DEBUG_EXECUTION
     print_stack(vm);
+    printf("---- EXEC ");
     clox_disassemble_instruction(vm->chunk, (size_t)(vm->ip - vm->chunk->code));
 #endif
 

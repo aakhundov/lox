@@ -16,8 +16,6 @@ typedef enum {
 
 extern const char *const clox_op_code_names[];
 
-typedef unsigned char clox_byte_t;
-
 typedef struct {
   size_t length;
   size_t capacity;

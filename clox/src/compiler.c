@@ -85,7 +85,8 @@ static inline void end_compiler(const clox_compiler_t *c) {
 
 #if CLOX_DEBUG_COMPILATION
   if (!c->had_error) {
-    clox_disassemble_chunk(c->chunk, "code");
+    clox_disassemble_chunk(c->chunk, "CODE");
+    printf("\n");
   }
 #endif
 }
@@ -272,7 +273,7 @@ static const clox_parse_rule_t parse_rules[] = {
 
 _Static_assert(CLOX_ARRAY_SIZE(parse_rules) == TOKEN_TYPE_COUNT, "parse rules array size mismatch");
 
-static clox_parse_rule_t get_rule(clox_token_type_t type) {
+static inline clox_parse_rule_t get_rule(clox_token_type_t type) {
   assert(type < TOKEN_TYPE_COUNT);
   return parse_rules[type];
 }

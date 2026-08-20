@@ -3,6 +3,10 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+
+typedef unsigned char clox_byte_t;
+typedef uint32_t clox_hash_t;
 
 typedef enum {
   VAL_BOOL,
@@ -12,6 +16,7 @@ typedef enum {
 } clox_value_type_t;
 
 typedef struct clox_object_t clox_object_t;
+typedef struct clox_string_t clox_string_t;
 
 typedef struct {
   clox_value_type_t type;
