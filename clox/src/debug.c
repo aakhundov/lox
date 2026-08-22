@@ -19,7 +19,7 @@ static size_t const_instruction(FILE *stream, const clox_chunk_t *chunk, clox_op
   assert(ip > chunk->code + offset + 1); // ip has moved
 
   (void)fprintf(stream, "[");
-  clox_value_fprintf(stream, val);
+  clox_value_repr_fprintf(stream, val);
   (void)fprintf(stream, "]");
 
   // cast is safe: assert above
@@ -49,6 +49,7 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_NIL:
     case OP_TRUE:
     case OP_FALSE:
+    case OP_POP:
     case OP_EQUAL:
     case OP_NOT_EQUAL:
     case OP_GREATER:
@@ -61,11 +62,18 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_DIVIDE:
     case OP_NOT:
     case OP_NEGATE:
+    case OP_PRINT:
     case OP_RETURN:
       offset++; // just opcode
       break;
     case OP_CONSTANT:
     case OP_CONSTANT_LONG:
+    case OP_DEF_GLOBAL:
+    case OP_DEF_GLOBAL_LONG:
+    case OP_GET_GLOBAL:
+    case OP_GET_GLOBAL_LONG:
+    case OP_SET_GLOBAL:
+    case OP_SET_GLOBAL_LONG:
       offset = const_instruction(stream, chunk, opcode, offset);
       break;
     case OP_CODE_COUNT:

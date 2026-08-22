@@ -183,3 +183,35 @@ const clox_string_t *clox_table_get_key_string(const clox_table_t *table, const 
     }
   }
 }
+
+const clox_table_entry_t *clox_table_next(const clox_table_t *table,
+                                          const clox_table_entry_t *prev) {
+  if (table->entries == NULL) {
+    // the table is empty
+    return NULL;
+  }
+
+  const clox_table_entry_t *current;
+  if (prev != NULL) {
+    // make sure prev belongs to the table
+    assert((uintptr_t)prev >= (uintptr_t)table->entries);
+    assert((uintptr_t)prev - (uintptr_t)table->entries <
+           sizeof(clox_table_entry_t) * table->capacity);
+
+    // start at the entry past prev
+    current = prev + 1;
+  } else {
+    // start at the first entry
+    current = table->entries;
+  }
+
+  while (current < table->entries + table->capacity) {
+    if (current->key != NULL) {
+      return current;
+    }
+    current++;
+  }
+
+  // no entries past prev
+  return NULL;
+}

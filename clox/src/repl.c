@@ -14,6 +14,8 @@
 #include "compiler.h"
 #include "error.h"
 #include "object.h"
+#include "table.h"
+#include "value.h"
 #include "vm.h"
 
 #define MAX_ERROR_MSG_LEN 1024
@@ -173,8 +175,17 @@ static void setup_ic_history(void) {
   ic_set_history(path, -1);
 }
 
-static void handle_repl_command(const char *command) {
-  print_error("Unrecognized command: \"%s\"", command);
+static void handle_repl_command(clox_harness_t *h, const char *command) {
+  if (strcmp(command, "env") == 0) {
+    const clox_table_entry_t *running = NULL;
+    while ((running = clox_table_next(&h->vm.globals, running))) {
+      printf("%s = [", CLOX_AS_CSTRING(CLOX_OBJECT(running->key)));
+      clox_value_repr_printf(running->value);
+      printf("]\n");
+    }
+  } else {
+    print_error("Unrecognized command: \"%s\"", command);
+  }
 }
 
 static void run_repl(void) {
@@ -218,7 +229,7 @@ static void run_repl(void) {
           ic_free(text); // free before break
           break;
         }
-        handle_repl_command(command);
+        handle_repl_command(&harness, command);
       }
     } else {
       run_code(&harness, source);

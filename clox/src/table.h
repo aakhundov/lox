@@ -26,4 +26,8 @@ void clox_table_copy(clox_table_t *dst, const clox_table_t *src);
 const clox_string_t *clox_table_get_key_string(const clox_table_t *table, const char *chars,
                                                size_t length, clox_hash_t hash);
 
+// the returned pointer is valid only until the table is modified
+const clox_table_entry_t *clox_table_next(const clox_table_t *table,
+                                          const clox_table_entry_t *prev);
+
 #endif

@@ -283,6 +283,93 @@ UTEST_F(table, get_key_string_finds_nothing_after_the_key_is_deleted) {
             clox_table_get_key_string(&utest_fixture->table, key->chars, key->length, key->hash));
 }
 
+UTEST_F(table, next_finds_nothing_in_an_empty_table) {
+  EXPECT_EQ(NULL, clox_table_next(&utest_fixture->table, NULL));
+}
+
+UTEST_F(table, next_finds_nothing_in_a_freed_table) {
+  const clox_string_t *key = clox_test_intern(&utest_fixture->alloc, "a");
+
+  ASSERT_TRUE(clox_table_set(&utest_fixture->table, key, CLOX_NUMBER(1.0)));
+  clox_table_free(&utest_fixture->table);
+
+  EXPECT_EQ(NULL, clox_table_next(&utest_fixture->table, NULL));
+}
+
+UTEST_F(table, next_visits_the_only_entry_and_then_stops) {
+  const clox_string_t *key = clox_test_intern(&utest_fixture->alloc, "only");
+
+  ASSERT_TRUE(clox_table_set(&utest_fixture->table, key, CLOX_NUMBER(1.0)));
+
+  const clox_table_entry_t *entry = clox_table_next(&utest_fixture->table, NULL);
+  ASSERT_TRUE(entry != NULL);
+  EXPECT_EQ(key, entry->key);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), entry->value);
+  EXPECT_EQ(NULL, clox_table_next(&utest_fixture->table, entry));
+}
+
+UTEST_F(table, next_visits_every_entry_exactly_once) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_table_t *table = &utest_fixture->table;
+  bool seen[MANY_KEYS] = {false};
+
+  for (size_t i = 0; i < MANY_KEYS; i++) {
+    ASSERT_TRUE(clox_table_set(table, clox_test_intern_indexed(alloc, i), CLOX_NUMBER((double)i)));
+  }
+
+  size_t visited = 0;
+  const clox_table_entry_t *entry = NULL;
+  while ((entry = clox_table_next(table, entry)) != NULL) {
+    // the value says which key this entry holds
+    ASSERT_TRUE(CLOX_IS_NUMBER(entry->value));
+    size_t index = (size_t)CLOX_AS_NUMBER(entry->value);
+
+    ASSERT_TRUE(index < MANY_KEYS);
+    ASSERT_FALSE(seen[index]);
+    seen[index] = true;
+    ASSERT_EQ(clox_test_intern_indexed(alloc, index), entry->key);
+    visited++;
+  }
+
+  EXPECT_EQ((size_t)MANY_KEYS, visited);
+}
+
+UTEST_F(table, next_passes_over_deleted_entries) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_table_t *table = &utest_fixture->table;
+
+  for (size_t i = 0; i < MANY_KEYS; i++) {
+    ASSERT_TRUE(clox_table_set(table, clox_test_intern_indexed(alloc, i), CLOX_NUMBER((double)i)));
+  }
+  for (size_t i = 0; i < MANY_KEYS; i += 2) {
+    ASSERT_TRUE(clox_table_delete(table, clox_test_intern_indexed(alloc, i)));
+  }
+
+  size_t visited = 0;
+  const clox_table_entry_t *entry = NULL;
+  while ((entry = clox_table_next(table, entry)) != NULL) {
+    size_t index = (size_t)CLOX_AS_NUMBER(entry->value);
+
+    ASSERT_TRUE(index % 2 == 1); // the even keys are gone
+    ASSERT_EQ(clox_test_intern_indexed(alloc, index), entry->key);
+    visited++;
+  }
+
+  EXPECT_EQ((size_t)MANY_KEYS / 2, visited);
+}
+
+UTEST_F(table, next_finds_nothing_once_every_entry_is_deleted) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_table_t *table = &utest_fixture->table;
+
+  ASSERT_TRUE(clox_table_set(table, clox_test_intern(alloc, "one"), CLOX_NUMBER(1.0)));
+  ASSERT_TRUE(clox_table_set(table, clox_test_intern(alloc, "two"), CLOX_NUMBER(2.0)));
+  ASSERT_TRUE(clox_table_delete(table, clox_test_intern(alloc, "one")));
+  ASSERT_TRUE(clox_table_delete(table, clox_test_intern(alloc, "two")));
+
+  EXPECT_EQ(NULL, clox_table_next(table, NULL));
+}
+
 UTEST_F(table, a_table_is_empty_and_reusable_after_being_freed) {
   const clox_string_t *key = clox_test_intern(&utest_fixture->alloc, "a");
 

@@ -49,6 +49,17 @@ const char *clox_test_value_string(char (*buffer)[CLOX_TEST_MESSAGE_SIZE], clox_
   return clox_test_close_buffer(stream, *buffer, CLOX_TEST_MESSAGE_SIZE);
 }
 
+const char *clox_test_value_repr_string(char (*buffer)[CLOX_TEST_MESSAGE_SIZE], clox_value_t val) {
+  FILE *stream = clox_test_open_buffer(*buffer, CLOX_TEST_MESSAGE_SIZE);
+  if (stream == NULL) {
+    return "<could not render the value>";
+  }
+
+  clox_value_repr_fprintf(stream, val);
+
+  return clox_test_close_buffer(stream, *buffer, CLOX_TEST_MESSAGE_SIZE);
+}
+
 const char *clox_test_values_message(char (*buffer)[CLOX_TEST_MESSAGE_SIZE], clox_value_t expected,
                                      clox_value_t actual) {
   FILE *stream = clox_test_open_buffer(*buffer, CLOX_TEST_MESSAGE_SIZE);

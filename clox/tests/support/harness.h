@@ -50,6 +50,10 @@ const char *clox_test_close_buffer(FILE *stream, char *buffer, size_t size);
 // Renders val the way the interpreter prints it, into buffer, and returns it.
 const char *clox_test_value_string(char (*buffer)[CLOX_TEST_MESSAGE_SIZE], clox_value_t val);
 
+// Renders val the way the interpreter reprs it -- as Lox source -- into
+// buffer, and returns it. A repr longer than the buffer is truncated.
+const char *clox_test_value_repr_string(char (*buffer)[CLOX_TEST_MESSAGE_SIZE], clox_value_t val);
+
 // Renders both values into buffer as "expected <a>, got <b>", and returns it.
 // A value longer than the buffer is truncated: this is a failure message, not
 // a rendering of the value.

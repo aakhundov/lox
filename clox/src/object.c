@@ -28,7 +28,7 @@ static inline clox_object_t *allocate_object(clox_allocator_t *a, size_t size,
 static inline void free_object(clox_object_t *obj) {
 #if CLOX_DEBUG_ALLOCATION
   printf("---- FREE [");
-  clox_object_printf(CLOX_OBJECT(obj));
+  clox_object_repr_printf(CLOX_OBJECT(obj));
   printf("] @ %p\n", (void *)obj);
 #endif
 
@@ -54,7 +54,7 @@ static inline const clox_string_t *allocate_string(clox_allocator_t *a, char *ch
 
 #if CLOX_DEBUG_ALLOCATION
   printf("---- ALLC [");
-  clox_object_printf(CLOX_OBJECT(string));
+  clox_object_repr_printf(CLOX_OBJECT(string));
   printf("] @ %p\n", (void *)string);
 #endif
 
@@ -153,6 +153,20 @@ void clox_object_fprintf(FILE *stream, clox_value_t val) {
 
 void clox_object_printf(clox_value_t val) {
   clox_object_fprintf(stdout, val);
+}
+
+void clox_object_repr_fprintf(FILE *stream, clox_value_t val) {
+  assert(CLOX_IS_OBJECT(val));
+
+  switch (CLOX_AS_OBJECT(val)->type) {
+  case OBJ_STRING:
+    (void)fprintf(stream, "\"%s\"", CLOX_AS_CSTRING(val));
+    break;
+  }
+}
+
+void clox_object_repr_printf(clox_value_t val) {
+  clox_object_repr_fprintf(stdout, val);
 }
 
 void clox_allocator_init(clox_allocator_t *alloc) {

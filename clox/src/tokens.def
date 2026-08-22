@@ -23,16 +23,16 @@ X(STAR,          NULL,     binary, PREC_FACTOR)
 
 // one or two character tokens
 X(BANG,          unary,    NULL,   PREC_NONE)
-X(BANG_EQUAL,    NULL,     binary,   PREC_EQUALITY)
+X(BANG_EQUAL,    NULL,     binary, PREC_EQUALITY)
 X(EQUAL,         NULL,     NULL,   PREC_NONE)
-X(EQUAL_EQUAL,   NULL,     binary,   PREC_EQUALITY)
-X(GREATER,       NULL,     binary,   PREC_COMPARISON)
-X(GREATER_EQUAL, NULL,     binary,   PREC_COMPARISON)
-X(LESS,          NULL,     binary,   PREC_COMPARISON)
-X(LESS_EQUAL,    NULL,     binary,   PREC_COMPARISON)
+X(EQUAL_EQUAL,   NULL,     binary, PREC_EQUALITY)
+X(GREATER,       NULL,     binary, PREC_COMPARISON)
+X(GREATER_EQUAL, NULL,     binary, PREC_COMPARISON)
+X(LESS,          NULL,     binary, PREC_COMPARISON)
+X(LESS_EQUAL,    NULL,     binary, PREC_COMPARISON)
 
 // literals
-X(IDENTIFIER,    NULL,     NULL,   PREC_NONE)
+X(IDENTIFIER,    variable, NULL,   PREC_NONE)
 X(STRING,        string,   NULL,   PREC_NONE)
 X(NUMBER,        number,   NULL,   PREC_NONE)
 X(NIL,           literal,  NULL,   PREC_NONE)

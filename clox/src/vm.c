@@ -10,22 +10,43 @@
 #include "debug.h"
 #include "error.h"
 #include "object.h"
+#include "table.h"
 #include "value.h"
 
 #if CLOX_DEBUG_EXECUTION
 static void print_stack(const clox_vm_t *vm) {
-  assert(vm->stack_top >= vm->stack);
+  if (vm->stack_top == vm->stack) {
+    return;
+  }
+
+  assert(vm->stack_top > vm->stack);
   // cast is safe: assert above
   size_t size = (size_t)(vm->stack_top - vm->stack);
 
   printf("---- STCK [ ");
+  const char *sep = "";
   for (size_t i = 0; i < size; i++) {
-    clox_value_printf(*(vm->stack + i));
-    if (i < size - 1) {
-      printf(" | ");
-    }
+    printf("%s", sep);
+    clox_value_repr_printf(*(vm->stack + i));
+    sep = " | ";
   }
   printf(" ]\n");
+}
+
+static void print_globals(const clox_vm_t *vm) {
+  if (vm->globals.entries == NULL) {
+    return;
+  }
+
+  printf("---- GLOB { ");
+  const char *sep = "";
+  const clox_table_entry_t *running = NULL;
+  while ((running = clox_table_next(&vm->globals, running))) {
+    printf("%s%s = ", sep, running->key->chars);
+    clox_value_repr_printf(running->value);
+    sep = " | ";
+  }
+  printf(" }\n");
 }
 #endif
 
@@ -105,6 +126,7 @@ static bool run(clox_vm_t *vm) {
 #define PEEK(distance) peek_stack(vm, (distance))
 #define READ_BYTE() (*vm->ip++)
 #define READ_CONSTANT(opcode) clox_read_constant(vm->chunk, (opcode), &vm->ip)
+#define READ_STRING(opcode) CLOX_AS_STRING(READ_CONSTANT(opcode))
 #define BINARY_OP(op, RESULT_TYPE)                                                                 \
   do {                                                                                             \
     if (!CLOX_IS_NUMBER(PEEK(0)) || !CLOX_IS_NUMBER(PEEK(1))) {                                    \
@@ -121,6 +143,7 @@ static bool run(clox_vm_t *vm) {
 
 #if CLOX_DEBUG_EXECUTION
     print_stack(vm);
+    print_globals(vm);
     printf("---- EXEC ");
     clox_disassemble_instruction(vm->chunk, (size_t)(vm->ip - vm->chunk->code));
 #endif
@@ -134,6 +157,34 @@ static bool run(clox_vm_t *vm) {
     case OP_CONSTANT_LONG:
       PUSH(READ_CONSTANT(opcode));
       break;
+    case OP_DEF_GLOBAL:
+    case OP_DEF_GLOBAL_LONG: {
+      const clox_string_t *name = READ_STRING(opcode);
+      clox_table_set(&vm->globals, name, PEEK(0));
+      POP(); // pop after peek to avoid GC in-flight
+      break;
+    }
+    case OP_GET_GLOBAL:
+    case OP_GET_GLOBAL_LONG: {
+      const clox_string_t *name = READ_STRING(opcode);
+      clox_value_t value;
+      if (!clox_table_get(&vm->globals, name, &value)) {
+        ERROR("undefined variable '%s'", name->chars);
+      }
+      PUSH(value);
+      break;
+    }
+    case OP_SET_GLOBAL:
+    case OP_SET_GLOBAL_LONG: {
+      const clox_string_t *name = READ_STRING(opcode);
+      if (clox_table_set(&vm->globals, name, PEEK(0))) {
+        // the name didn't exist among the globals
+        clox_table_delete(&vm->globals, name); // revert
+        ERROR("undefined variable '%s'", name->chars);
+      }
+      // no POP(): assignment is expression
+      break;
+    }
     case OP_NIL:
       PUSH(CLOX_NIL);
       break;
@@ -142,6 +193,9 @@ static bool run(clox_vm_t *vm) {
       break;
     case OP_FALSE:
       PUSH(CLOX_BOOL(false));
+      break;
+    case OP_POP:
+      POP();
       break;
     case OP_EQUAL: {
       clox_value_t b = POP();
@@ -199,10 +253,12 @@ static bool run(clox_vm_t *vm) {
       }
       PUSH(CLOX_NUMBER(-CLOX_AS_NUMBER(POP())));
       break;
+    case OP_PRINT:
+      PRINT(POP());
+      break;
     case OP_RETURN:
-      while (vm->stack_top > vm->stack) {
-        PRINT(POP()); // temporary
-      }
+      // stack must be empty on return
+      assert(vm->stack_top == vm->stack);
       return true;
     case OP_CODE_COUNT:
       assert(0 && "unreachable");
@@ -216,6 +272,7 @@ static bool run(clox_vm_t *vm) {
 #undef PEEK
 #undef READ_BYTE
 #undef READ_CONSTANT
+#undef READ_STRING
 #undef BINARY_OP
 }
 
@@ -223,6 +280,7 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
   vm->ip = NULL;
   vm->chunk = NULL;
   vm->allocator = alloc;
+  clox_table_init(&vm->globals);
   clox_vm_reset_error_handler(vm);
   clox_vm_set_default_print_fn(vm);
   reset_stack(vm);
@@ -232,6 +290,7 @@ void clox_vm_free(clox_vm_t *vm) {
   vm->ip = NULL;
   vm->chunk = NULL;
   vm->allocator = NULL;
+  clox_table_free(&vm->globals);
   clox_vm_reset_error_handler(vm);
   clox_vm_set_default_print_fn(vm);
   reset_stack(vm);

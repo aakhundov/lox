@@ -6,6 +6,7 @@
 #include "chunk.h"
 #include "error.h"
 #include "object.h"
+#include "table.h"
 #include "value.h"
 
 #define CLOX_STACK_SIZE 1024
@@ -18,6 +19,7 @@ typedef struct {
   clox_value_t *stack_top;
   clox_value_t stack[CLOX_STACK_SIZE];
   clox_allocator_t *allocator;
+  clox_table_t globals;
   clox_error_handler_t *error_handler;
   void *error_ctx;
   clox_print_fn_t *print_fn;

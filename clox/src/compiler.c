@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,26 +21,28 @@
 
 __attribute__((format(printf, 3, 4))) static inline void
 error(clox_compiler_t *c, const clox_token_t *token, const char *fmt, ...) {
-  // do nothing in panic mode
-  if (!c->panic_mode) {
-    c->panic_mode = true;
-    c->had_error = true;
+  if (c->panic_mode) {
+    // do nothing in panic mode
+    return;
+  }
 
-    if (c->error_handler != NULL) {
-      va_list ap;
-      va_start(ap, fmt);
-      char message[MAX_ERROR_LENGTH + 1];
-      clox_format_error(&message, fmt, ap);
-      va_end(ap);
+  c->panic_mode = true;
+  c->had_error = true;
 
-      // report the error
-      c->error_handler(
-          (clox_error_info_t){
-              .message = message,
-              .pos = token->pos,
-          },
-          c->error_ctx);
-    }
+  if (c->error_handler != NULL) {
+    va_list ap;
+    va_start(ap, fmt);
+    char message[MAX_ERROR_LENGTH + 1];
+    clox_format_error(&message, fmt, ap);
+    va_end(ap);
+
+    // report the error
+    c->error_handler(
+        (clox_error_info_t){
+            .message = message,
+            .pos = token->pos,
+        },
+        c->error_ctx);
   }
 }
 
@@ -66,13 +69,54 @@ static inline void consume(clox_compiler_t *c, clox_token_type_t type, const cha
   error(c, &c->current, "%s", error_msg);
 }
 
+static inline bool check(clox_compiler_t *c, clox_token_type_t type) {
+  return c->current.type == type;
+}
+
+static inline bool match(clox_compiler_t *c, clox_token_type_t type) {
+  if (!check(c, type)) {
+    return false;
+  }
+  advance(c);
+  return true;
+}
+
+static inline void synchronize(clox_compiler_t *c) {
+  c->panic_mode = false;
+
+  while (!check(c, TOKEN_EOF)) {
+    if (c->previous.type == TOKEN_SEMICOLON) {
+      // finished a statement
+      return;
+    }
+
+    switch (c->current.type) {
+    case TOKEN_CLASS:
+    case TOKEN_FUN:
+    case TOKEN_VAR:
+    case TOKEN_FOR:
+    case TOKEN_IF:
+    case TOKEN_WHILE:
+    case TOKEN_PRINT:
+    case TOKEN_RETURN:
+      // starting a keyword-led statement
+      return;
+    default:
+      break;
+    }
+
+    advance(c);
+  }
+}
+
 static inline void emit_byte(const clox_compiler_t *c, clox_byte_t byte,
                              const clox_token_t *token) {
   clox_chunk_write(c->chunk, byte, token->pos);
 }
 
-static inline void emit_constant(clox_compiler_t *c, clox_value_t val, const clox_token_t *token) {
-  if (!clox_write_constant(c->chunk, val, token->pos)) {
+static inline void emit_constant(clox_compiler_t *c, clox_op_code_t opcode, clox_value_t val,
+                                 const clox_token_t *token) {
+  if (!clox_write_constant(c->chunk, opcode, val, token->pos)) {
     error(c, token, "constant limit exceeded");
   }
 }
@@ -83,7 +127,11 @@ static inline void end_compiler(const clox_compiler_t *c) {
 
 #if CLOX_DEBUG_COMPILATION
   if (!c->had_error) {
-    clox_disassemble_chunk(c->chunk, "CODE");
+    for (size_t offset = 0; offset < c->chunk->length;) {
+      printf("---- CODE ");
+      offset = clox_disassemble_instruction(c->chunk, offset);
+    }
+    printf("\n");
   }
 #endif
 }
@@ -103,7 +151,7 @@ typedef enum {
   PREC_COUNT,
 } clox_precedence_t;
 
-typedef void clox_parse_fn_t(clox_compiler_t *c);
+typedef void clox_parse_fn_t(clox_compiler_t *c, bool can_assign);
 
 typedef struct {
   clox_parse_fn_t *const prefix_fn;
@@ -129,14 +177,20 @@ static void parse(clox_compiler_t *c, clox_precedence_t prec) {
     error(c, &c->previous, "expect expression");
     goto ret;
   }
-  prefix_fn(c); // parse by prefix rule
+
+  bool can_assign = (prec <= PREC_ASSIGNMENT);
+  prefix_fn(c, can_assign); // parse by prefix rule
 
   // parse everything with prec or higher infix precedence
   while (prec <= get_rule(c->current.type).infix_prec) {
     advance(c); // current token moves to previous position
     clox_parse_fn_t *infix_fn = get_rule(c->previous.type).infix_fn;
     assert(infix_fn != NULL); // must be defined when != PREC_NONE (0)
-    infix_fn(c);              // parse by infix rule
+    infix_fn(c, can_assign);  // parse by infix rule
+  }
+
+  if (can_assign && match(c, TOKEN_EQUAL)) {
+    error(c, &c->previous, "invalid assignment target");
   }
 
 ret:
@@ -147,12 +201,67 @@ static void expression(clox_compiler_t *c) {
   parse(c, PREC_ASSIGNMENT);
 }
 
-static void grouping(clox_compiler_t *c) {
+static void print_statement(clox_compiler_t *c) {
+  clox_token_t keyword = c->previous;
+
+  expression(c);
+  consume(c, TOKEN_SEMICOLON, "expect ';' after value");
+  emit_byte(c, OP_PRINT, &keyword);
+}
+
+static void expression_statement(clox_compiler_t *c) {
+  expression(c);
+  consume(c, TOKEN_SEMICOLON, "expect ';' after expression");
+  emit_byte(c, OP_POP, &c->previous); // at semicolon token
+}
+
+static void statement(clox_compiler_t *c) {
+  if (match(c, TOKEN_PRINT)) {
+    print_statement(c);
+  } else {
+    expression_statement(c);
+  }
+}
+
+static void var_declaration(clox_compiler_t *c) {
+  clox_token_t keyword = c->previous;
+
+  consume(c, TOKEN_IDENTIFIER, "expect variable name");
+  clox_token_t name = c->previous;
+  clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+
+  if (match(c, TOKEN_EQUAL)) {
+    // initializer
+    expression(c);
+  } else {
+    // initialize to NIL
+    emit_byte(c, OP_NIL, &name);
+  }
+
+  consume(c, TOKEN_SEMICOLON, "expect ';' after variable declaration");
+  emit_constant(c, OP_DEF_GLOBAL, name_str, &keyword);
+}
+
+static void declaration(clox_compiler_t *c) {
+  if (match(c, TOKEN_VAR)) {
+    var_declaration(c);
+  } else {
+    statement(c);
+  }
+
+  if (c->panic_mode) {
+    synchronize(c);
+  }
+}
+
+static void grouping(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
   expression(c);
   consume(c, TOKEN_RIGHT_PAREN, "expect ')' after expression");
 }
 
-static void binary(clox_compiler_t *c) {
+static void binary(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
   clox_token_t op = c->previous;
   clox_parse_rule_t rule = get_rule(op.type);
 
@@ -197,7 +306,8 @@ static void binary(clox_compiler_t *c) {
   }
 }
 
-static void unary(clox_compiler_t *c) {
+static void unary(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
   clox_token_t op = c->previous;
 
   // compile the operand
@@ -215,7 +325,8 @@ static void unary(clox_compiler_t *c) {
   }
 }
 
-static void number(clox_compiler_t *c) {
+static void number(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
   clox_token_t token = c->previous;
 
   char *term = (char *)token.start + token.length;
@@ -229,22 +340,24 @@ static void number(clox_compiler_t *c) {
 
   assert(parse_end == term); // must parse the whole string
   if (errno != ERANGE) {
-    emit_constant(c, CLOX_NUMBER(val), &token);
+    emit_constant(c, OP_CONSTANT, CLOX_NUMBER(val), &token);
   } else {
     error(c, &token, "number out of range");
   }
 }
 
-static void string(clox_compiler_t *c) {
+static void string(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
   clox_token_t token = c->previous;
 
   const char *chars = token.start + 1; // skip leading "
   size_t length = token.length - 2;    // skip both "s
 
-  emit_constant(c, CLOX_STRING_COPY(c->allocator, chars, length), &token);
+  emit_constant(c, OP_CONSTANT, CLOX_STRING_COPY(c->allocator, chars, length), &token);
 }
 
-static void literal(clox_compiler_t *c) {
+static void literal(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
   clox_token_t token = c->previous;
 
   switch (token.type) {
@@ -259,6 +372,18 @@ static void literal(clox_compiler_t *c) {
     break;
   default:
     assert(0 && "unreachable");
+  }
+}
+
+static void variable(clox_compiler_t *c, bool can_assign) {
+  clox_token_t name = c->previous;
+  clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+
+  if (can_assign && match(c, TOKEN_EQUAL)) {
+    expression(c);
+    emit_constant(c, OP_SET_GLOBAL, name_str, &name);
+  } else {
+    emit_constant(c, OP_GET_GLOBAL, name_str, &name);
   }
 }
 
@@ -304,9 +429,11 @@ bool clox_compile(clox_compiler_t *compiler, char *source, clox_chunk_t *chunk) 
   compiler->panic_mode = false;
   compiler->parser_depth = 0;
 
-  advance(compiler);    // scan the first token
-  expression(compiler); // compile single expression
-  consume(compiler, TOKEN_EOF, "expect end of expression");
+  advance(compiler); // scan the first token
+  while (!match(compiler, TOKEN_EOF)) {
+    // sequence of declaration statements
+    declaration(compiler);
+  }
   end_compiler(compiler);
 
   assert(compiler->parser_depth == 0);

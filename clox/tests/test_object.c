@@ -137,6 +137,20 @@ UTEST_F(object, a_string_renders_as_its_characters) {
   EXPECT_STREQ("text", clox_test_value_string(&buffer, value));
 }
 
+UTEST_F(object, a_string_reprs_in_quotes) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_value_t value = CLOX_STRING_COPY(&utest_fixture->alloc, "text", 4);
+
+  EXPECT_STREQ("\"text\"", clox_test_value_repr_string(&buffer, value));
+}
+
+UTEST_F(object, an_empty_string_reprs_as_a_bare_pair_of_quotes) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_value_t value = CLOX_STRING_COPY(&utest_fixture->alloc, "", 0);
+
+  EXPECT_STREQ("\"\"", clox_test_value_repr_string(&buffer, value));
+}
+
 UTEST(object_lifetime, freeing_the_allocator_releases_every_string) {
   // LSan is the check: nothing here is freed by hand
   clox_allocator_t alloc;
