@@ -190,6 +190,106 @@ UTEST_F(lox, a_variable_survives_into_the_next_run) {
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
 }
 
+UTEST_F(lox, a_local_holds_the_value_it_was_given) {
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1 + 2; print a; }"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, assignment_replaces_the_value_of_a_local) {
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; a = 2; print a; }"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, locals_declared_together_keep_their_own_values) {
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; var b = 2; print a; print b; }"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, an_inner_block_sees_the_enclosing_local) {
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; { print a; } }"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_inner_block_assigns_to_the_enclosing_local) {
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; { a = 2; } print a; }"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_local_shadows_a_global_of_the_same_name) {
+  ASSERT_TRUE(run(utest_fixture, "var a = 1; { var a = 2; print a; } print a;"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  // the global is untouched by the block that shadowed it
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_shadowed_local_comes_back_when_the_block_ends) {
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; { var a = 2; print a; } print a; }"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_local_does_not_outlive_its_block) {
+  // nothing named a is left, so the read falls through to the globals
+  EXPECT_FALSE(run(utest_fixture, "{ var a = 1; } print a;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "undefined variable") != NULL);
+}
+
+UTEST_F(lox, a_block_leaves_no_locals_behind_on_the_stack) {
+  // each block's values are gone before the next statement starts, so a
+  // sequence of them cannot pile up
+  ASSERT_TRUE(run(utest_fixture,
+                  "{ var a = 1; var b = 2; } { var c = 3; } { var d = 4; var e = 5; } print 6;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(6.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, statements_around_a_block_run_in_order) {
+  ASSERT_TRUE(run(utest_fixture, "print 1; { print 2; } print 3;"));
+
+  ASSERT_EQ((size_t)3, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[2]);
+}
+
+UTEST_F(lox, an_empty_block_runs_and_prints_nothing) {
+  ASSERT_TRUE(run(utest_fixture, "{ }"));
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+}
+
+UTEST_F(lox, a_local_used_in_its_own_initializer_is_a_compile_error) {
+  // unlike the global form, which compiles and fails at run time
+  EXPECT_FALSE(run(utest_fixture, "{ var a = a; }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+}
+
+UTEST_F(lox, declaring_a_local_twice_in_one_block_is_a_compile_error) {
+  // unlike a global, which the later declaration simply replaces
+  EXPECT_FALSE(run(utest_fixture, "{ var a = 1; var a = 2; }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+}
+
+UTEST_F(lox, a_local_does_not_survive_into_the_next_run) {
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; }"));
+  ASSERT_EQ((size_t)0, utest_fixture->printed.count);
+
+  clox_chunk_free(&utest_fixture->chunk);
+  EXPECT_FALSE(run(utest_fixture, "print a;"));
+  EXPECT_TRUE(utest_fixture->errors.count > 0);
+}
+
 UTEST_F(lox, a_value_renders_the_way_the_repl_shows_it) {
   char buffer[CLOX_TEST_MESSAGE_SIZE];
 

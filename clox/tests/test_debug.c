@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,6 +30,20 @@ UTEST_F_SETUP(debug) {
 
 UTEST_F_TEARDOWN(debug) {
   clox_chunk_free(&utest_fixture->chunk);
+}
+
+// The opcodes carrying a one-byte operand. Written out rather than derived, so
+// a new opcode counts as operand-less here: the test walking those opcodes then
+// fails on the stride it did not advance by, instead of going unnoticed.
+static bool takes_byte_operand(clox_op_code_t opcode) {
+  switch (opcode) {
+  case OP_GET_LOCAL:
+  case OP_SET_LOCAL:
+  case OP_POP_N:
+    return true;
+  default:
+    return false;
+  }
 }
 
 // Disassembles one instruction into the fixture's buffer, and returns the
@@ -91,7 +106,7 @@ UTEST_F(debug, a_constant_is_disassembled_as_lox_source) {
                                   CLOX_STRING_COPY(&alloc, "text", 4), POS));
 
   EXPECT_EQ((size_t)2, disassemble_one(utest_fixture, 0));
-  EXPECT_TRUE(strstr(utest_fixture->text, "[\"text\"]") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "\"text\"") != NULL);
 
   clox_allocator_free(&alloc);
 }
@@ -138,6 +153,9 @@ UTEST_F(debug, every_opcode_without_operands_disassembles_under_its_own_name) {
     if (opcode < CONST_OP_CODE_COUNT) {
       continue; // const opcodes carry an operand
     }
+    if (takes_byte_operand((clox_op_code_t)opcode)) {
+      continue; // so do these
+    }
 
     size_t offset = chunk->length;
     clox_chunk_write(chunk, (clox_byte_t)opcode, POS);
@@ -147,11 +165,78 @@ UTEST_F(debug, every_opcode_without_operands_disassembles_under_its_own_name) {
   }
 }
 
+UTEST_F(debug, every_byte_operand_opcode_disassembles_under_its_own_name) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+
+  size_t walked = 0;
+  for (size_t opcode = CONST_OP_CODE_COUNT; opcode < OP_CODE_COUNT; opcode++) {
+    if (!takes_byte_operand((clox_op_code_t)opcode)) {
+      continue;
+    }
+
+    size_t offset = chunk->length;
+    clox_chunk_write(chunk, (clox_byte_t)opcode, POS);
+    clox_chunk_write(chunk, 1, POS); // the operand
+
+    ASSERT_EQ(offset + 2, disassemble_one(utest_fixture, offset));
+    ASSERT_TRUE(strstr(utest_fixture->text, clox_op_code_names[opcode]) != NULL);
+    walked++;
+  }
+
+  // the loop above is vacuous if the operand list ever empties
+  EXPECT_TRUE(walked > 0);
+}
+
+UTEST_F(debug, a_zero_byte_operand_is_rendered_as_two_hex_digits) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  clox_chunk_write(chunk, OP_GET_LOCAL, POS);
+  clox_chunk_write(chunk, 0, POS);
+
+  EXPECT_EQ((size_t)2, disassemble_one(utest_fixture, 0));
+  // zero is the case a '#' flag renders without its 0x prefix
+  EXPECT_TRUE(strstr(utest_fixture->text, "0x00") != NULL);
+}
+
+UTEST_F(debug, the_widest_byte_operand_is_rendered_as_two_hex_digits) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  clox_chunk_write(chunk, OP_POP_N, POS);
+  clox_chunk_write(chunk, 255, POS);
+
+  EXPECT_EQ((size_t)2, disassemble_one(utest_fixture, 0));
+  EXPECT_TRUE(strstr(utest_fixture->text, "0xff") != NULL);
+}
+
+UTEST_F(debug, walking_a_chunk_of_byte_operand_instructions_lands_exactly_on_its_end) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_NUMBER(1.0), POS));
+  clox_chunk_write(chunk, OP_GET_LOCAL, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, OP_SET_LOCAL, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, OP_POP_N, POS);
+  clox_chunk_write(chunk, 2, POS);
+  clox_chunk_write(chunk, OP_RETURN, POS);
+
+  size_t offset = 0;
+  size_t instructions = 0;
+  while (offset < chunk->length) {
+    size_t next = disassemble_one(utest_fixture, offset);
+    ASSERT_TRUE(next > offset); // no instruction may stand still
+    offset = next;
+    instructions++;
+  }
+
+  EXPECT_EQ(chunk->length, offset);
+  EXPECT_EQ((size_t)5, instructions);
+}
+
 UTEST_F(debug, a_byte_that_is_not_an_opcode_is_named_unknown_and_stepped_over) {
   clox_chunk_write(&utest_fixture->chunk, (clox_byte_t)0xFF, POS);
 
   EXPECT_EQ((size_t)1, disassemble_one(utest_fixture, 0));
   EXPECT_TRUE(strstr(utest_fixture->text, "Unknown opcode") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "0xff") != NULL);
 }
 
 UTEST_F(debug, a_disassembled_chunk_is_titled_and_lists_its_instructions) {

@@ -18,12 +18,16 @@ static size_t const_instruction(FILE *stream, const clox_chunk_t *chunk, clox_op
   clox_value_t val = clox_read_constant(chunk, opcode, &ip);
   assert(ip > chunk->code + offset + 1); // ip has moved
 
-  (void)fprintf(stream, "[");
   clox_value_repr_fprintf(stream, val);
-  (void)fprintf(stream, "]");
 
   // cast is safe: assert above
   return (size_t)(ip - chunk->code);
+}
+
+static size_t byte_instruction(FILE *stream, const clox_chunk_t *chunk, size_t offset) {
+  clox_byte_t byte = chunk->code[offset + 1];
+  (void)fprintf(stream, "0x%02x", byte);
+  return offset + 2; // opcode + byte
 }
 
 size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *chunk,
@@ -76,11 +80,16 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_SET_GLOBAL_LONG:
       offset = const_instruction(stream, chunk, opcode, offset);
       break;
+    case OP_GET_LOCAL:
+    case OP_SET_LOCAL:
+    case OP_POP_N:
+      offset = byte_instruction(stream, chunk, offset);
+      break;
     case OP_CODE_COUNT:
       assert(0 && "unreachable");
     }
   } else {
-    (void)fprintf(stream, "Unknown opcode: %#04x", byte);
+    (void)fprintf(stream, "Unknown opcode: 0x%02x", byte);
     offset++; // skip this byte
   }
 

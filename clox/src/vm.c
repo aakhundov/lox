@@ -106,6 +106,13 @@ static inline clox_value_t pop_stack(clox_vm_t *vm) {
   return *vm->stack_top;
 }
 
+static inline void pop_stack_n(clox_vm_t *vm, size_t n) {
+  assert(n <= CLOX_STACK_SIZE);
+  assert(vm->stack_top >= vm->stack + n); // has n items
+
+  vm->stack_top -= n;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool run(clox_vm_t *vm) {
 #define ERROR(...)                                                                                 \
@@ -123,6 +130,7 @@ static bool run(clox_vm_t *vm) {
     }                                                                                              \
   } while (0)
 #define POP() pop_stack(vm)
+#define POP_N(n) pop_stack_n(vm, n)
 #define PEEK(distance) peek_stack(vm, (distance))
 #define READ_BYTE() (*vm->ip++)
 #define READ_CONSTANT(opcode) clox_read_constant(vm->chunk, (opcode), &vm->ip)
@@ -174,17 +182,24 @@ static bool run(clox_vm_t *vm) {
       PUSH(value);
       break;
     }
+    case OP_GET_LOCAL:
+      PUSH(vm->stack[READ_BYTE()]);
+      break;
     case OP_SET_GLOBAL:
     case OP_SET_GLOBAL_LONG: {
       const clox_string_t *name = READ_STRING(opcode);
+      // no POP(): assignment is expression
       if (clox_table_set(&vm->globals, name, PEEK(0))) {
         // the name didn't exist among the globals
         clox_table_delete(&vm->globals, name); // revert
         ERROR("undefined variable '%s'", name->chars);
       }
-      // no POP(): assignment is expression
       break;
     }
+    case OP_SET_LOCAL:
+      // no POP(): assignment is expression
+      vm->stack[READ_BYTE()] = PEEK(0);
+      break;
     case OP_NIL:
       PUSH(CLOX_NIL);
       break;
@@ -196,6 +211,9 @@ static bool run(clox_vm_t *vm) {
       break;
     case OP_POP:
       POP();
+      break;
+    case OP_POP_N:
+      POP_N(READ_BYTE());
       break;
     case OP_EQUAL: {
       clox_value_t b = POP();
@@ -269,6 +287,7 @@ static bool run(clox_vm_t *vm) {
 #undef PRINT
 #undef PUSH
 #undef POP
+#undef POP_N
 #undef PEEK
 #undef READ_BYTE
 #undef READ_CONSTANT

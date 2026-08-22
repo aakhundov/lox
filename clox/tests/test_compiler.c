@@ -1,3 +1,4 @@
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -12,9 +13,12 @@
 
 #include "support/harness.h"
 
-#define SOURCE_SIZE 512
+// room for a declaration per local slot, several times over
+#define SOURCE_SIZE 8192
 // more digits than a double can hold, and fewer than the source buffer
 #define OVERSIZED_DIGITS 400
+// one more local than there are slots to hold them
+#define OVER_LOCAL_SLOTS (CLOX_MAX_LOCALS + 1)
 
 // Compares the whole emitted code array, so a stray or missing byte shows up.
 #define EXPECT_CODE(chunk, ...)                                                                    \
@@ -55,6 +59,19 @@ static bool compile(struct compiler *fixture, const char *source) {
   (void)snprintf(fixture->source, SOURCE_SIZE, "%s", source);
 
   return clox_compile(&fixture->compiler, fixture->source, &fixture->chunk);
+}
+
+// Renders a block declaring count locals -- "{var v0;var v1;...}" -- into
+// buffer. SOURCE_SIZE holds several times the longest block a caller can ask
+// for, so nothing here truncates.
+static const char *block_of_locals(char (*buffer)[SOURCE_SIZE], size_t count) {
+  size_t written = (size_t)snprintf(*buffer, SOURCE_SIZE, "{");
+  for (size_t i = 0; i < count; i++) {
+    written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "var v%zu;", i);
+  }
+  (void)snprintf(*buffer + written, SOURCE_SIZE - written, "}");
+
+  return *buffer;
 }
 
 UTEST_F(compiler, a_number_becomes_a_constant) {
@@ -297,6 +314,139 @@ UTEST_F(compiler, a_variable_takes_part_in_expressions) {
   ASSERT_TRUE(compile(utest_fixture, "print a + 1;"));
 
   EXPECT_CODE(&utest_fixture->chunk, OP_GET_GLOBAL, 0, OP_CONSTANT, 1, OP_ADD, OP_PRINT, OP_RETURN);
+}
+
+UTEST_F(compiler, a_block_keeps_its_variable_out_of_the_globals) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; }"));
+
+  // one local leaves by the plain OP_POP, not a counted one
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_POP, OP_RETURN);
+  // the initializer is the only constant: a local is never named
+  EXPECT_EQ((size_t)1, utest_fixture->chunk.constants.length);
+}
+
+UTEST_F(compiler, a_local_is_read_by_its_slot) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; a; }"));
+
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 0, OP_POP, OP_POP, OP_RETURN);
+  EXPECT_EQ((size_t)1, utest_fixture->chunk.constants.length);
+}
+
+UTEST_F(compiler, a_local_is_assigned_by_its_slot) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; a = 2; }"));
+
+  // the value is left behind, as every assignment is an expression
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_SET_LOCAL, 0, OP_POP,
+              OP_POP, OP_RETURN);
+}
+
+UTEST_F(compiler, locals_take_their_slots_in_declaration_order) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; var b = 2; a; b; }"));
+
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_GET_LOCAL, 0, OP_POP,
+              OP_GET_LOCAL, 1, OP_POP, OP_POP_N, 2, OP_RETURN);
+}
+
+UTEST_F(compiler, a_local_shadows_an_enclosing_one_of_the_same_name) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; { var a = 2; a; } }"));
+
+  // the inner slot wins, and each block pops only what it declared
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_GET_LOCAL, 1, OP_POP,
+              OP_POP, OP_POP, OP_RETURN);
+}
+
+UTEST_F(compiler, an_inner_block_reaches_the_enclosing_local) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; { a; } }"));
+
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 0, OP_POP, OP_POP, OP_RETURN);
+}
+
+UTEST_F(compiler, an_inner_block_assigns_to_the_enclosing_local) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; { a = 2; } }"));
+
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_SET_LOCAL, 0, OP_POP,
+              OP_POP, OP_RETURN);
+}
+
+UTEST_F(compiler, a_block_declaring_nothing_pops_nothing) {
+  ASSERT_TRUE(compile(utest_fixture, "{ 1; }"));
+
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_POP, OP_RETURN);
+}
+
+UTEST_F(compiler, leaving_a_block_pops_its_locals_in_one_instruction) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a; var b; var c; }"));
+
+  EXPECT_CODE(&utest_fixture->chunk, OP_NIL, OP_NIL, OP_NIL, OP_POP_N, 3, OP_RETURN);
+}
+
+UTEST_F(compiler, the_counted_pop_starts_at_the_second_local) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a; }"));
+  EXPECT_CODE(&utest_fixture->chunk, OP_NIL, OP_POP, OP_RETURN);
+
+  clox_chunk_free(&utest_fixture->chunk);
+  ASSERT_TRUE(compile(utest_fixture, "{ var a; var b; }"));
+  EXPECT_CODE(&utest_fixture->chunk, OP_NIL, OP_NIL, OP_POP_N, 2, OP_RETURN);
+}
+
+UTEST_F(compiler, a_declaration_outside_every_block_is_still_a_global) {
+  ASSERT_TRUE(compile(utest_fixture, "var a = 1; { var b = 2; }"));
+
+  EXPECT_CODE(&utest_fixture->chunk, OP_CONSTANT, 0, OP_DEF_GLOBAL, 1, OP_CONSTANT, 2, OP_POP,
+              OP_RETURN);
+  // only the global is named
+  ASSERT_EQ((size_t)3, utest_fixture->chunk.constants.length);
+  EXPECT_STREQ("a", CLOX_AS_CSTRING(utest_fixture->chunk.constants.values[1]));
+}
+
+UTEST_F(compiler, filling_every_local_slot_pops_them_in_byte_sized_groups) {
+  char source[SOURCE_SIZE];
+  ASSERT_TRUE(compile(utest_fixture, block_of_locals(&source, CLOX_MAX_LOCALS)));
+
+  // one OP_NIL per local, then the pops no single byte could count
+  const clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_EQ((size_t)CLOX_MAX_LOCALS + 5, chunk->length);
+  EXPECT_EQ(OP_NIL, chunk->code[CLOX_MAX_LOCALS - 1]);
+  EXPECT_EQ(OP_POP_N, chunk->code[CLOX_MAX_LOCALS]);
+  EXPECT_EQ(UCHAR_MAX, chunk->code[CLOX_MAX_LOCALS + 1]);
+  EXPECT_EQ(OP_POP_N, chunk->code[CLOX_MAX_LOCALS + 2]);
+  EXPECT_EQ(CLOX_MAX_LOCALS - UCHAR_MAX, chunk->code[CLOX_MAX_LOCALS + 3]);
+  EXPECT_EQ(OP_RETURN, chunk->code[CLOX_MAX_LOCALS + 4]);
+}
+
+UTEST_F(compiler, one_local_more_than_there_are_slots_is_reported) {
+  char source[SOURCE_SIZE];
+  EXPECT_FALSE(compile(utest_fixture, block_of_locals(&source, OVER_LOCAL_SLOTS)));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "locals") != NULL);
+}
+
+UTEST_F(compiler, declaring_a_local_twice_in_one_block_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "{ var a; var a; }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "already defined") != NULL);
+}
+
+UTEST_F(compiler, a_local_may_repeat_a_name_from_an_enclosing_block) {
+  EXPECT_TRUE(compile(utest_fixture, "{ var a; { var a; } }"));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(compiler, a_local_read_inside_its_own_initializer_is_reported) {
+  // the global form of this compiles and fails at run time instead
+  EXPECT_FALSE(compile(utest_fixture, "{ var a = a; }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "own initializer") != NULL);
+}
+
+UTEST_F(compiler, a_block_without_its_closing_brace_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "{ 1;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "after block") != NULL);
 }
 
 UTEST_F(compiler, a_number_too_large_to_represent_is_reported) {

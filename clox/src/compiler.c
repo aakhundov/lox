@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -114,11 +115,33 @@ static inline void emit_byte(const clox_compiler_t *c, clox_byte_t byte,
   clox_chunk_write(c->chunk, byte, token->pos);
 }
 
+static inline void emit_byte_op(const clox_compiler_t *c, clox_op_code_t opcode, clox_byte_t byte,
+                                const clox_token_t *token) {
+  // cast is safe by construction
+  clox_chunk_write(c->chunk, (clox_byte_t)opcode, token->pos);
+  clox_chunk_write(c->chunk, byte, token->pos);
+}
+
 static inline void emit_constant(clox_compiler_t *c, clox_op_code_t opcode, clox_value_t val,
                                  const clox_token_t *token) {
   if (!clox_write_constant(c->chunk, opcode, val, token->pos)) {
     error(c, token, "constant limit exceeded");
   }
+}
+
+static inline void scan_to_eof(clox_compiler_t *c) {
+  while (c->current.type != TOKEN_EOF) {
+    advance(c);
+  }
+}
+
+static inline bool at_max_parser_depth(clox_compiler_t *c) {
+  if (c->parser_depth >= MAX_PARSER_DEPTH) {
+    error(c, &c->current, "max parser depth exceeded");
+    scan_to_eof(c); // no point in trying to recover
+    return true;
+  }
+  return false;
 }
 
 static inline void end_compiler(const clox_compiler_t *c) {
@@ -159,12 +182,12 @@ typedef struct {
   clox_precedence_t infix_prec;
 } clox_parse_rule_t;
 
+static void declaration(clox_compiler_t *c);
 static clox_parse_rule_t get_rule(clox_token_type_t type);
 
 static void parse(clox_compiler_t *c, clox_precedence_t prec) {
   c->parser_depth++;
-  if (c->parser_depth >= MAX_PARSER_DEPTH) {
-    error(c, &c->current, "max parser depth exceeded");
+  if (at_max_parser_depth(c)) {
     goto ret;
   }
 
@@ -209,6 +232,34 @@ static void print_statement(clox_compiler_t *c) {
   emit_byte(c, OP_PRINT, &keyword);
 }
 
+static void block(clox_compiler_t *c) {
+  c->scope_depth++;
+
+  while (!check(c, TOKEN_RIGHT_BRACE) && !check(c, TOKEN_EOF)) {
+    declaration(c);
+  }
+
+  consume(c, TOKEN_RIGHT_BRACE, "expect '}' after block");
+
+  c->scope_depth--;
+  size_t n_to_pop = 0;
+  while (c->local_count > 0 && c->locals[c->local_count - 1].depth > c->scope_depth) {
+    c->local_count--;
+    n_to_pop++;
+  }
+  if (n_to_pop == 1) {
+    // use OP_POP for single pop as more efficient
+    emit_byte(c, OP_POP, &c->previous); // at closing brace
+  } else {
+    while (n_to_pop > 0) {
+      // cast is safe by construction
+      clox_byte_t chunk = (n_to_pop > UCHAR_MAX) ? UCHAR_MAX : (clox_byte_t)n_to_pop;
+      emit_byte_op(c, OP_POP_N, chunk, &c->previous); // at closing brace
+      n_to_pop -= chunk;
+    }
+  }
+}
+
 static void expression_statement(clox_compiler_t *c) {
   expression(c);
   consume(c, TOKEN_SEMICOLON, "expect ';' after expression");
@@ -216,19 +267,90 @@ static void expression_statement(clox_compiler_t *c) {
 }
 
 static void statement(clox_compiler_t *c) {
+  c->parser_depth++;
+  if (at_max_parser_depth(c)) {
+    goto ret;
+  }
+
   if (match(c, TOKEN_PRINT)) {
     print_statement(c);
+  } else if (match(c, TOKEN_LEFT_BRACE)) {
+    block(c);
   } else {
     expression_statement(c);
   }
+
+ret:
+  c->parser_depth--;
+}
+
+static inline bool names_equal(const clox_token_t *a, const clox_token_t *b) {
+  if (a->length != b->length) {
+    return false;
+  }
+  return memcmp(a->start, b->start, a->length) == 0;
+}
+
+static inline void add_local(clox_compiler_t *c, const clox_token_t *name) {
+  assert(c->scope_depth > 0);
+
+  if (c->local_count >= CLOX_MAX_LOCALS) {
+    error(c, name, "max. %d locals allowed at a time", CLOX_MAX_LOCALS);
+    return;
+  }
+
+  clox_local_t *local = c->locals + c->local_count;
+  local->name = *name;
+  local->depth = c->scope_depth;
+  local->initialized = false;
+  c->local_count++;
+}
+
+static inline size_t resolve_local(clox_compiler_t *c, const clox_token_t *name) {
+  // cast is safe: MAX_LOCALS <= INT_MAX
+  for (int i = (int)c->local_count - 1; i >= 0; i--) {
+    clox_local_t *local = c->locals + i;
+    if (names_equal(&local->name, name)) {
+      if (!local->initialized) {
+        error(c, name, "can't read '%.*s' in its own initializer", (int)name->length, name->start);
+      }
+
+      // cast is safe: range is non-negative
+      return (size_t)i;
+    }
+  }
+  // sentinel value
+  return CLOX_MAX_LOCALS;
+}
+
+_Static_assert(CLOX_MAX_LOCALS <= INT_MAX, "MAX_LOCALS must fit within int");
+
+static inline void declare_variable(clox_compiler_t *c, const clox_token_t *name) {
+  assert(c->scope_depth > 0);
+
+  // cast is safe: MAX_LOCALS <= INT_MAX
+  for (int i = (int)c->local_count - 1; i >= 0; i--) {
+    clox_local_t *local = c->locals + i;
+    if (local->initialized && local->depth < c->scope_depth) {
+      break;
+    }
+    if (names_equal(&local->name, name)) {
+      error(c, name, "'%.*s' already defined in this scope", (int)name->length, name->start);
+      return;
+    }
+  }
+
+  add_local(c, name);
 }
 
 static void var_declaration(clox_compiler_t *c) {
   clox_token_t keyword = c->previous;
-
   consume(c, TOKEN_IDENTIFIER, "expect variable name");
   clox_token_t name = c->previous;
-  clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+
+  if (c->scope_depth > 0) { // local scope
+    declare_variable(c, &name);
+  }
 
   if (match(c, TOKEN_EQUAL)) {
     // initializer
@@ -239,7 +361,14 @@ static void var_declaration(clox_compiler_t *c) {
   }
 
   consume(c, TOKEN_SEMICOLON, "expect ';' after variable declaration");
-  emit_constant(c, OP_DEF_GLOBAL, name_str, &keyword);
+
+  if (c->scope_depth > 0) { // local scope
+    // mark the declared variable initialized
+    c->locals[c->local_count - 1].initialized = true;
+  } else { // global scope
+    clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+    emit_constant(c, OP_DEF_GLOBAL, name_str, &keyword);
+  }
 }
 
 static void declaration(clox_compiler_t *c) {
@@ -375,15 +504,39 @@ static void literal(clox_compiler_t *c, bool can_assign) {
   }
 }
 
+_Static_assert(CLOX_MAX_LOCALS - 1 <= UCHAR_MAX, "local index should fit in unsigned char");
+
 static void variable(clox_compiler_t *c, bool can_assign) {
   clox_token_t name = c->previous;
-  clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
 
-  if (can_assign && match(c, TOKEN_EQUAL)) {
+  bool assignment = can_assign && match(c, TOKEN_EQUAL);
+  if (assignment) {
+    // evaluate lhs
     expression(c);
-    emit_constant(c, OP_SET_GLOBAL, name_str, &name);
+  }
+
+  size_t local_idx = resolve_local(c, &name);
+  if (local_idx < CLOX_MAX_LOCALS) {
+    // local variable
+    // cast is safe: range checked above
+    clox_byte_t byte_idx = (clox_byte_t)local_idx;
+    if (assignment) {
+      // set local
+      emit_byte_op(c, OP_SET_LOCAL, byte_idx, &name);
+    } else {
+      // get local
+      emit_byte_op(c, OP_GET_LOCAL, byte_idx, &name);
+    }
   } else {
-    emit_constant(c, OP_GET_GLOBAL, name_str, &name);
+    // global variable
+    clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+    if (assignment) {
+      // set global
+      emit_constant(c, OP_SET_GLOBAL, name_str, &name);
+    } else {
+      // get global
+      emit_constant(c, OP_GET_GLOBAL, name_str, &name);
+    }
   }
 }
 
@@ -428,6 +581,8 @@ bool clox_compile(clox_compiler_t *compiler, char *source, clox_chunk_t *chunk) 
   compiler->had_error = false;
   compiler->panic_mode = false;
   compiler->parser_depth = 0;
+  compiler->local_count = 0;
+  compiler->scope_depth = 0;
 
   advance(compiler); // scan the first token
   while (!match(compiler, TOKEN_EOF)) {

@@ -29,6 +29,7 @@ const char *const clox_op_code_names[] = {
 #undef X
 };
 
+_Static_assert(OP_CODE_COUNT <= UCHAR_MAX + 1, "opcodes must be single-byte");
 _Static_assert(CLOX_ARRAY_SIZE(clox_op_code_names) == OP_CODE_COUNT,
                "op code names array size mismatch");
 

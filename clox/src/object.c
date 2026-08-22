@@ -27,9 +27,9 @@ static inline clox_object_t *allocate_object(clox_allocator_t *a, size_t size,
 
 static inline void free_object(clox_object_t *obj) {
 #if CLOX_DEBUG_ALLOCATION
-  printf("---- FREE [");
+  printf("---- FREE ");
   clox_object_repr_printf(CLOX_OBJECT(obj));
-  printf("] @ %p\n", (void *)obj);
+  printf(" @ %p\n", (void *)obj);
 #endif
 
   switch (obj->type) {
@@ -53,9 +53,9 @@ static inline const clox_string_t *allocate_string(clox_allocator_t *a, char *ch
   clox_table_set(&a->strings, string, CLOX_NIL);
 
 #if CLOX_DEBUG_ALLOCATION
-  printf("---- ALLC [");
+  printf("---- ALLC ");
   clox_object_repr_printf(CLOX_OBJECT(string));
-  printf("] @ %p\n", (void *)string);
+  printf(" @ %p\n", (void *)string);
 #endif
 
   return string;

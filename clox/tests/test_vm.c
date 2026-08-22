@@ -1,3 +1,4 @@
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -259,6 +260,86 @@ UTEST_F(vm, popping_discards_the_top_of_the_stack) {
   ASSERT_TRUE(interpret(utest_fixture, 1));
   ASSERT_EQ((size_t)1, utest_fixture->printed.count);
   EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_local_slot_is_read_onto_the_top_of_the_stack) {
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0)); // slot 0
+  emit(utest_fixture, OP_GET_LOCAL);
+  emit(utest_fixture, 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  // the copy on top, and the slot it was read from
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, a_local_slot_is_read_by_its_own_index) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // slot 0
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0)); // slot 1
+  emit(utest_fixture, OP_GET_LOCAL);
+  emit(utest_fixture, 1);
+
+  ASSERT_TRUE(interpret(utest_fixture, 3));
+  ASSERT_EQ((size_t)3, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, setting_a_local_slot_overwrites_it) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // slot 0
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit(utest_fixture, OP_SET_LOCAL);
+  emit(utest_fixture, 0);
+  emit(utest_fixture, OP_POP); // the value the assignment left behind
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, setting_a_local_slot_leaves_the_value_on_the_stack) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // slot 0
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit(utest_fixture, OP_SET_LOCAL);
+  emit(utest_fixture, 0);
+
+  // both the slot and the assignment's own value are still there
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  EXPECT_EQ((size_t)2, utest_fixture->printed.count);
+}
+
+UTEST_F(vm, a_counted_pop_discards_that_many_values) {
+  emit(utest_fixture, OP_TRUE);
+  emit(utest_fixture, OP_NIL);
+  emit(utest_fixture, OP_FALSE);
+  emit(utest_fixture, OP_POP_N);
+  emit(utest_fixture, 2);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_counted_pop_of_zero_leaves_the_stack_alone) {
+  emit(utest_fixture, OP_TRUE);
+  emit(utest_fixture, OP_POP_N);
+  emit(utest_fixture, 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_counted_pop_clears_a_whole_byte_of_values) {
+  for (size_t i = 0; i < UCHAR_MAX; i++) {
+    emit(utest_fixture, OP_NIL);
+  }
+  emit(utest_fixture, OP_POP_N);
+  emit(utest_fixture, UCHAR_MAX);
+
+  // the run returns on an empty stack
+  EXPECT_TRUE(interpret(utest_fixture, 0));
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
 }
 
 UTEST_F(vm, a_defined_global_reads_back_its_value) {

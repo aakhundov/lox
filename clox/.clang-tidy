@@ -9,6 +9,7 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -readability-identifier-length,
   -readability-implicit-bool-conversion,
+  -misc-no-recursion,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 
 # our own headers only: vendored third-party code is not ours to lint
