@@ -201,7 +201,7 @@ UTEST_F(lox, assignment_replaces_the_value_of_a_local) {
 }
 
 UTEST_F(lox, locals_declared_together_keep_their_own_values) {
-  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; var b = 2; print a; print b; }"));
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; var b = 2; print a, b; }"));
 
   ASSERT_EQ((size_t)2, utest_fixture->printed.count);
   EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
@@ -263,6 +263,262 @@ UTEST_F(lox, statements_around_a_block_run_in_order) {
 UTEST_F(lox, an_empty_block_runs_and_prints_nothing) {
   ASSERT_TRUE(run(utest_fixture, "{ }"));
   EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+}
+
+UTEST_F(lox, a_print_reports_all_of_its_values_in_order) {
+  ASSERT_TRUE(run(utest_fixture, "print 1, nil, false, 2;"));
+
+  ASSERT_EQ((size_t)4, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NIL, utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[2]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[3]);
+}
+
+UTEST_F(lox, an_if_runs_its_then_branch_when_the_condition_holds) {
+  ASSERT_TRUE(run(utest_fixture, "if (true) print 1; else print 2;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_if_runs_its_else_branch_when_the_condition_fails) {
+  ASSERT_TRUE(run(utest_fixture, "if (false) print 1; else print 2;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_if_without_an_else_runs_nothing_when_its_condition_fails) {
+  ASSERT_TRUE(run(utest_fixture, "if (false) print 1; print 2;"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_else_belongs_to_the_nearest_if) {
+  ASSERT_TRUE(run(utest_fixture, "if (true) if (false) print 1; else print 2;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_condition_is_gone_from_the_stack_once_the_branch_is_decided) {
+  // a run only returns on an empty stack, so a condition left behind by
+  // either outcome would stop this before it printed
+  ASSERT_TRUE(run(utest_fixture, "if (true) { } if (false) { } print 1;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, and_gives_back_the_left_operand_that_stopped_it) {
+  ASSERT_TRUE(run(utest_fixture, "print nil and 2;"));
+  EXPECT_VALUE_EQ(CLOX_NIL, only_printed(utest_fixture));
+}
+
+UTEST_F(lox, and_gives_back_its_right_operand_when_the_left_holds) {
+  ASSERT_TRUE(run(utest_fixture, "print 1 and 2;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, or_gives_back_the_left_operand_that_stopped_it) {
+  ASSERT_TRUE(run(utest_fixture, "print 1 or 2;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, or_gives_back_its_right_operand_when_the_left_is_falsy) {
+  ASSERT_TRUE(run(utest_fixture, "print false or 2;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, and_never_reaches_its_right_operand_once_the_left_is_falsy) {
+  // reading the undefined name would be a runtime error if it happened
+  ASSERT_TRUE(run(utest_fixture, "print false and missing;"));
+
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), only_printed(utest_fixture));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(lox, or_never_reaches_its_right_operand_once_the_left_holds) {
+  ASSERT_TRUE(run(utest_fixture, "print true or missing;"));
+
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(lox, and_binds_tighter_than_or) {
+  ASSERT_TRUE(run(utest_fixture, "print false or 1 and 2;"));
+  // "false or (1 and 2)", not "(false or 1) and 2"
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_while_loop_repeats_until_its_condition_fails) {
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; while (n < 3) { print n; n = n + 1; } print n;"));
+
+  ASSERT_EQ((size_t)4, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[2]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[3]);
+}
+
+UTEST_F(lox, a_while_loop_whose_condition_fails_first_never_runs) {
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; while (false) { n = 1; } print n;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_loop_body_declaring_locals_does_not_pile_them_up) {
+  // more turns than the stack has room for, so a local left behind by any
+  // one of them would overflow it before the loop ended
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; while (n < 1200) { var t = n; n = n + 1; } print n;"));
+
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1200.0), only_printed(utest_fixture));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(lox, a_for_loop_counts_from_its_initializer_up_to_its_condition) {
+  ASSERT_TRUE(run(utest_fixture, "for (var i = 0; i < 3; i = i + 1) print i;"));
+
+  ASSERT_EQ((size_t)3, utest_fixture->printed.count);
+  // the first turn prints before the increment has run
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[2]);
+}
+
+UTEST_F(lox, a_for_loop_may_leave_its_clauses_out) {
+  ASSERT_TRUE(run(utest_fixture, "var i = 0; for (; i < 2;) { print i; i = i + 1; }"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_for_loop_variable_does_not_outlive_the_loop) {
+  // nothing named i is left, so the read falls through to the globals
+  EXPECT_FALSE(run(utest_fixture, "for (var i = 0; i < 1; i = i + 1) print i; print i;"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), only_printed(utest_fixture));
+  EXPECT_TRUE(utest_fixture->errors.count > 0);
+}
+
+UTEST_F(lox, a_for_loop_body_may_declare_locals_of_its_own) {
+  ASSERT_TRUE(run(utest_fixture, "var s = 0; for (var i = 1; i < 4; i = i + 1) { var d = i * i;"
+                                 " s = s + d; } print s;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(14.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_nested_loop_starts_over_on_every_turn_of_the_outer_one) {
+  ASSERT_TRUE(run(utest_fixture, "for (var i = 0; i < 2; i = i + 1)"
+                                 " for (var j = 0; j < 2; j = j + 1) print i, j;"));
+
+  ASSERT_EQ((size_t)8, utest_fixture->printed.count);
+  // the inner counter comes back to zero for the outer one's second turn
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[4]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[5]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[6]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[7]);
+}
+
+UTEST_F(lox, a_break_ends_the_loop_it_is_in) {
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; while (true) { n = n + 1;"
+                                 " if (n == 3) break; } print n;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_break_leaves_the_rest_of_the_body_unrun) {
+  ASSERT_TRUE(run(utest_fixture, "for (var i = 0; i < 3; i = i + 1)"
+                                 " { if (i == 1) break; print i; }"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_continue_leaves_the_rest_of_the_body_unrun) {
+  ASSERT_TRUE(run(utest_fixture, "for (var i = 0; i < 4; i = i + 1)"
+                                 " { if (i == 1) continue; print i; }"));
+
+  // the turn it skips is the only one missing; the loop runs to its end
+  ASSERT_EQ((size_t)3, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[2]);
+}
+
+UTEST_F(lox, a_continue_in_a_for_loop_still_runs_the_increment) {
+  // going back to the condition instead would leave the counter standing
+  // and the loop would never end
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; for (var i = 0; i < 3; i = i + 1)"
+                                 " { n = n + 1; continue; } print n;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_break_leaves_only_the_innermost_loop) {
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; for (var i = 0; i < 3; i = i + 1)"
+                                 " { for (var j = 0; j < 3; j = j + 1)"
+                                 " { if (j == 1) break; n = n + 1; } } print n;"));
+
+  // one turn of the inner loop survives on each of the outer loop's three
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_continue_repeats_only_the_innermost_loop) {
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; for (var i = 0; i < 2; i = i + 1)"
+                                 " { for (var j = 0; j < 3; j = j + 1)"
+                                 " { if (j == 0) continue; n = n + 1; }"
+                                 " n = n + 10; } print n;"));
+
+  // two inner turns count on each outer one, and the outer body goes on
+  // past the inner loop both times
+  EXPECT_VALUE_EQ(CLOX_NUMBER(24.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_later_break_leaves_the_loop_by_the_way_the_first_one_opened) {
+  // the second break is the one that fires, and it reaches the way out
+  // through the jump the first break left behind
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; while (true) { n = n + 1;"
+                                 " if (n == 5) break; if (n == 2) break; } print n;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_continue_leaves_no_locals_behind_on_the_stack) {
+  // more turns than the stack has room for, so a local the continue failed
+  // to drop would overflow it before the loop ended
+  ASSERT_TRUE(run(utest_fixture, "var n = 0; while (n < 1200) { var t = n;"
+                                 " n = n + 1; continue; } print n;"));
+
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1200.0), only_printed(utest_fixture));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(lox, a_break_out_of_nested_blocks_leaves_the_stack_as_it_found_it) {
+  // the break drops the two locals it leaves behind and no more, so the one
+  // declared before the loop is still where the print expects it
+  ASSERT_TRUE(run(utest_fixture, "{ var a = 1; while (true) { var b = 2;"
+                                 " { var c = 3; break; } } print a; }"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_for_loop_variable_does_not_outlive_a_break) {
+  // leaving by a break drops the variable the same way running out does
+  EXPECT_FALSE(run(utest_fixture, "for (var i = 0;;) break; print i;"));
+
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+  EXPECT_TRUE(utest_fixture->errors.count > 0);
+}
+
+UTEST_F(lox, a_runtime_error_inside_a_loop_stops_it) {
+  EXPECT_FALSE(run(utest_fixture, "var n = 0; while (n < 3) { print missing; }"));
+
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.count);
+}
+
+UTEST_F(lox, a_break_outside_a_loop_stops_before_anything_runs) {
+  EXPECT_FALSE(run(utest_fixture, "print 1; break;"));
+
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+  EXPECT_TRUE(utest_fixture->errors.count > 0);
+}
+
+UTEST_F(lox, a_continue_outside_a_loop_stops_before_anything_runs) {
+  EXPECT_FALSE(run(utest_fixture, "print 1; continue;"));
+
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+  EXPECT_TRUE(utest_fixture->errors.count > 0);
 }
 
 UTEST_F(lox, a_local_used_in_its_own_initializer_is_a_compile_error) {

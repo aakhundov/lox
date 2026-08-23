@@ -40,6 +40,20 @@ static bool takes_byte_operand(clox_op_code_t opcode) {
   case OP_GET_LOCAL:
   case OP_SET_LOCAL:
   case OP_POP_N:
+  case OP_PRINT_N:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool takes_jump_operand(clox_op_code_t opcode) {
+  switch (opcode) {
+  case OP_JUMP_TRUE:
+  case OP_JUMP_FALSE:
+  case OP_JUMP_FALSE_POP:
+  case OP_JUMP:
+  case OP_LOOP:
     return true;
   default:
     return false;
@@ -153,7 +167,7 @@ UTEST_F(debug, every_opcode_without_operands_disassembles_under_its_own_name) {
     if (opcode < CONST_OP_CODE_COUNT) {
       continue; // const opcodes carry an operand
     }
-    if (takes_byte_operand((clox_op_code_t)opcode)) {
+    if (takes_byte_operand((clox_op_code_t)opcode) || takes_jump_operand((clox_op_code_t)opcode)) {
       continue; // so do these
     }
 
@@ -229,6 +243,91 @@ UTEST_F(debug, walking_a_chunk_of_byte_operand_instructions_lands_exactly_on_its
 
   EXPECT_EQ(chunk->length, offset);
   EXPECT_EQ((size_t)5, instructions);
+}
+
+UTEST_F(debug, every_jump_opcode_disassembles_under_its_own_name) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+
+  size_t walked = 0;
+  for (size_t opcode = CONST_OP_CODE_COUNT; opcode < OP_CODE_COUNT; opcode++) {
+    if (!takes_jump_operand((clox_op_code_t)opcode)) {
+      continue;
+    }
+
+    size_t offset = chunk->length;
+    clox_chunk_write(chunk, (clox_byte_t)opcode, POS);
+    clox_chunk_write(chunk, 0, POS); // the two operand bytes
+    clox_chunk_write(chunk, 0, POS);
+
+    ASSERT_EQ(offset + 3, disassemble_one(utest_fixture, offset));
+    ASSERT_TRUE(strstr(utest_fixture->text, clox_op_code_names[opcode]) != NULL);
+    walked++;
+  }
+
+  // the loop above is vacuous if the operand list ever empties
+  EXPECT_TRUE(walked > 0);
+}
+
+UTEST_F(debug, a_forward_jump_is_rendered_as_the_offset_it_lands_on) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  clox_chunk_write(chunk, OP_JUMP, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, 5, POS);
+
+  EXPECT_EQ((size_t)3, disassemble_one(utest_fixture, 0));
+  // the offset counts from the end of the instruction, not from its start
+  EXPECT_TRUE(strstr(utest_fixture->text, "0008") != NULL);
+}
+
+UTEST_F(debug, a_loop_is_rendered_as_the_offset_it_returns_to) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  for (size_t i = 0; i < 10; i++) {
+    clox_chunk_write(chunk, OP_NIL, POS); // something to jump back over
+  }
+  clox_chunk_write(chunk, OP_LOOP, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, 7, POS);
+
+  EXPECT_EQ((size_t)13, disassemble_one(utest_fixture, 10));
+  EXPECT_TRUE(strstr(utest_fixture->text, "0006") != NULL);
+}
+
+UTEST_F(debug, a_jump_operand_wider_than_a_byte_is_read_big_endian) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  clox_chunk_write(chunk, OP_JUMP, POS);
+  clox_chunk_write(chunk, 1, POS); // the high byte
+  clox_chunk_write(chunk, 2, POS);
+
+  EXPECT_EQ((size_t)3, disassemble_one(utest_fixture, 0));
+  // 0x0102 is 258, so the landing offset is 261 rather than 5 or 516
+  EXPECT_TRUE(strstr(utest_fixture->text, "0261") != NULL);
+}
+
+UTEST_F(debug, walking_a_chunk_of_jump_instructions_lands_exactly_on_its_end) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+
+  clox_chunk_write(chunk, OP_JUMP, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, OP_JUMP_FALSE, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, OP_LOOP, POS);
+  clox_chunk_write(chunk, 0, POS);
+  clox_chunk_write(chunk, 9, POS);
+  clox_chunk_write(chunk, OP_RETURN, POS);
+
+  size_t offset = 0;
+  size_t instructions = 0;
+  while (offset < chunk->length) {
+    size_t next = disassemble_one(utest_fixture, offset);
+    ASSERT_TRUE(next > offset); // no instruction may stand still
+    offset = next;
+    instructions++;
+  }
+
+  EXPECT_EQ(chunk->length, offset);
+  EXPECT_EQ((size_t)4, instructions);
 }
 
 UTEST_F(debug, a_byte_that_is_not_an_opcode_is_named_unknown_and_stepped_over) {

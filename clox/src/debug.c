@@ -1,6 +1,7 @@
 #include "debug.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -28,6 +29,18 @@ static size_t byte_instruction(FILE *stream, const clox_chunk_t *chunk, size_t o
   clox_byte_t byte = chunk->code[offset + 1];
   (void)fprintf(stream, "0x%02x", byte);
   return offset + 2; // opcode + byte
+}
+
+static size_t jump_instruction(FILE *stream, const clox_chunk_t *chunk, int sign, size_t offset) {
+  assert(sign == 1 || sign == -1);
+
+  size_t jump = ((size_t)chunk->code[offset + 1] << CHAR_BIT);
+  jump |= chunk->code[offset + 2];
+
+  ptrdiff_t destination = (ptrdiff_t)offset + 3 + (sign * (ptrdiff_t)jump);
+  (void)fprintf(stream, "%04td", destination);
+
+  return offset + 3; // opcode + 2 bytes
 }
 
 size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *chunk,
@@ -83,7 +96,17 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_GET_LOCAL:
     case OP_SET_LOCAL:
     case OP_POP_N:
+    case OP_PRINT_N:
       offset = byte_instruction(stream, chunk, offset);
+      break;
+    case OP_JUMP_TRUE:
+    case OP_JUMP_FALSE:
+    case OP_JUMP_FALSE_POP:
+    case OP_JUMP:
+      offset = jump_instruction(stream, chunk, +1, offset);
+      break;
+    case OP_LOOP:
+      offset = jump_instruction(stream, chunk, -1, offset);
       break;
     case OP_CODE_COUNT:
       assert(0 && "unreachable");

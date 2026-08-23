@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,7 +93,9 @@ static inline void synchronize(clox_compiler_t *c) {
     }
 
     switch (c->current.type) {
+    case TOKEN_BREAK:
     case TOKEN_CLASS:
+    case TOKEN_CONTINUE:
     case TOKEN_FUN:
     case TOKEN_VAR:
     case TOKEN_FOR:
@@ -126,6 +129,67 @@ static inline void emit_constant(clox_compiler_t *c, clox_op_code_t opcode, clox
                                  const clox_token_t *token) {
   if (!clox_write_constant(c->chunk, opcode, val, token->pos)) {
     error(c, token, "constant limit exceeded");
+  }
+}
+
+static inline size_t emit_jump(clox_compiler_t *c, clox_op_code_t opcode,
+                               const clox_token_t *token) {
+  // cast is safe by construction
+  emit_byte(c, (clox_byte_t)opcode, token);
+  emit_byte(c, UCHAR_MAX, token); // placeholder
+  emit_byte(c, UCHAR_MAX, token); // placeholder
+
+  // offset position in the code
+  return c->chunk->length - 2;
+}
+
+_Static_assert(sizeof(size_t) >= 2, "sizeof(size_t) < 2");
+
+#define TWO_BYTE_MAX (((size_t)UCHAR_MAX << CHAR_BIT) | UCHAR_MAX)
+
+static inline void patch_jump(clox_compiler_t *c, size_t jump_pos, const clox_token_t *token) {
+  assert(jump_pos + 2 <= c->chunk->length);
+  // the length of forward jump after reading the whole
+  // jump instruction (including the 2 offset bytes)
+  size_t offset = c->chunk->length - jump_pos - 2;
+
+  if (offset > TWO_BYTE_MAX) {
+    error(c, token, "too long forward jump of %zu", offset);
+  }
+
+  // the two-byte jump offset encoded in big-endian
+  c->chunk->code[jump_pos] = (clox_byte_t)(offset >> CHAR_BIT);
+  c->chunk->code[jump_pos + 1] = (clox_byte_t)offset;
+}
+
+static inline void emit_loop(clox_compiler_t *c, size_t loop_start, const clox_token_t *token) {
+  emit_byte(c, OP_LOOP, token);
+
+  assert(loop_start <= c->chunk->length);
+  // the length of backward jump after reading the whole
+  // loop instruction (including the 2 offset bytes)
+  size_t offset = c->chunk->length - loop_start + 2;
+
+  if (offset > TWO_BYTE_MAX) {
+    error(c, token, "too long backward jump of %zu", offset);
+  }
+
+  // the two-byte jump offset encoded in big-endian
+  emit_byte(c, (clox_byte_t)(offset >> CHAR_BIT), token);
+  emit_byte(c, (clox_byte_t)offset, token);
+}
+
+static inline void emit_pop_n(clox_compiler_t *c, size_t n_to_pop, const clox_token_t *token) {
+  if (n_to_pop == 1) {
+    // use OP_POP for single pop as more efficient
+    emit_byte(c, OP_POP, token);
+  } else {
+    while (n_to_pop > 0) {
+      // cast is safe by construction
+      clox_byte_t n_part = (n_to_pop > UCHAR_MAX) ? UCHAR_MAX : (clox_byte_t)n_to_pop;
+      emit_byte_op(c, OP_POP_N, n_part, token);
+      n_to_pop -= n_part;
+    }
   }
 }
 
@@ -183,6 +247,9 @@ typedef struct {
 } clox_parse_rule_t;
 
 static void declaration(clox_compiler_t *c);
+static void var_declaration(clox_compiler_t *c);
+static void statement(clox_compiler_t *c);
+static void expression_statement(clox_compiler_t *c);
 static clox_parse_rule_t get_rule(clox_token_type_t type);
 
 static void parse(clox_compiler_t *c, clox_precedence_t prec) {
@@ -228,12 +295,50 @@ static void print_statement(clox_compiler_t *c) {
   clox_token_t keyword = c->previous;
 
   expression(c);
-  consume(c, TOKEN_SEMICOLON, "expect ';' after value");
-  emit_byte(c, OP_PRINT, &keyword);
+  size_t n_to_print = 1;
+  while (match(c, TOKEN_COMMA)) {
+    expression(c);
+    n_to_print++;
+  }
+  consume(c, TOKEN_SEMICOLON, "expect ';' after values");
+
+  if (n_to_print > UCHAR_MAX) {
+    error(c, &keyword, "max. %d print args allowed", UCHAR_MAX);
+  }
+
+  if (n_to_print == 1) {
+    emit_byte(c, OP_PRINT, &keyword);
+  } else {
+    emit_byte(c, OP_PRINT_N, &keyword);
+    // cast is safe: the range check error above
+    emit_byte(c, (clox_byte_t)n_to_print, &keyword);
+  }
 }
 
-static void block(clox_compiler_t *c) {
+static inline void begin_scope(clox_compiler_t *c) {
   c->scope_depth++;
+}
+
+static inline size_t n_locals_above(const clox_compiler_t *c, size_t depth) {
+  size_t result = 0;
+  for (int i = (int)c->local_count - 1; i >= 0; i--) {
+    if (c->locals[i].depth <= depth) {
+      break; // in scope
+    }
+    result++;
+  }
+  return result;
+}
+
+static inline void end_scope(clox_compiler_t *c, const clox_token_t *token) {
+  c->scope_depth--;
+  size_t n_to_pop = n_locals_above(c, c->scope_depth);
+  c->local_count -= n_to_pop;
+  emit_pop_n(c, n_to_pop, token);
+}
+
+static void block_statement(clox_compiler_t *c) {
+  begin_scope(c);
 
   while (!check(c, TOKEN_RIGHT_BRACE) && !check(c, TOKEN_EOF)) {
     declaration(c);
@@ -241,23 +346,169 @@ static void block(clox_compiler_t *c) {
 
   consume(c, TOKEN_RIGHT_BRACE, "expect '}' after block");
 
-  c->scope_depth--;
-  size_t n_to_pop = 0;
-  while (c->local_count > 0 && c->locals[c->local_count - 1].depth > c->scope_depth) {
-    c->local_count--;
-    n_to_pop++;
+  end_scope(c, &c->previous); // at closing brace
+}
+
+static void if_statement(clox_compiler_t *c) {
+  clox_token_t keyword = c->previous;
+
+  consume(c, TOKEN_LEFT_PAREN, "expect '(' before if condition");
+  expression(c); // condition
+  consume(c, TOKEN_RIGHT_PAREN, "expect ')' after if condition");
+
+  size_t after_then_jump = emit_jump(c, OP_JUMP_FALSE_POP, &keyword);
+  statement(c); // then block
+
+  size_t after_else_jump = SIZE_MAX;
+  if (match(c, TOKEN_ELSE)) {
+    after_else_jump = emit_jump(c, OP_JUMP, &keyword);
   }
-  if (n_to_pop == 1) {
-    // use OP_POP for single pop as more efficient
-    emit_byte(c, OP_POP, &c->previous); // at closing brace
-  } else {
-    while (n_to_pop > 0) {
-      // cast is safe by construction
-      clox_byte_t chunk = (n_to_pop > UCHAR_MAX) ? UCHAR_MAX : (clox_byte_t)n_to_pop;
-      emit_byte_op(c, OP_POP_N, chunk, &c->previous); // at closing brace
-      n_to_pop -= chunk;
+
+  patch_jump(c, after_then_jump, &keyword);
+
+  if (after_else_jump != SIZE_MAX) {
+    statement(c); // else block
+    patch_jump(c, after_else_jump, &keyword);
+  }
+}
+
+static void for_statement(clox_compiler_t *c) {
+  clox_token_t keyword = c->previous;
+
+  consume(c, TOKEN_LEFT_PAREN, "expect '(' before for clauses");
+
+  begin_scope(c);
+
+  // initializer
+  if (!match(c, TOKEN_SEMICOLON)) {
+    if (match(c, TOKEN_VAR)) {
+      var_declaration(c);
+    } else {
+      expression_statement(c);
     }
   }
+
+  // return here after increment (or body if none)
+  size_t loop_start = c->chunk->length;
+
+  // condition
+  size_t cond_exit_jump = SIZE_MAX;
+  if (!match(c, TOKEN_SEMICOLON)) {
+    expression(c); // condition expression
+    consume(c, TOKEN_SEMICOLON, "expect ';' after for condition");
+    cond_exit_jump = emit_jump(c, OP_JUMP_FALSE_POP, &keyword);
+  }
+
+  // increment
+  if (!match(c, TOKEN_RIGHT_PAREN)) {
+    // skip the increment, jump to body
+    size_t body_jump = emit_jump(c, OP_JUMP, &keyword);
+    // return here after body
+    size_t increment_start = c->chunk->length;
+    expression(c); // increment expression
+    emit_byte(c, OP_POP, &keyword);
+    consume(c, TOKEN_RIGHT_PAREN, "expect ')' after for clauses");
+    // return to the loop start
+    emit_loop(c, loop_start, &keyword);
+    loop_start = increment_start;
+    patch_jump(c, body_jump, &keyword);
+  }
+
+  clox_loop_state_t prev_state = c->loop;
+  c->loop = (clox_loop_state_t){
+      .inside = true,
+      .start = loop_start,
+      .exit_patch = SIZE_MAX, // sentinel
+      .scope = c->scope_depth,
+  };
+  statement(c); // loop body
+  size_t exit_jump = c->loop.exit_patch;
+  c->loop = prev_state;
+
+  emit_loop(c, loop_start, &keyword);
+  if (cond_exit_jump != SIZE_MAX) {
+    patch_jump(c, cond_exit_jump, &keyword);
+  }
+  if (exit_jump != SIZE_MAX) {
+    // patch first break's exit jump
+    patch_jump(c, exit_jump, &keyword);
+  }
+
+  end_scope(c, &keyword);
+}
+
+static void while_statement(clox_compiler_t *c) {
+  clox_token_t keyword = c->previous;
+
+  size_t loop_start = c->chunk->length;
+
+  consume(c, TOKEN_LEFT_PAREN, "expect '(' before while condition");
+  expression(c); // condition
+  consume(c, TOKEN_RIGHT_PAREN, "expect ')' after while condition");
+
+  size_t cond_exit_jump = emit_jump(c, OP_JUMP_FALSE_POP, &keyword);
+
+  clox_loop_state_t prev_state = c->loop;
+  c->loop = (clox_loop_state_t){
+      .inside = true,
+      .start = loop_start,
+      .exit_patch = SIZE_MAX, // sentinel
+      .scope = c->scope_depth,
+  };
+  statement(c); // loop body
+  size_t exit_jump = c->loop.exit_patch;
+  c->loop = prev_state;
+
+  emit_loop(c, loop_start, &keyword);
+  patch_jump(c, cond_exit_jump, &keyword);
+  if (exit_jump != SIZE_MAX) {
+    // patch first break's exit jump
+    patch_jump(c, exit_jump, &keyword);
+  }
+}
+
+static void break_statement(clox_compiler_t *c) {
+  clox_token_t keyword = c->previous;
+
+  consume(c, TOKEN_SEMICOLON, "expect ';' after break");
+
+  if (!c->loop.inside) {
+    error(c, &keyword, "break allowed only inside loop body");
+    return;
+  }
+
+  // pop all locals from above the loop's scope
+  size_t n_to_pop = n_locals_above(c, c->loop.scope);
+  emit_pop_n(c, n_to_pop, &keyword);
+
+  // exit the loop
+  if (c->loop.exit_patch == SIZE_MAX) {
+    // create new exit patch
+    c->loop.exit_patch = emit_jump(c, OP_JUMP, &keyword);
+  } else {
+    // loop back to the existing exit patch
+    // the jump opcode is 1 byte behind the patch
+    size_t loop_exit = c->loop.exit_patch - 1;
+    emit_loop(c, loop_exit, &keyword);
+  }
+}
+
+static void continue_statement(clox_compiler_t *c) {
+  clox_token_t keyword = c->previous;
+
+  consume(c, TOKEN_SEMICOLON, "expect ';' after continue");
+
+  if (!c->loop.inside) {
+    error(c, &keyword, "continue allowed only inside loop body");
+    return;
+  }
+
+  // pop all locals from above the loop's scope
+  size_t n_to_pop = n_locals_above(c, c->loop.scope);
+  emit_pop_n(c, n_to_pop, &keyword);
+
+  // move to the loop start
+  emit_loop(c, c->loop.start, &keyword);
 }
 
 static void expression_statement(clox_compiler_t *c) {
@@ -274,8 +525,18 @@ static void statement(clox_compiler_t *c) {
 
   if (match(c, TOKEN_PRINT)) {
     print_statement(c);
+  } else if (match(c, TOKEN_IF)) {
+    if_statement(c);
+  } else if (match(c, TOKEN_FOR)) {
+    for_statement(c);
+  } else if (match(c, TOKEN_WHILE)) {
+    while_statement(c);
+  } else if (match(c, TOKEN_BREAK)) {
+    break_statement(c);
+  } else if (match(c, TOKEN_CONTINUE)) {
+    continue_statement(c);
   } else if (match(c, TOKEN_LEFT_BRACE)) {
-    block(c);
+    block_statement(c);
   } else {
     expression_statement(c);
   }
@@ -540,6 +801,28 @@ static void variable(clox_compiler_t *c, bool can_assign) {
   }
 }
 
+static void and_(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
+  clox_token_t keyword = c->previous;
+
+  // if lhs is falsy, leave it on the stack and jump
+  size_t end_jump = emit_jump(c, OP_JUMP_FALSE, &keyword);
+  emit_byte(c, OP_POP, &keyword); // discard lhs
+  parse(c, PREC_AND);             // parse rhs
+  patch_jump(c, end_jump, &keyword);
+}
+
+static void or_(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
+  clox_token_t keyword = c->previous;
+
+  // if lhs is truthy, leave it on the stack and jump
+  size_t end_jump = emit_jump(c, OP_JUMP_TRUE, &keyword);
+  emit_byte(c, OP_POP, &keyword); // discard lhs
+  parse(c, PREC_OR);              // parse rhs
+  patch_jump(c, end_jump, &keyword);
+}
+
 static const clox_parse_rule_t parse_rules[] = {
 #define X(name, prefix_fn, infix_fn, prec) [TOKEN_##name] = {prefix_fn, infix_fn, prec},
 #include "tokens.def"
@@ -583,6 +866,7 @@ bool clox_compile(clox_compiler_t *compiler, char *source, clox_chunk_t *chunk) 
   compiler->parser_depth = 0;
   compiler->local_count = 0;
   compiler->scope_depth = 0;
+  compiler->loop = (clox_loop_state_t){0};
 
   advance(compiler); // scan the first token
   while (!match(compiler, TOKEN_EOF)) {

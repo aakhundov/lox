@@ -1,8 +1,10 @@
 #include "vm.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 
 #include "chunk.h"
@@ -50,9 +52,14 @@ static void print_globals(const clox_vm_t *vm) {
 }
 #endif
 
-static void default_print_fn(clox_value_t val, void *ctx) {
+static void default_print_fn(const clox_value_t *vals, size_t n, void *ctx) {
   (void)ctx; // unused
-  clox_value_printf(val);
+  for (size_t i = 0; i < n; i++) {
+    clox_value_printf(vals[i]);
+    if (i < n - 1) {
+      printf(" ");
+    }
+  }
   printf("\n");
 }
 
@@ -122,7 +129,6 @@ static bool run(clox_vm_t *vm) {
     }                                                                                              \
     return false;                                                                                  \
   } while (0)
-#define PRINT(val) vm->print_fn((val), vm->print_ctx)
 #define PUSH(val)                                                                                  \
   do {                                                                                             \
     if (!push_stack(vm, (val))) {                                                                  \
@@ -133,6 +139,7 @@ static bool run(clox_vm_t *vm) {
 #define POP_N(n) pop_stack_n(vm, n)
 #define PEEK(distance) peek_stack(vm, (distance))
 #define READ_BYTE() (*vm->ip++)
+#define READ_TWO_BYTES() (vm->ip += 2, ((size_t)vm->ip[-2] << CHAR_BIT) | vm->ip[-1])
 #define READ_CONSTANT(opcode) clox_read_constant(vm->chunk, (opcode), &vm->ip)
 #define READ_STRING(opcode) CLOX_AS_STRING(READ_CONSTANT(opcode))
 #define BINARY_OP(op, RESULT_TYPE)                                                                 \
@@ -272,8 +279,46 @@ static bool run(clox_vm_t *vm) {
       PUSH(CLOX_NUMBER(-CLOX_AS_NUMBER(POP())));
       break;
     case OP_PRINT:
-      PRINT(POP());
+      vm->print_fn(vm->stack_top - 1, 1, vm->print_ctx);
+      POP();
       break;
+    case OP_PRINT_N: {
+      size_t n = READ_BYTE();
+      vm->print_fn(vm->stack_top - n, n, vm->print_ctx);
+      POP_N(n);
+      break;
+    }
+    case OP_JUMP_TRUE: {
+      size_t offset = READ_TWO_BYTES();
+      if (clox_value_is_truthy(PEEK(0))) {
+        vm->ip += offset;
+      }
+      break;
+    }
+    case OP_JUMP_FALSE: {
+      size_t offset = READ_TWO_BYTES();
+      if (!clox_value_is_truthy(PEEK(0))) {
+        vm->ip += offset;
+      }
+      break;
+    }
+    case OP_JUMP_FALSE_POP: {
+      size_t offset = READ_TWO_BYTES();
+      if (!clox_value_is_truthy(POP())) {
+        vm->ip += offset;
+      }
+      break;
+    }
+    case OP_JUMP: {
+      size_t offset = READ_TWO_BYTES();
+      vm->ip += offset;
+      break;
+    }
+    case OP_LOOP: {
+      size_t offset = READ_TWO_BYTES();
+      vm->ip -= offset;
+      break;
+    }
     case OP_RETURN:
       // stack must be empty on return
       assert(vm->stack_top == vm->stack);
@@ -284,12 +329,12 @@ static bool run(clox_vm_t *vm) {
   }
 
 #undef ERROR
-#undef PRINT
 #undef PUSH
 #undef POP
 #undef POP_N
 #undef PEEK
 #undef READ_BYTE
+#undef READ_TWO_BYTES
 #undef READ_CONSTANT
 #undef READ_STRING
 #undef BINARY_OP

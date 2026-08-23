@@ -57,28 +57,54 @@ UTEST(scanner, each_operator_scans_to_its_one_or_two_character_form) {
 }
 
 UTEST(scanner, each_keyword_scans_to_its_type) {
-  EXPECT_TOKEN_TYPE(TOKEN_AND, scan_first("and").type);
-  EXPECT_TOKEN_TYPE(TOKEN_CLASS, scan_first("class").type);
-  EXPECT_TOKEN_TYPE(TOKEN_ELSE, scan_first("else").type);
-  EXPECT_TOKEN_TYPE(TOKEN_FALSE, scan_first("false").type);
-  EXPECT_TOKEN_TYPE(TOKEN_FOR, scan_first("for").type);
-  EXPECT_TOKEN_TYPE(TOKEN_FUN, scan_first("fun").type);
-  EXPECT_TOKEN_TYPE(TOKEN_IF, scan_first("if").type);
-  EXPECT_TOKEN_TYPE(TOKEN_NIL, scan_first("nil").type);
-  EXPECT_TOKEN_TYPE(TOKEN_OR, scan_first("or").type);
-  EXPECT_TOKEN_TYPE(TOKEN_PRINT, scan_first("print").type);
-  EXPECT_TOKEN_TYPE(TOKEN_RETURN, scan_first("return").type);
-  EXPECT_TOKEN_TYPE(TOKEN_SUPER, scan_first("super").type);
-  EXPECT_TOKEN_TYPE(TOKEN_THIS, scan_first("this").type);
-  EXPECT_TOKEN_TYPE(TOKEN_TRUE, scan_first("true").type);
-  EXPECT_TOKEN_TYPE(TOKEN_VAR, scan_first("var").type);
-  EXPECT_TOKEN_TYPE(TOKEN_WHILE, scan_first("while").type);
+  // a table rather than a line apiece: every comparison the macro expands to
+  // counts towards one function's size, and this list only ever grows
+  const struct {
+    const char *text;
+    clox_token_type_t type;
+  } keywords[] = {
+      {"and", TOKEN_AND},           {"break", TOKEN_BREAK}, {"class", TOKEN_CLASS},
+      {"continue", TOKEN_CONTINUE}, {"else", TOKEN_ELSE},   {"false", TOKEN_FALSE},
+      {"for", TOKEN_FOR},           {"fun", TOKEN_FUN},     {"if", TOKEN_IF},
+      {"nil", TOKEN_NIL},           {"or", TOKEN_OR},       {"print", TOKEN_PRINT},
+      {"return", TOKEN_RETURN},     {"super", TOKEN_SUPER}, {"this", TOKEN_THIS},
+      {"true", TOKEN_TRUE},         {"var", TOKEN_VAR},     {"while", TOKEN_WHILE},
+  };
+
+  for (size_t i = 0; i < sizeof(keywords) / sizeof(*keywords); i++) {
+    EXPECT_EQ_MSG(keywords[i].type, scan_first(keywords[i].text).type, keywords[i].text);
+  }
 }
 
 UTEST(scanner, a_word_that_only_starts_like_a_keyword_is_an_identifier) {
   EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("orchid").type);
   EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("iffy").type);
   EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("classy").type);
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("breaking").type);
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("continued").type);
+}
+
+UTEST(scanner, a_word_stopping_short_of_a_keyword_is_an_identifier) {
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("brea").type);
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("continu").type);
+}
+
+UTEST(scanner, a_word_sharing_a_first_letter_with_a_keyword_is_an_identifier) {
+  // c, f and t each begin more than one keyword, so a word starting with one
+  // of them is told apart by its second letter, and a word of one letter has
+  // none to be told apart by
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("cat").type);
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("comb").type);
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("c").type);
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("f").type);
+  EXPECT_TOKEN_TYPE(TOKEN_IDENTIFIER, scan_first("t").type);
+}
+
+UTEST(scanner, a_keyword_carries_its_whole_lexeme) {
+  clox_token_t token = scan_first("continue;");
+
+  ASSERT_TOKEN_TYPE(TOKEN_CONTINUE, token.type);
+  EXPECT_TRUE(lexeme_is(token, "continue"));
 }
 
 UTEST(scanner, identifiers_carry_their_whole_lexeme) {

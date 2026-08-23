@@ -158,8 +158,18 @@ static clox_token_type_t identifier_type(const clox_scanner_t *s) {
   switch (s->start[0]) {
   case 'a':
     return check_keyword(s, 1, REST_ARGS(nd), TOKEN_AND);
+  case 'b':
+    return check_keyword(s, 1, REST_ARGS(reak), TOKEN_BREAK);
   case 'c':
-    return check_keyword(s, 1, REST_ARGS(lass), TOKEN_CLASS);
+    if (s->current - s->start >= 2) {
+      switch (s->start[1]) {
+      case 'l':
+        return check_keyword(s, 2, REST_ARGS(ass), TOKEN_CLASS);
+      case 'o':
+        return check_keyword(s, 2, REST_ARGS(ntinue), TOKEN_CONTINUE);
+      }
+    }
+    break;
   case 'e':
     return check_keyword(s, 1, REST_ARGS(lse), TOKEN_ELSE);
   case 'f':

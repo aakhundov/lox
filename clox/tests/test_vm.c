@@ -17,6 +17,13 @@
 #define OVER_STACK (CLOX_STACK_SIZE + 1)
 // one more than a single-byte constant index can address
 #define OVER_BYTE_INDEX 256
+// A jump offset needing both of its bytes, measured in the units it spans:
+// one constant and one print each, so an offset read wrongly lands among
+// instructions that print and the count gives it away. 171 * 3 is 0x0201,
+// whose bytes differ, so swapping them lands somewhere else again.
+#define WIDE_JUMP_UNIT ((size_t)3)
+#define WIDE_JUMP_UNITS ((size_t)171)
+#define WIDE_JUMP_OFFSET (WIDE_JUMP_UNITS * WIDE_JUMP_UNIT)
 
 static const clox_pos_t POS = {.line = 1, .col = 1};
 
@@ -61,12 +68,54 @@ static void emit_global(struct vm *fixture, clox_op_code_t opcode, const char *n
                             CLOX_STRING_COPY(&fixture->alloc, name, strlen(name)), POS);
 }
 
-// Prints the values the code under test is expected to leave behind, one
-// OP_PRINT each, before returning on an empty stack. Each print takes the
-// value from the top, so they arrive in reverse of the order they were pushed.
+// Writes a jump instruction over the given offset, big-endian. The tests that
+// name their offset here are what pins the encoding the three helpers below
+// share with the compiler.
+static void emit_jump_over(struct vm *fixture, clox_op_code_t opcode, size_t offset) {
+  emit(fixture, (clox_byte_t)opcode);
+  emit(fixture, (clox_byte_t)(offset >> CHAR_BIT));
+  emit(fixture, (clox_byte_t)offset);
+}
+
+// Writes a jump whose offset patch_jump fills in, and returns where the two
+// operand bytes stand.
+static size_t emit_jump_forward(struct vm *fixture, clox_op_code_t opcode) {
+  emit_jump_over(fixture, opcode, 0);
+
+  return fixture->chunk.length - 2;
+}
+
+// Points a jump written earlier at the end of the code written so far.
+static void patch_jump(struct vm *fixture, size_t operand) {
+  size_t offset = fixture->chunk.length - operand - 2;
+  fixture->chunk.code[operand] = (clox_byte_t)(offset >> CHAR_BIT);
+  fixture->chunk.code[operand + 1] = (clox_byte_t)offset;
+}
+
+// Writes a loop instruction returning to target.
+static void emit_loop_to(struct vm *fixture, size_t target) {
+  emit(fixture, OP_LOOP);
+  size_t offset = fixture->chunk.length - target + 2;
+  emit(fixture, (clox_byte_t)(offset >> CHAR_BIT));
+  emit(fixture, (clox_byte_t)offset);
+}
+
+// Prints the values the code under test is expected to leave behind, before
+// returning on an empty stack. One print drains up to UCHAR_MAX values off the
+// top and reports them in the order they were pushed, so a stack within that
+// range arrives in push order. Anything deeper takes several prints, and those
+// groups arrive top down.
 static bool interpret(struct vm *fixture, size_t left_on_stack) {
-  for (size_t i = 0; i < left_on_stack; i++) {
-    emit(fixture, OP_PRINT);
+  for (size_t remaining = left_on_stack; remaining > 0;) {
+    size_t n = remaining < UCHAR_MAX ? remaining : UCHAR_MAX;
+    if (n == 1) {
+      emit(fixture, OP_PRINT);
+    } else {
+      emit(fixture, OP_PRINT_N);
+      // cast is safe: n is capped at UCHAR_MAX above
+      emit(fixture, (clox_byte_t)n);
+    }
+    remaining -= n;
   }
   emit(fixture, OP_RETURN);
 
@@ -93,10 +142,9 @@ UTEST_F(vm, the_literal_opcodes_push_their_values) {
 
   ASSERT_TRUE(interpret(utest_fixture, 3));
   ASSERT_EQ((size_t)3, utest_fixture->printed.count);
-  // the stack is printed from the top down
-  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NIL, utest_fixture->printed.values[0]);
   EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[1]);
-  EXPECT_VALUE_EQ(CLOX_NIL, utest_fixture->printed.values[2]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[2]);
 }
 
 UTEST_F(vm, addition_leaves_a_single_result) {
@@ -182,9 +230,8 @@ UTEST_F(vm, greater_or_equal_admits_the_equal_case) {
 
   ASSERT_TRUE(interpret(utest_fixture, 2));
   ASSERT_EQ((size_t)2, utest_fixture->printed.count);
-  // the stack is printed from the top down, so the later comparison comes first
-  EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[0]);
-  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[1]);
 }
 
 UTEST_F(vm, less_or_equal_admits_the_equal_case) {
@@ -197,8 +244,8 @@ UTEST_F(vm, less_or_equal_admits_the_equal_case) {
 
   ASSERT_TRUE(interpret(utest_fixture, 2));
   ASSERT_EQ((size_t)2, utest_fixture->printed.count);
-  EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[0]);
-  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[1]);
 }
 
 UTEST_F(vm, equality_holds_between_equal_values) {
@@ -269,7 +316,7 @@ UTEST_F(vm, a_local_slot_is_read_onto_the_top_of_the_stack) {
 
   ASSERT_TRUE(interpret(utest_fixture, 2));
   ASSERT_EQ((size_t)2, utest_fixture->printed.count);
-  // the copy on top, and the slot it was read from
+  // the slot, and the copy read from it onto the top
   EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
   EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[1]);
 }
@@ -282,7 +329,8 @@ UTEST_F(vm, a_local_slot_is_read_by_its_own_index) {
 
   ASSERT_TRUE(interpret(utest_fixture, 3));
   ASSERT_EQ((size_t)3, utest_fixture->printed.count);
-  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  // the copy on top came from slot 1, not slot 0
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[2]);
 }
 
 UTEST_F(vm, setting_a_local_slot_overwrites_it) {
@@ -382,9 +430,8 @@ UTEST_F(vm, distinct_globals_hold_distinct_values) {
 
   ASSERT_TRUE(interpret(utest_fixture, 2));
   ASSERT_EQ((size_t)2, utest_fixture->printed.count);
-  // the stack is printed from the top down
-  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
-  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
 }
 
 UTEST_F(vm, assigning_to_a_global_leaves_the_value_on_the_stack) {
@@ -444,6 +491,170 @@ UTEST_F(vm, a_global_outlives_the_run_that_defined_it) {
   EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
 
   clox_chunk_free(&next);
+}
+
+UTEST_F(vm, a_counted_print_reports_its_values_in_push_order) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit_constant(utest_fixture, CLOX_NUMBER(3.0));
+  emit(utest_fixture, OP_PRINT_N);
+  emit(utest_fixture, 3);
+  emit(utest_fixture, OP_RETURN);
+
+  ASSERT_TRUE(clox_interpret(&utest_fixture->vm, &utest_fixture->chunk));
+  ASSERT_EQ((size_t)3, utest_fixture->printed.count);
+  // the deepest of the three comes first, not the one on top
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[2]);
+}
+
+UTEST_F(vm, a_counted_print_takes_only_the_values_it_counted) {
+  emit_constant(utest_fixture, CLOX_NUMBER(9.0)); // stands below the print
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit(utest_fixture, OP_PRINT_N);
+  emit(utest_fixture, 2);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)3, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+  // what was underneath survived the counted print
+  EXPECT_VALUE_EQ(CLOX_NUMBER(9.0), utest_fixture->printed.values[2]);
+}
+
+UTEST_F(vm, an_unconditional_jump_skips_the_instructions_it_spans) {
+  emit_jump_over(utest_fixture, OP_JUMP, 3);
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // skipped
+  emit(utest_fixture, OP_PRINT);                  // skipped
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_false_condition_takes_the_popping_jump_and_loses_the_condition) {
+  emit(utest_fixture, OP_FALSE);
+  emit_jump_over(utest_fixture, OP_JUMP_FALSE_POP, 3);
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // skipped
+  emit(utest_fixture, OP_PRINT);                  // skipped
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+
+  // the run ends on an empty stack, so the condition went with the jump
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_true_condition_falls_through_the_popping_jump_and_still_loses_it) {
+  emit(utest_fixture, OP_TRUE);
+  emit_jump_over(utest_fixture, OP_JUMP_FALSE_POP, 3);
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit(utest_fixture, OP_PRINT);
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, a_false_condition_takes_the_keeping_jump_and_stays_on_the_stack) {
+  emit(utest_fixture, OP_FALSE);
+  emit_jump_over(utest_fixture, OP_JUMP_FALSE, 3);
+  emit(utest_fixture, OP_POP);                    // skipped
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // skipped
+
+  // the condition itself is what the jump leaves behind to be printed
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_true_condition_falls_through_the_keeping_jump) {
+  emit(utest_fixture, OP_TRUE);
+  emit_jump_over(utest_fixture, OP_JUMP_FALSE, 3);
+  emit(utest_fixture, OP_POP); // drops the condition it fell past
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_true_condition_takes_the_true_jump_and_stays_on_the_stack) {
+  emit(utest_fixture, OP_TRUE);
+  emit_jump_over(utest_fixture, OP_JUMP_TRUE, 3);
+  emit(utest_fixture, OP_POP);                    // skipped
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // skipped
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_false_condition_falls_through_the_true_jump) {
+  emit(utest_fixture, OP_NIL);
+  emit_jump_over(utest_fixture, OP_JUMP_TRUE, 3);
+  emit(utest_fixture, OP_POP);
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_jump_weighs_its_condition_the_way_the_language_does) {
+  // zero is falsy here, as it is to OP_NOT, so the branch is taken
+  emit_constant(utest_fixture, CLOX_NUMBER(0.0));
+  emit_jump_over(utest_fixture, OP_JUMP_FALSE_POP, 3);
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // skipped
+  emit(utest_fixture, OP_PRINT);                  // skipped
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_jump_offset_wider_than_a_byte_is_read_big_endian) {
+  emit_jump_over(utest_fixture, OP_JUMP, WIDE_JUMP_OFFSET);
+  for (size_t i = 0; i < WIDE_JUMP_UNITS; i++) {
+    emit_constant(utest_fixture, CLOX_NUMBER((double)i));
+    emit(utest_fixture, OP_PRINT);
+  }
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+
+  // an offset short by its high byte, or with its bytes the other way round,
+  // lands inside the run above and prints its way to the end
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_loop_returns_to_an_earlier_instruction) {
+  // counts a global down to zero, which is the falsy value the loop stops on
+  emit_constant(utest_fixture, CLOX_NUMBER(3.0));
+  emit_global(utest_fixture, OP_DEF_GLOBAL, "n");
+
+  size_t condition = utest_fixture->chunk.length;
+  emit_global(utest_fixture, OP_GET_GLOBAL, "n");
+  size_t exit_jump = emit_jump_forward(utest_fixture, OP_JUMP_FALSE_POP);
+  emit_global(utest_fixture, OP_GET_GLOBAL, "n");
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit(utest_fixture, OP_SUBTRACT);
+  emit_global(utest_fixture, OP_SET_GLOBAL, "n");
+  emit(utest_fixture, OP_PRINT); // the assignment's own value
+  emit_loop_to(utest_fixture, condition);
+  patch_jump(utest_fixture, exit_jump);
+
+  ASSERT_TRUE(interpret(utest_fixture, 0));
+  ASSERT_EQ((size_t)3, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[2]);
 }
 
 UTEST_F(vm, reading_an_undefined_global_is_a_runtime_error) {

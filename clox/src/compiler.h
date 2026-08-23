@@ -19,6 +19,13 @@ typedef struct {
 } clox_local_t;
 
 typedef struct {
+  bool inside;
+  size_t scope;
+  size_t start;
+  size_t exit_patch;
+} clox_loop_state_t;
+
+typedef struct {
   // output
   clox_chunk_t *chunk;
   // parser
@@ -32,6 +39,8 @@ typedef struct {
   clox_local_t locals[CLOX_MAX_LOCALS];
   size_t local_count;
   size_t scope_depth;
+  // loops
+  clox_loop_state_t loop;
   // string allocator
   clox_allocator_t *allocator;
   // error handling

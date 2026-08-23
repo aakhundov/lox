@@ -75,12 +75,14 @@ const char *clox_test_values_message(char (*buffer)[CLOX_TEST_MESSAGE_SIZE], clo
   return clox_test_close_buffer(stream, *buffer, CLOX_TEST_MESSAGE_SIZE);
 }
 
-void clox_test_print_fn(clox_value_t val, void *ctx) {
+void clox_test_print_fn(const clox_value_t *vals, size_t n, void *ctx) {
   clox_test_printed_t *printed = ctx;
-  if (printed->count < CLOX_TEST_MAX_PRINTED) {
-    printed->values[printed->count] = val;
+  for (size_t i = 0; i < n; i++) {
+    if (printed->count < CLOX_TEST_MAX_PRINTED) {
+      printed->values[printed->count] = vals[i];
+    }
+    printed->count++;
   }
-  printed->count++;
 }
 
 void clox_test_error_handler(clox_error_info_t error, void *ctx) {

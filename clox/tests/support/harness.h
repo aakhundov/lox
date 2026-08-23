@@ -13,8 +13,10 @@
 #define CLOX_TEST_MAX_PRINTED 16
 #define CLOX_TEST_MAX_ERRORS 8
 
-// Collects what a run printed. count keeps rising past CLOX_TEST_MAX_PRINTED
-// so a test can tell "more than fits" from "exactly this many".
+// Collects what a run printed. One print can carry several values; they are
+// collected flat, so count is a total of values and not of print calls. count
+// keeps rising past CLOX_TEST_MAX_PRINTED so a test can tell "more than fits"
+// from "exactly this many".
 typedef struct {
   size_t count;
   clox_value_t values[CLOX_TEST_MAX_PRINTED];
@@ -29,7 +31,7 @@ typedef struct {
 } clox_test_errors_t;
 
 // matches clox_print_fn_t; ctx is a clox_test_printed_t
-void clox_test_print_fn(clox_value_t val, void *ctx);
+void clox_test_print_fn(const clox_value_t *vals, size_t n, void *ctx);
 
 // matches clox_error_handler_t; ctx is a clox_test_errors_t
 void clox_test_error_handler(clox_error_info_t error, void *ctx);

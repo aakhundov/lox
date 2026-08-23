@@ -2,6 +2,7 @@
 #define CLOX_VM_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "chunk.h"
 #include "error.h"
@@ -11,7 +12,7 @@
 
 #define CLOX_STACK_SIZE 1024
 
-typedef void clox_print_fn_t(clox_value_t val, void *ctx);
+typedef void clox_print_fn_t(const clox_value_t *vals, size_t n, void *ctx);
 
 typedef struct {
   const clox_chunk_t *chunk;
