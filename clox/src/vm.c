@@ -6,11 +6,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "chunk.h"
 #include "common.h"
 #include "debug.h"
 #include "error.h"
+#include "library.h"
 #include "object.h"
 #include "table.h"
 #include "value.h"
@@ -40,15 +42,25 @@ static void print_globals(const clox_vm_t *vm) {
     return;
   }
 
-  printf("---- GLOB { ");
+  bool empty = true;
   const char *sep = "";
   const clox_table_entry_t *running = NULL;
   while ((running = clox_table_next(&vm->globals, running))) {
+    if (CLOX_IS_FUNCTION(running->value) || CLOX_IS_NATIVE(running->value)) {
+      // skip non-primitives
+      continue;
+    }
+    if (empty) {
+      printf("---- GLOB { ");
+      empty = false;
+    }
     printf("%s%s = ", sep, running->key->chars);
     clox_value_repr_printf(running->value);
     sep = " | ";
   }
-  printf(" }\n");
+  if (!empty) {
+    printf(" }\n");
+  }
 }
 #endif
 
@@ -65,7 +77,9 @@ static void default_print_fn(const clox_value_t *vals, size_t n, void *ctx) {
 
 __attribute__((format(printf, 2, 3))) static inline void error(const clox_vm_t *vm, const char *fmt,
                                                                ...) {
-  assert(vm->error_handler != NULL);
+  if (vm->error_handler == NULL) {
+    return;
+  }
 
   va_list ap;
   va_start(ap, fmt);
@@ -73,10 +87,12 @@ __attribute__((format(printf, 2, 3))) static inline void error(const clox_vm_t *
   clox_format_error(&message, fmt, ap);
   va_end(ap);
 
+  const clox_call_frame_t *frame = &vm->frames[vm->frame_count - 1];
+
   // ip is incremented before processing instruction
-  assert(vm->ip > vm->chunk->code); // non-zero difference
-  size_t offset = (size_t)(vm->ip - vm->chunk->code - 1);
-  clox_pos_t pos = vm->chunk->positions[offset];
+  assert(frame->ip > frame->function->chunk.code); // non-zero difference
+  size_t offset = (size_t)(frame->ip - frame->function->chunk.code - 1);
+  clox_pos_t pos = frame->function->chunk.positions[offset];
 
   // report the error
   vm->error_handler(
@@ -85,10 +101,6 @@ __attribute__((format(printf, 2, 3))) static inline void error(const clox_vm_t *
           .pos = pos,
       },
       vm->error_ctx);
-}
-
-static inline void reset_stack(clox_vm_t *vm) {
-  vm->stack_top = vm->stack;
 }
 
 static inline clox_value_t peek_stack(const clox_vm_t *vm, size_t distance) {
@@ -113,34 +125,81 @@ static inline clox_value_t pop_stack(clox_vm_t *vm) {
   return *vm->stack_top;
 }
 
-static inline void pop_stack_n(clox_vm_t *vm, size_t n) {
+static inline void pop_n_stack(clox_vm_t *vm, size_t n) {
   assert(n <= CLOX_STACK_SIZE);
   assert(vm->stack_top >= vm->stack + n); // has n items
 
   vm->stack_top -= n;
 }
 
+static inline bool call_function(clox_vm_t *vm, const clox_function_t *function, size_t arg_count) {
+  if (vm->frame_count >= CLOX_MAX_FRAMES) {
+    error(vm, "call stack overflow");
+    return false;
+  }
+  if (arg_count != function->arity) {
+    error(vm, "expected %zu args but got %zu", function->arity, arg_count);
+    return false;
+  }
+
+  // set up new call frame
+  clox_call_frame_t *frame = &vm->frames[vm->frame_count++];
+  frame->function = function;
+  frame->ip = function->chunk.code;
+  // function and args are in the new call frame
+  frame->slots = vm->stack_top - arg_count - 1;
+
+  return true;
+}
+
+static inline bool call_native(clox_vm_t *vm, const clox_native_t *native, size_t arg_count) {
+  clox_value_t result = native->function(arg_count, vm->stack_top - arg_count);
+  pop_n_stack(vm, arg_count + 1); // discard callee and args
+  push_stack(vm, result);         // can't overflow: callee popped
+
+  return true;
+}
+
+static inline bool call_value(clox_vm_t *vm, clox_value_t val, size_t arg_count) {
+  // make sure callee and args are on the stack
+  assert(vm->stack_top - vm->stack >= (ptrdiff_t)arg_count + 1);
+
+  if (CLOX_IS_OBJECT(val)) {
+    switch (CLOX_AS_OBJECT(val)->type) {
+    case OBJ_FUNCTION:
+      return call_function(vm, CLOX_AS_FUNCTION(val), arg_count);
+    case OBJ_NATIVE:
+      return call_native(vm, CLOX_AS_NATIVE(val), arg_count);
+    case OBJ_STRING:
+      break; // non-callable object type
+    }
+  }
+
+  error(vm, "can only call functions");
+  return false;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool run(clox_vm_t *vm) {
+  clox_call_frame_t *frame = &vm->frames[vm->frame_count - 1];
+
 #define ERROR(...)                                                                                 \
   do {                                                                                             \
-    if (vm->error_handler != NULL) {                                                               \
-      error(vm, __VA_ARGS__);                                                                      \
-    }                                                                                              \
+    error(vm, __VA_ARGS__);                                                                        \
     return false;                                                                                  \
   } while (0)
 #define PUSH(val)                                                                                  \
   do {                                                                                             \
     if (!push_stack(vm, (val))) {                                                                  \
-      ERROR("stack overflow");                                                                     \
+      ERROR("value stack overflow");                                                               \
     }                                                                                              \
   } while (0)
 #define POP() pop_stack(vm)
-#define POP_N(n) pop_stack_n(vm, n)
+#define POP_N(n) pop_n_stack(vm, n)
 #define PEEK(distance) peek_stack(vm, (distance))
-#define READ_BYTE() (*vm->ip++)
-#define READ_TWO_BYTES() (vm->ip += 2, ((size_t)vm->ip[-2] << CHAR_BIT) | vm->ip[-1])
-#define READ_CONSTANT(opcode) clox_read_constant(vm->chunk, (opcode), &vm->ip)
+#define READ_BYTE() (*frame->ip++)
+#define READ_TWO_BYTES() (frame->ip += 2, ((size_t)frame->ip[-2] << CHAR_BIT) | frame->ip[-1])
+#define READ_CONSTANT(opcode) clox_read_constant(&frame->function->chunk, (opcode), &frame->ip)
 #define READ_STRING(opcode) CLOX_AS_STRING(READ_CONSTANT(opcode))
 #define BINARY_OP(op, RESULT_TYPE)                                                                 \
   do {                                                                                             \
@@ -153,14 +212,15 @@ static bool run(clox_vm_t *vm) {
   } while (0)
 
   while (1) {
-    assert(vm->ip >= vm->chunk->code);
-    assert(vm->ip < vm->chunk->code + vm->chunk->length);
+    assert(frame->ip >= frame->function->chunk.code);
+    assert(frame->ip < frame->function->chunk.code + frame->function->chunk.length);
 
 #if CLOX_DEBUG_EXECUTION
     print_stack(vm);
     print_globals(vm);
     printf("---- EXEC ");
-    clox_disassemble_instruction(vm->chunk, (size_t)(vm->ip - vm->chunk->code));
+    clox_disassemble_instruction(&frame->function->chunk,
+                                 (size_t)(frame->ip - frame->function->chunk.code));
 #endif
 
     clox_byte_t byte = READ_BYTE();
@@ -190,7 +250,7 @@ static bool run(clox_vm_t *vm) {
       break;
     }
     case OP_GET_LOCAL:
-      PUSH(vm->stack[READ_BYTE()]);
+      PUSH(frame->slots[READ_BYTE()]);
       break;
     case OP_SET_GLOBAL:
     case OP_SET_GLOBAL_LONG: {
@@ -205,7 +265,7 @@ static bool run(clox_vm_t *vm) {
     }
     case OP_SET_LOCAL:
       // no POP(): assignment is expression
-      vm->stack[READ_BYTE()] = PEEK(0);
+      frame->slots[READ_BYTE()] = PEEK(0);
       break;
     case OP_NIL:
       PUSH(CLOX_NIL);
@@ -291,38 +351,54 @@ static bool run(clox_vm_t *vm) {
     case OP_JUMP_TRUE: {
       size_t offset = READ_TWO_BYTES();
       if (clox_value_is_truthy(PEEK(0))) {
-        vm->ip += offset;
+        frame->ip += offset;
       }
       break;
     }
     case OP_JUMP_FALSE: {
       size_t offset = READ_TWO_BYTES();
       if (!clox_value_is_truthy(PEEK(0))) {
-        vm->ip += offset;
+        frame->ip += offset;
       }
       break;
     }
     case OP_JUMP_FALSE_POP: {
       size_t offset = READ_TWO_BYTES();
       if (!clox_value_is_truthy(POP())) {
-        vm->ip += offset;
+        frame->ip += offset;
       }
       break;
     }
     case OP_JUMP: {
       size_t offset = READ_TWO_BYTES();
-      vm->ip += offset;
+      frame->ip += offset;
       break;
     }
     case OP_LOOP: {
       size_t offset = READ_TWO_BYTES();
-      vm->ip -= offset;
+      frame->ip -= offset;
       break;
     }
-    case OP_RETURN:
-      // stack must be empty on return
-      assert(vm->stack_top == vm->stack);
-      return true;
+    case OP_CALL: {
+      size_t arg_count = READ_BYTE();
+      if (!call_value(vm, PEEK(arg_count), arg_count)) {
+        return false; // call failed
+      }
+      // pick up the new call frame locally
+      frame = &vm->frames[vm->frame_count - 1];
+      break;
+    }
+    case OP_RETURN: {
+      clox_value_t result = POP();
+      vm->frame_count--;
+      if (vm->frame_count == 0) {
+        return true; // return from script
+      }
+      vm->stack_top = frame->slots;             // rewind to caller's stack
+      PUSH(result);                             // push result on caller's stack
+      frame = &vm->frames[vm->frame_count - 1]; // restore caller's frame
+      break;
+    }
     case OP_CODE_COUNT:
       assert(0 && "unreachable");
     }
@@ -341,23 +417,28 @@ static bool run(clox_vm_t *vm) {
 }
 
 void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
-  vm->ip = NULL;
-  vm->chunk = NULL;
   vm->allocator = alloc;
+  vm->stack_top = vm->stack;
+  vm->frame_count = 0;
+
   clox_table_init(&vm->globals);
   clox_vm_reset_error_handler(vm);
   clox_vm_set_default_print_fn(vm);
-  reset_stack(vm);
+
+  // define built-in native functions
+  for (size_t i = 0; i < CLOX_LIBRARY_SIZE; i++) {
+    clox_vm_define_native(vm, clox_library_fn_names[i], clox_library_fns[i]);
+  }
 }
 
 void clox_vm_free(clox_vm_t *vm) {
-  vm->ip = NULL;
-  vm->chunk = NULL;
   vm->allocator = NULL;
+  vm->stack_top = vm->stack;
+  vm->frame_count = 0;
+
   clox_table_free(&vm->globals);
   clox_vm_reset_error_handler(vm);
   clox_vm_set_default_print_fn(vm);
-  reset_stack(vm);
 }
 
 void clox_vm_set_error_handler(clox_vm_t *vm, clox_error_handler_t *error_handler,
@@ -381,17 +462,33 @@ void clox_vm_set_default_print_fn(clox_vm_t *vm) {
   vm->print_ctx = NULL;
 }
 
-bool clox_interpret(clox_vm_t *vm, const clox_chunk_t *chunk) {
-  // init
-  vm->chunk = chunk;
-  vm->ip = chunk->code;
-  reset_stack(vm);
+void clox_vm_define_native(clox_vm_t *vm, const char *name, clox_native_fn_t *native) {
+  // temporary stack placement to avoid in-flight GC
+  push_stack(vm, CLOX_NATIVE(vm->allocator, name, native));
+  push_stack(vm, CLOX_STRING_COPY(vm->allocator, name, strlen(name)));
+  clox_table_set(&vm->globals, CLOX_AS_STRING(peek_stack(vm, 0)), peek_stack(vm, 1));
+  pop_stack(vm); // name
+  pop_stack(vm); // native
+}
 
-  bool result = run(vm);
+bool clox_interpret(clox_vm_t *vm, const clox_function_t *script) {
+  // init
+  vm->stack_top = vm->stack;
+  vm->frame_count = 0;
+
+  // set up the script's call frame
+  push_stack(vm, CLOX_OBJECT(script));
+  call_function(vm, script, 0);
+
+  if (!run(vm)) {
+    return false;
+  }
 
   // cleanup
-  vm->chunk = NULL;
-  vm->ip = NULL;
+  pop_stack(vm); // script
 
-  return result;
+  assert(vm->frame_count == 0);
+  assert(vm->stack_top == vm->stack);
+
+  return true;
 }

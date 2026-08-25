@@ -5,7 +5,6 @@
 
 #include <utest.h>
 
-#include "chunk.h"
 #include "compiler.h"
 #include "object.h"
 #include "value.h"
@@ -22,7 +21,7 @@ struct lox {
   clox_allocator_t alloc;
   clox_compiler_t compiler;
   clox_vm_t vm;
-  clox_chunk_t chunk;
+  clox_function_t *script;
   clox_test_printed_t printed;
   clox_test_errors_t errors;
   char source[SOURCE_SIZE];
@@ -32,7 +31,7 @@ UTEST_F_SETUP(lox) {
   clox_allocator_init(&utest_fixture->alloc);
   clox_compiler_init(&utest_fixture->compiler, &utest_fixture->alloc);
   clox_vm_init(&utest_fixture->vm, &utest_fixture->alloc);
-  clox_chunk_init(&utest_fixture->chunk);
+  utest_fixture->script = NULL;
   utest_fixture->printed = (clox_test_printed_t){0};
   utest_fixture->errors = (clox_test_errors_t){0};
   clox_compiler_set_error_handler(&utest_fixture->compiler, clox_test_error_handler,
@@ -45,7 +44,6 @@ UTEST_F_TEARDOWN(lox) {
   clox_compiler_reset_error_handler(&utest_fixture->compiler);
   clox_vm_reset_error_handler(&utest_fixture->vm);
   clox_vm_set_default_print_fn(&utest_fixture->vm);
-  clox_chunk_free(&utest_fixture->chunk);
   clox_vm_free(&utest_fixture->vm);
   clox_compiler_free(&utest_fixture->compiler);
   clox_allocator_free(&utest_fixture->alloc);
@@ -54,11 +52,11 @@ UTEST_F_TEARDOWN(lox) {
 static bool run(struct lox *fixture, const char *source) {
   (void)snprintf(fixture->source, SOURCE_SIZE, "%s", source);
 
-  if (!clox_compile(&fixture->compiler, fixture->source, &fixture->chunk)) {
+  if (!clox_compile(&fixture->compiler, fixture->source, &fixture->script)) {
     return false;
   }
 
-  return clox_interpret(&fixture->vm, &fixture->chunk);
+  return clox_interpret(&fixture->vm, fixture->script);
 }
 
 // The single value a successful run printed.
@@ -87,7 +85,6 @@ UTEST_F(lox, subtraction_and_division_associate_to_the_left) {
   EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
 
   utest_fixture->printed = (clox_test_printed_t){0};
-  clox_chunk_free(&utest_fixture->chunk);
   ASSERT_TRUE(run(utest_fixture, "print 12 / 3 / 2;"));
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
 }
@@ -185,7 +182,6 @@ UTEST_F(lox, a_variable_survives_into_the_next_run) {
   ASSERT_TRUE(run(utest_fixture, "var a = 1;"));
   ASSERT_EQ((size_t)0, utest_fixture->printed.count);
 
-  clox_chunk_free(&utest_fixture->chunk);
   ASSERT_TRUE(run(utest_fixture, "print a + 1;"));
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
 }
@@ -541,7 +537,6 @@ UTEST_F(lox, a_local_does_not_survive_into_the_next_run) {
   ASSERT_TRUE(run(utest_fixture, "{ var a = 1; }"));
   ASSERT_EQ((size_t)0, utest_fixture->printed.count);
 
-  clox_chunk_free(&utest_fixture->chunk);
   EXPECT_FALSE(run(utest_fixture, "print a;"));
   EXPECT_TRUE(utest_fixture->errors.count > 0);
 }
@@ -608,4 +603,233 @@ UTEST_F(lox, a_runtime_error_points_at_the_operator_not_the_operand) {
   ASSERT_TRUE(utest_fixture->errors.count > 0);
   EXPECT_EQ((size_t)2, utest_fixture->errors.positions[0].line);
   EXPECT_EQ((size_t)3, utest_fixture->errors.positions[0].col);
+}
+
+UTEST_F(lox, a_function_returns_the_value_it_names) {
+  ASSERT_TRUE(run(utest_fixture, "fun answer() { return 42; } print answer();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_reaching_its_end_returns_nil) {
+  ASSERT_TRUE(run(utest_fixture, "fun nothing() {} print nothing();"));
+  EXPECT_VALUE_EQ(CLOX_NIL, only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_bare_return_yields_nil) {
+  ASSERT_TRUE(run(utest_fixture, "fun nothing() { return; } print nothing();"));
+  EXPECT_VALUE_EQ(CLOX_NIL, only_printed(utest_fixture));
+}
+
+UTEST_F(lox, arguments_reach_the_parameters_in_the_order_they_are_written) {
+  ASSERT_TRUE(run(utest_fixture, "fun sub(a, b) { return a - b; } print sub(10, 4);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(6.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_argument_is_an_expression_of_its_own) {
+  ASSERT_TRUE(run(utest_fixture, "fun twice(n) { return n * 2; } print twice(1 + 2);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(6.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_call_is_an_expression_and_nests_in_another) {
+  ASSERT_TRUE(run(utest_fixture, "fun twice(n) { return n * 2; } print twice(twice(3));"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(12.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_is_a_value_that_can_be_passed_around) {
+  ASSERT_TRUE(run(utest_fixture, "fun answer() { return 42; } var f = answer; print f();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_can_be_handed_to_another_function) {
+  ASSERT_TRUE(run(utest_fixture, "fun apply(f) { return f(); }"
+                                 "fun answer() { return 42; }"
+                                 "print apply(answer);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_prints_as_itself) {
+  ASSERT_TRUE(run(utest_fixture, "fun named() {} print named;"));
+
+  clox_value_t printed = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_FUNCTION(printed));
+  EXPECT_STREQ("named", CLOX_AS_FUNCTION(printed)->name);
+}
+
+UTEST_F(lox, recursion_runs_down_to_its_base_case) {
+  ASSERT_TRUE(run(utest_fixture,
+                  "fun count(n) { if (n <= 0) { return 0; } return count(n - 1) + 1; }"
+                  "print count(10);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(10.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_return_leaves_the_function_at_once) {
+  ASSERT_TRUE(run(utest_fixture, "fun early() { return 1; print 2; } print early();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_return_leaves_the_loop_it_stands_in) {
+  ASSERT_TRUE(run(utest_fixture, "fun first_over(n) {"
+                                 "  for (var i = 0; i < 100; i = i + 1) {"
+                                 "    if (i > n) { return i; }"
+                                 "  }"
+                                 "  return -1;"
+                                 "}"
+                                 "print first_over(3);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(4.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_return_out_of_a_scope_leaves_nothing_behind) {
+  // the locals of every scope the return jumps out of go with the frame
+  ASSERT_TRUE(run(utest_fixture, "fun deep() { { var a = 1; { var b = 2; return a + b; } } }"
+                                 "print deep(); print deep();"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_function_reads_the_globals_around_it) {
+  ASSERT_TRUE(run(utest_fixture, "var g = 7; fun read() { return g; } print read();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(7.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_writes_the_globals_around_it) {
+  ASSERT_TRUE(run(utest_fixture, "var g = 1; fun bump() { g = g + 1; } bump(); bump(); print g;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_parameter_shadows_a_global_of_the_same_name) {
+  ASSERT_TRUE(run(utest_fixture, "var n = 1; fun show(n) { return n; } print show(2); print n;"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_functions_locals_do_not_reach_the_caller) {
+  EXPECT_FALSE(run(utest_fixture, "fun hidden() { var secret = 1; } hidden(); print secret;"));
+  EXPECT_TRUE(utest_fixture->errors.count > 0);
+}
+
+UTEST_F(lox, one_call_does_not_see_the_locals_of_another) {
+  // both frames use the same slots, and neither reads what the other put there
+  ASSERT_TRUE(run(utest_fixture, "fun counted(n) { var doubled = n * 2; return doubled; }"
+                                 "print counted(1); print counted(5);"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(10.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_function_declared_in_a_block_is_gone_after_it) {
+  EXPECT_FALSE(run(utest_fixture, "{ fun inner() { return 1; } print inner(); } print inner();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+  EXPECT_TRUE(utest_fixture->errors.count > 0);
+}
+
+UTEST_F(lox, a_nested_function_is_reached_through_the_one_around_it) {
+  ASSERT_TRUE(run(utest_fixture, "fun outer() { fun inner() { return 5; } return inner() + 1; }"
+                                 "print outer();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(6.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_global_function_survives_into_the_next_run) {
+  ASSERT_TRUE(run(utest_fixture, "fun answer() { return 42; }"));
+  ASSERT_EQ((size_t)0, utest_fixture->printed.count);
+
+  ASSERT_TRUE(run(utest_fixture, "print answer();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_global_can_be_redefined_like_any_other) {
+  ASSERT_TRUE(run(utest_fixture, "fun which() { return 1; }"
+                                 "fun which() { return 2; }"
+                                 "print which();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_is_truthy) {
+  ASSERT_TRUE(run(utest_fixture, "fun f() {} if (f) { print 1; } else { print 2; }"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, too_few_arguments_is_a_runtime_error) {
+  EXPECT_FALSE(run(utest_fixture, "fun two(a, b) { return a; } print two(1);"));
+
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 2") != NULL);
+}
+
+UTEST_F(lox, too_many_arguments_is_a_runtime_error) {
+  EXPECT_FALSE(run(utest_fixture, "fun one(a) { return a; } print one(1, 2);"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 1") != NULL);
+}
+
+UTEST_F(lox, calling_something_that_is_not_a_function_is_a_runtime_error) {
+  EXPECT_FALSE(run(utest_fixture, "var n = 1; n();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "call") != NULL);
+}
+
+UTEST_F(lox, calling_the_result_of_a_call_that_returned_nil_is_a_runtime_error) {
+  EXPECT_FALSE(run(utest_fixture, "fun nothing() {} nothing()();"));
+  EXPECT_EQ((size_t)1, utest_fixture->errors.count);
+}
+
+UTEST_F(lox, a_runtime_error_inside_a_function_stops_the_run) {
+  EXPECT_FALSE(run(utest_fixture, "fun broken() { return -true; } print 1; print broken();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+  EXPECT_EQ((size_t)1, utest_fixture->errors.count);
+}
+
+UTEST_F(lox, a_runtime_error_inside_a_function_points_into_its_body) {
+  EXPECT_FALSE(run(utest_fixture, "fun broken() {\n  return -true;\n}\nprint broken();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_EQ((size_t)2, utest_fixture->errors.positions[0].line);
+}
+
+UTEST_F(lox, recursion_without_a_base_case_is_a_runtime_error) {
+  EXPECT_FALSE(run(utest_fixture, "fun forever() { return forever(); } forever();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "stack overflow") != NULL);
+}
+
+UTEST_F(lox, a_run_that_overflowed_the_frames_leaves_the_interpreter_usable) {
+  ASSERT_FALSE(run(utest_fixture, "fun forever() { return forever(); } forever();"));
+
+  utest_fixture->printed = (clox_test_printed_t){0};
+  utest_fixture->errors = (clox_test_errors_t){0};
+  ASSERT_TRUE(run(utest_fixture, "print 1;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_native_is_callable_by_its_name) {
+  ASSERT_TRUE(run(utest_fixture, "print clock() >= 0;"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_native_prints_as_itself) {
+  ASSERT_TRUE(run(utest_fixture, "print clock;"));
+
+  clox_value_t printed = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_NATIVE(printed));
+  EXPECT_STREQ("clock", CLOX_AS_NATIVE(printed)->name);
+}
+
+UTEST_F(lox, a_native_is_a_global_like_any_other) {
+  // nothing protects a built-in name from being redefined
+  ASSERT_TRUE(run(utest_fixture, "var clock = 1; print clock;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
 }

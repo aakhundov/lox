@@ -97,6 +97,7 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_SET_LOCAL:
     case OP_POP_N:
     case OP_PRINT_N:
+    case OP_CALL:
       offset = byte_instruction(stream, chunk, offset);
       break;
     case OP_JUMP_TRUE:

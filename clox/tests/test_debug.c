@@ -41,6 +41,7 @@ static bool takes_byte_operand(clox_op_code_t opcode) {
   case OP_SET_LOCAL:
   case OP_POP_N:
   case OP_PRINT_N:
+  case OP_CALL:
     return true;
   default:
     return false;

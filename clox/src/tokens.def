@@ -9,7 +9,7 @@ fields:
 */
 
 // single-character tokens
-X(LEFT_PAREN,    grouping, NULL,   PREC_NONE)
+X(LEFT_PAREN,    grouping, call,   PREC_CALL)
 X(RIGHT_PAREN,   NULL,     NULL,   PREC_NONE)
 X(LEFT_BRACE,    NULL,     NULL,   PREC_NONE)
 X(RIGHT_BRACE,   NULL,     NULL,   PREC_NONE)

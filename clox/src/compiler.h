@@ -5,11 +5,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "chunk.h"
 #include "error.h"
 #include "object.h"
 #include "scanner.h"
 
+#define CLOX_MAX_ARITY UCHAR_MAX
 #define CLOX_MAX_LOCALS (UCHAR_MAX + 1)
 
 typedef struct {
@@ -25,9 +25,26 @@ typedef struct {
   size_t exit_patch;
 } clox_loop_state_t;
 
+typedef enum {
+  FUNCTION_SCRIPT,
+  FUNCTION_FUNCTION,
+} clox_function_type_t;
+
+typedef struct clox_compile_frame_t {
+  // locals
+  clox_local_t locals[CLOX_MAX_LOCALS];
+  size_t local_count;
+  size_t scope_depth;
+  // loops
+  clox_loop_state_t loop;
+  // function
+  clox_function_t *function;
+  clox_function_type_t type;
+  // linked list of frames
+  struct clox_compile_frame_t *enclosing;
+} clox_compile_frame_t;
+
 typedef struct {
-  // output
-  clox_chunk_t *chunk;
   // parser
   clox_scanner_t scanner;
   clox_token_t previous;
@@ -35,13 +52,10 @@ typedef struct {
   bool had_error;
   bool panic_mode;
   size_t parser_depth;
-  // locals
-  clox_local_t locals[CLOX_MAX_LOCALS];
-  size_t local_count;
-  size_t scope_depth;
-  // loops
-  clox_loop_state_t loop;
-  // string allocator
+  size_t declaration_depth;
+  // current frame
+  clox_compile_frame_t *frame;
+  // compile-time allocator
   clox_allocator_t *allocator;
   // error handling
   clox_error_handler_t *error_handler;
@@ -55,6 +69,6 @@ void clox_compiler_set_error_handler(clox_compiler_t *compiler, clox_error_handl
 void clox_compiler_reset_error_handler(clox_compiler_t *compiler);
 
 // modifies source internally, but guarantees identical content on return
-bool clox_compile(clox_compiler_t *compiler, char *source, clox_chunk_t *chunk);
+bool clox_compile(clox_compiler_t *compiler, char *source, clox_function_t **function);
 
 #endif

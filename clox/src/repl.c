@@ -10,7 +10,6 @@
 
 #include <isocline.h>
 
-#include "chunk.h"
 #include "compiler.h"
 #include "error.h"
 #include "object.h"
@@ -118,19 +117,18 @@ static void clox_harness_teardown(clox_harness_t *harness) {
 static clox_exit_code_t run_code(clox_harness_t *h, char *source) {
   clox_exit_code_t ret = CLOX_EX_OK;
 
-  clox_chunk_t chunk;
-  clox_chunk_init(&chunk);
+  clox_function_t *script;
 
   clox_error_ctx_t compile_ctx = {.domain = "Compilation", .source = source};
   clox_compiler_set_error_handler(&h->compiler, print_clox_error, &compile_ctx);
-  if (!clox_compile(&h->compiler, source, &chunk)) {
+  if (!clox_compile(&h->compiler, source, &script)) {
     ret = CLOX_EX_DATAERR;
     goto out;
   }
 
   clox_error_ctx_t interpret_ctx = {.domain = "Runtime", .source = source};
   clox_vm_set_error_handler(&h->vm, print_clox_error, &interpret_ctx);
-  if (!clox_interpret(&h->vm, &chunk)) {
+  if (!clox_interpret(&h->vm, script)) {
     ret = CLOX_EX_SOFTWARE;
     goto out;
   }
@@ -138,7 +136,6 @@ static clox_exit_code_t run_code(clox_harness_t *h, char *source) {
 out:
   clox_compiler_reset_error_handler(&h->compiler);
   clox_vm_reset_error_handler(&h->vm);
-  clox_chunk_free(&chunk);
   return ret;
 }
 
