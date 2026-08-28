@@ -78,6 +78,20 @@ COVERAGE_FLAGS := -fprofile-instr-generate -fcoverage-mapping
 PROFRAW := $(BUILD)/tests.profraw
 PROFDATA := $(BUILD)/tests.profdata
 
+# The release build is the same sources with the development scaffolding taken
+# out: the sanitizers, the debug info and the pinned frame pointer come off,
+# optimization goes on, and NDEBUG compiles the internal-invariant asserts
+# away. Like coverage it gets a build directory of its own, so objects built
+# two different ways never share one.
+#
+# -flto=thin makes every object a bitcode file and defers code generation to
+# the link, which is where a call from one .c into another can finally be
+# inlined. It belongs in CFLAGS rather than LDFLAGS because it has to reach
+# both halves, and the link recipes already pass CFLAGS.
+RELEASE_BUILD := $(BUILD)/release
+RELEASE_CFLAGS := $(filter-out -fsanitize=% -g3 -O0 -fno-omit-frame-pointer,$(CFLAGS)) \
+                  -O2 -flto=thin -DNDEBUG
+
 # Tests include the headers of what they cover by bare name, and the test
 # framework as <utest.h>. Both are test-only, so they stay out of CPPFLAGS.
 TEST_CPPFLAGS := -I$(SRC) -I$(VENDOR)/utest
@@ -107,7 +121,7 @@ FLAGS_STAMP := $(BUILD)/.flags
 # `force` deliberately has no rule anywhere: a phony target that never exists
 # is always out of date, which is what keeps the flags stamp reconsidered on
 # every run.
-.PHONY: run check test coverage coverage-report doctor clean format format-check tidy force
+.PHONY: run check test release run-release coverage coverage-report doctor clean format format-check tidy force
 
 $(EXEC): $(OBJS) $(VENDOR_OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $(EXEC)
@@ -176,6 +190,19 @@ tidy:
 # what has to hold for every change, in one command; anything slower than a
 # keystroke -- coverage, a fuzzing run -- earns its own target instead
 check: format-check tidy test
+
+# Recursive for the same reason coverage is: BUILD and CFLAGS have to differ
+# for the whole tree, flags stamp included, not for a single recipe. No goal is
+# named, so the sub-make builds its default one, which is $(EXEC) under the
+# overridden BUILD.
+release:
+	@$(MAKE) --no-print-directory BUILD=$(RELEASE_BUILD) \
+	         CFLAGS='$(RELEASE_CFLAGS)'
+
+# run's counterpart for the other build. No RUN_ENV: the sanitizers are not
+# compiled into this binary, so there is nothing for those variables to tune.
+run-release: release
+	@$(RELEASE_BUILD)/$(APP) $(ARGS)
 
 # A report rather than a gate, so it stays out of check and a failing test does
 # not stop it: what it is good for is naming code that has never run at all.

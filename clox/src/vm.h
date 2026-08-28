@@ -21,12 +21,12 @@ typedef struct {
 } clox_call_frame_t;
 
 typedef struct {
-  size_t frame_count;
-  clox_call_frame_t frames[CLOX_MAX_FRAMES];
+  clox_table_t globals;
   clox_value_t *stack_top;
   clox_value_t stack[CLOX_STACK_SIZE];
+  size_t frame_count;
+  clox_call_frame_t frames[CLOX_MAX_FRAMES];
   clox_allocator_t *allocator;
-  clox_table_t globals;
   clox_error_handler_t *error_handler;
   void *error_ctx;
   clox_print_fn_t *print_fn;

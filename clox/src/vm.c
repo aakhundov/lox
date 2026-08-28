@@ -182,9 +182,11 @@ static inline bool call_value(clox_vm_t *vm, clox_value_t val, size_t arg_count)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool run(clox_vm_t *vm) {
   clox_call_frame_t *frame = &vm->frames[vm->frame_count - 1];
+  const clox_byte_t *ip = frame->ip;
 
 #define ERROR(...)                                                                                 \
   do {                                                                                             \
+    frame->ip = ip;                                                                                \
     error(vm, __VA_ARGS__);                                                                        \
     return false;                                                                                  \
   } while (0)
@@ -197,9 +199,9 @@ static bool run(clox_vm_t *vm) {
 #define POP() pop_stack(vm)
 #define POP_N(n) pop_n_stack(vm, n)
 #define PEEK(distance) peek_stack(vm, (distance))
-#define READ_BYTE() (*frame->ip++)
-#define READ_TWO_BYTES() (frame->ip += 2, ((size_t)frame->ip[-2] << CHAR_BIT) | frame->ip[-1])
-#define READ_CONSTANT(opcode) clox_read_constant(&frame->function->chunk, (opcode), &frame->ip)
+#define READ_BYTE() (*ip++)
+#define READ_TWO_BYTES() (ip += 2, ((size_t)ip[-2] << CHAR_BIT) | ip[-1])
+#define READ_CONSTANT(opcode) clox_read_constant(&frame->function->chunk, (opcode), &ip)
 #define READ_STRING(opcode) CLOX_AS_STRING(READ_CONSTANT(opcode))
 #define BINARY_OP(op, RESULT_TYPE)                                                                 \
   do {                                                                                             \
@@ -212,15 +214,15 @@ static bool run(clox_vm_t *vm) {
   } while (0)
 
   while (1) {
-    assert(frame->ip >= frame->function->chunk.code);
-    assert(frame->ip < frame->function->chunk.code + frame->function->chunk.length);
+    assert(ip >= frame->function->chunk.code);
+    assert(ip < frame->function->chunk.code + frame->function->chunk.length);
 
 #if CLOX_DEBUG_EXECUTION
     print_stack(vm);
     print_globals(vm);
     printf("---- EXEC ");
     clox_disassemble_instruction(&frame->function->chunk,
-                                 (size_t)(frame->ip - frame->function->chunk.code));
+                                 (size_t)(ip - frame->function->chunk.code));
 #endif
 
     clox_byte_t byte = READ_BYTE();
@@ -254,11 +256,17 @@ static bool run(clox_vm_t *vm) {
       break;
     case OP_SET_GLOBAL:
     case OP_SET_GLOBAL_LONG: {
+      clox_value_t existing_value;
       const clox_string_t *name = READ_STRING(opcode);
-      // no POP(): assignment is expression
-      if (clox_table_set(&vm->globals, name, PEEK(0))) {
-        // the name didn't exist among the globals
-        clox_table_delete(&vm->globals, name); // revert
+      bool name_exists = clox_table_get(&vm->globals, name, &existing_value);
+      if (name_exists) {
+        if (!CLOX_IS_NATIVE(existing_value)) {
+          // no POP(): assignment is expression
+          clox_table_set(&vm->globals, name, PEEK(0));
+        } else {
+          ERROR("can't assign to native '%s'", name->chars);
+        }
+      } else {
         ERROR("undefined variable '%s'", name->chars);
       }
       break;
@@ -351,41 +359,43 @@ static bool run(clox_vm_t *vm) {
     case OP_JUMP_TRUE: {
       size_t offset = READ_TWO_BYTES();
       if (clox_value_is_truthy(PEEK(0))) {
-        frame->ip += offset;
+        ip += offset;
       }
       break;
     }
     case OP_JUMP_FALSE: {
       size_t offset = READ_TWO_BYTES();
       if (!clox_value_is_truthy(PEEK(0))) {
-        frame->ip += offset;
+        ip += offset;
       }
       break;
     }
     case OP_JUMP_FALSE_POP: {
       size_t offset = READ_TWO_BYTES();
       if (!clox_value_is_truthy(POP())) {
-        frame->ip += offset;
+        ip += offset;
       }
       break;
     }
     case OP_JUMP: {
       size_t offset = READ_TWO_BYTES();
-      frame->ip += offset;
+      ip += offset;
       break;
     }
     case OP_LOOP: {
       size_t offset = READ_TWO_BYTES();
-      frame->ip -= offset;
+      ip -= offset;
       break;
     }
     case OP_CALL: {
       size_t arg_count = READ_BYTE();
+      frame->ip = ip; // for transitive error() calls
       if (!call_value(vm, PEEK(arg_count), arg_count)) {
         return false; // call failed
       }
       // pick up the new call frame locally
       frame = &vm->frames[vm->frame_count - 1];
+      ip = frame->ip;
       break;
     }
     case OP_RETURN: {
@@ -395,8 +405,9 @@ static bool run(clox_vm_t *vm) {
         return true; // return from script
       }
       vm->stack_top = frame->slots;             // rewind to caller's stack
-      PUSH(result);                             // push result on caller's stack
       frame = &vm->frames[vm->frame_count - 1]; // restore caller's frame
+      ip = frame->ip;
+      PUSH(result); // push result on caller's stack
       break;
     }
     case OP_CODE_COUNT:
