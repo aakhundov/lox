@@ -158,10 +158,12 @@ clox_function_t *clox_new_function(clox_allocator_t *alloc, const char *name, si
   return function;
 }
 
-clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, clox_native_fn_t *fn) {
+clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, size_t arity,
+                               clox_native_fn_t *fn) {
   clox_native_t *native = ALLOCATE_OBJECT(alloc, clox_native_t, OBJ_NATIVE);
-  native->function = fn;
   native->name = duplicate_cstring(name, strlen(name));
+  native->arity = arity;
+  native->function = fn;
 
   LOG_ALLOCATE(native);
   return native;

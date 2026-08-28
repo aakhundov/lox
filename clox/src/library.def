@@ -1,0 +1,24 @@
+X(clock, 0)
+X(time, 0)
+X(sleep, 1)
+X(exit, 0)
+
+X(seed, 1)
+X(random, 0)
+X(random_int, 1)
+
+X(sqrt, 1)
+X(pow, 2)
+X(abs, 1)
+X(floor, 1)
+X(ceil, 1)
+X(min, SIZE_MAX)
+X(max, SIZE_MAX)
+
+X(len, 1)
+X(ord, 1)
+
+X(is_bool, 1)
+X(is_nil, 1)
+X(is_number, 1)
+X(is_string, 1)

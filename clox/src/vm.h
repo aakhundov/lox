@@ -39,7 +39,7 @@ void clox_vm_set_error_handler(clox_vm_t *vm, clox_error_handler_t *error_handle
 void clox_vm_reset_error_handler(clox_vm_t *vm);
 void clox_vm_set_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx);
 void clox_vm_set_default_print_fn(clox_vm_t *vm);
-void clox_vm_define_native(clox_vm_t *vm, const char *name, clox_native_fn_t *native);
+void clox_vm_define_native(clox_vm_t *vm, const char *name, size_t arity, clox_native_fn_t *fn);
 
 bool clox_interpret(clox_vm_t *vm, const clox_function_t *script);
 

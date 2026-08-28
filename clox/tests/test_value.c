@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -111,6 +112,41 @@ UTEST(value, an_empty_string_is_not_truthy) {
   EXPECT_FALSE(clox_value_is_truthy(CLOX_STRING_COPY(&alloc, "", 0)));
 
   clox_allocator_free(&alloc);
+}
+
+UTEST(value, whole_numbers_are_integers) {
+  EXPECT_TRUE(CLOX_IS_INTEGER(CLOX_NUMBER(0.0)));
+  EXPECT_TRUE(CLOX_IS_INTEGER(CLOX_NUMBER(1.0)));
+  EXPECT_TRUE(CLOX_IS_INTEGER(CLOX_NUMBER(-1.0)));
+  // negative zero is a whole number like any other
+  EXPECT_TRUE(CLOX_IS_INTEGER(CLOX_NUMBER(-0.0)));
+}
+
+UTEST(value, a_number_with_a_fractional_part_is_not_an_integer) {
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_NUMBER(0.5)));
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_NUMBER(-0.5)));
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_NUMBER(1e-9)));
+}
+
+UTEST(value, a_whole_number_too_large_for_an_integer_type_is_still_an_integer) {
+  // integral says nothing about fitting anywhere: a caller converting to an
+  // integer type has its own range to check
+  EXPECT_TRUE(CLOX_IS_INTEGER(CLOX_NUMBER(9007199254740992.0))); // 2^53
+  EXPECT_TRUE(CLOX_IS_INTEGER(CLOX_NUMBER(1e300)));
+}
+
+UTEST(value, the_infinities_and_nan_are_not_integers) {
+  // an infinity satisfies trunc(x) == x, so it has to be excluded by hand
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_NUMBER(INFINITY)));
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_NUMBER(-INFINITY)));
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_NUMBER(NAN)));
+}
+
+UTEST(value, a_value_that_is_not_a_number_is_not_an_integer) {
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_NIL));
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_BOOL(true)));
+  // a size holds a whole number, but it is not the number type
+  EXPECT_FALSE(CLOX_IS_INTEGER(CLOX_SIZE(1)));
 }
 
 UTEST(value, values_of_different_types_are_never_equal) {

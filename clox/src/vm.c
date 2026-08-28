@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -153,10 +154,22 @@ static inline bool call_function(clox_vm_t *vm, const clox_function_t *function,
 }
 
 static inline bool call_native(clox_vm_t *vm, const clox_native_t *native, size_t arg_count) {
-  clox_value_t result = native->function(arg_count, vm->stack_top - arg_count);
-  pop_n_stack(vm, arg_count + 1); // discard callee and args
-  push_stack(vm, result);         // can't overflow: callee popped
+  // SIZE_MAX arity means variadic native
+  if (native->arity != SIZE_MAX && arg_count != native->arity) {
+    error(vm, "expected %zu args but got %zu", native->arity, arg_count);
+    return false;
+  }
 
+  clox_native_result_t result;
+  bool success = native->function(arg_count, vm->stack_top - arg_count, &result);
+  pop_n_stack(vm, arg_count + 1); // discard callee and args
+
+  if (!success) {
+    error(vm, "%s", result.error_msg);
+    return false;
+  }
+
+  push_stack(vm, result.value); // can't overflow: callee popped
   return true;
 }
 
@@ -438,7 +451,8 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
 
   // define built-in native functions
   for (size_t i = 0; i < CLOX_LIBRARY_SIZE; i++) {
-    clox_vm_define_native(vm, clox_library_fn_names[i], clox_library_fns[i]);
+    clox_library_fn_t lib_fn = clox_library_fns[i];
+    clox_vm_define_native(vm, lib_fn.name, lib_fn.arity, lib_fn.fn);
   }
 }
 
@@ -473,9 +487,9 @@ void clox_vm_set_default_print_fn(clox_vm_t *vm) {
   vm->print_ctx = NULL;
 }
 
-void clox_vm_define_native(clox_vm_t *vm, const char *name, clox_native_fn_t *native) {
+void clox_vm_define_native(clox_vm_t *vm, const char *name, size_t arity, clox_native_fn_t *fn) {
   // temporary stack placement to avoid in-flight GC
-  push_stack(vm, CLOX_NATIVE(vm->allocator, name, native));
+  push_stack(vm, CLOX_NATIVE(vm->allocator, name, arity, fn));
   push_stack(vm, CLOX_STRING_COPY(vm->allocator, name, strlen(name)));
   clox_table_set(&vm->globals, CLOX_AS_STRING(peek_stack(vm, 0)), peek_stack(vm, 1));
   pop_stack(vm); // name

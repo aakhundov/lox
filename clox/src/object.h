@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include "chunk.h"
+#include "error.h"
 #include "table.h"
 #include "value.h"
 
@@ -38,19 +39,25 @@ typedef struct clox_function_t {
   // "inherits" from clox_object_t
   clox_object_t object;
   // function-specific fields
-  size_t arity;
   const char *name; // NUL-terminated
+  size_t arity;
   clox_chunk_t chunk;
 } clox_function_t;
 
-typedef clox_value_t clox_native_fn_t(size_t arg_count, clox_value_t *args);
+typedef union {
+  clox_value_t value;
+  char error_msg[MAX_ERROR_LENGTH + 1];
+} clox_native_result_t;
+
+typedef bool clox_native_fn_t(size_t arg_count, clox_value_t *args, clox_native_result_t *result);
 
 typedef struct clox_native_t {
   // "inherits" from clox_object_t
   clox_object_t object;
   // native-specific fields
-  clox_native_fn_t *function;
   const char *name; // NUL-terminated
+  size_t arity;     // SIZE_MAX for variadic
+  clox_native_fn_t *function;
 } clox_native_t;
 
 #define CLOX_OBJECT_TYPE(val) (CLOX_AS_OBJECT(val)->type)
@@ -59,7 +66,7 @@ typedef struct clox_native_t {
 #define CLOX_STRING_MOVE(alloc, chars, length) CLOX_OBJECT(clox_string_move(alloc, chars, length))
 #define CLOX_FUNCTION(alloc, name, length, arity)                                                  \
   CLOX_OBJECT(clox_new_function(alloc, name, length, arity))
-#define CLOX_NATIVE(alloc, name, fn) CLOX_OBJECT(clox_new_native(alloc, name, fn))
+#define CLOX_NATIVE(alloc, name, arity, fn) CLOX_OBJECT(clox_new_native(alloc, name, arity, fn))
 
 #define CLOX_IS_STRING(val) is_object_type((val), OBJ_STRING)
 #define CLOX_IS_FUNCTION(val) is_object_type((val), OBJ_FUNCTION)
@@ -93,7 +100,8 @@ clox_function_t *clox_new_function(clox_allocator_t *alloc, const char *name, si
                                    size_t arity);
 
 // (name) is NULL-terminated C-string
-clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, clox_native_fn_t *fn);
+clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, size_t arity,
+                               clox_native_fn_t *fn);
 
 static inline bool is_object_type(clox_value_t val, clox_object_type_t type) {
   return CLOX_IS_OBJECT(val) && CLOX_OBJECT_TYPE(val) == type;

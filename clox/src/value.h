@@ -1,6 +1,7 @@
 #ifndef CLOX_VALUE_H
 #define CLOX_VALUE_H
 
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -39,6 +40,7 @@ typedef struct {
 #define CLOX_IS_BOOL(val) ((val).type == VAL_BOOL)
 #define CLOX_IS_NIL(val) ((val).type == VAL_NIL)
 #define CLOX_IS_NUMBER(val) ((val).type == VAL_NUMBER)
+#define CLOX_IS_INTEGER(val) (is_integer(val))
 #define CLOX_IS_SIZE(val) ((val).type == VAL_SIZE)
 #define CLOX_IS_OBJECT(val) ((val).type == VAL_OBJECT)
 
@@ -64,5 +66,13 @@ void clox_value_fprintf(FILE *stream, clox_value_t val);
 void clox_value_printf(clox_value_t val);
 void clox_value_repr_fprintf(FILE *stream, clox_value_t val);
 void clox_value_repr_printf(clox_value_t val);
+
+static inline bool is_integer(clox_value_t val) {
+  if (!CLOX_IS_NUMBER(val)) {
+    return false;
+  }
+  double num = CLOX_AS_NUMBER(val);
+  return isfinite(num) && trunc(num) == num;
+}
 
 #endif

@@ -833,3 +833,49 @@ UTEST_F(lox, a_native_is_a_global_like_any_other) {
   ASSERT_TRUE(run(utest_fixture, "var clock = 1; print clock;"));
   EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
 }
+
+UTEST_F(lox, a_native_called_with_the_wrong_argument_count_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "print sqrt();"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 1") != NULL);
+}
+
+UTEST_F(lox, a_native_given_the_wrong_type_reports_its_own_message) {
+  ASSERT_FALSE(run(utest_fixture, "print sqrt(\"nine\");"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "must be number") != NULL);
+}
+
+UTEST_F(lox, the_math_natives_compute_from_source) {
+  ASSERT_TRUE(run(utest_fixture, "print sqrt(9) + pow(2, 3) + abs(-1) + floor(2.7) + ceil(0.1);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(15.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_variadic_native_takes_any_number_of_arguments_from_source) {
+  ASSERT_TRUE(run(utest_fixture, "print min(3, 1, 2) + max(4) + max(5, 6);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(11.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, the_string_natives_read_a_string_literal) {
+  ASSERT_TRUE(run(utest_fixture, "print len(\"hello\") + ord(\"A\");"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(70.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, the_type_predicates_answer_about_a_value) {
+  ASSERT_TRUE(run(utest_fixture, "print is_number(1) and is_string(\"s\") and is_nil(nil);"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_seeded_random_int_stays_inside_its_bound) {
+  ASSERT_TRUE(run(utest_fixture, "seed(1); var n = random_int(4); print n >= 0 and n < 4;"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, exit_ends_the_run_as_a_runtime_error) {
+  // there is no unwinding path, so halting is failing: the statement after it
+  // never runs, and the VM is left to be torn down normally
+  ASSERT_FALSE(run(utest_fixture, "print 1; exit(); print 2;"));
+  EXPECT_EQ((size_t)1, utest_fixture->printed.count);
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_STREQ("exited", utest_fixture->errors.messages[0]);
+}

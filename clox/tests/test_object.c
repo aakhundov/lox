@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,16 +17,20 @@ struct object {
 
 // A body for the native tests. It returns its argument count, so a test can
 // tell an invocation that reached this function from one that did not.
-static clox_value_t counting_native(size_t arg_count, clox_value_t *args) {
+static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
   (void)args;
-  return CLOX_NUMBER((double)arg_count);
+
+  result->value = CLOX_NUMBER((double)arg_count);
+  return true;
 }
 
 // A second body, distinguishable from the first by its result.
-static clox_value_t nil_native(size_t arg_count, clox_value_t *args) {
+static bool nil_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
   (void)arg_count;
   (void)args;
-  return CLOX_NIL;
+
+  result->value = CLOX_NIL;
+  return true;
 }
 
 UTEST_F_SETUP(object) {
@@ -266,18 +271,30 @@ UTEST_F(object, a_function_is_truthy) {
   EXPECT_TRUE(clox_value_is_truthy(value));
 }
 
-UTEST_F(object, a_native_carries_the_name_and_the_body_it_is_given) {
-  clox_native_t *native = clox_new_native(&utest_fixture->alloc, "counting", counting_native);
+UTEST_F(object, a_native_carries_the_name_the_arity_and_the_body_it_is_given) {
+  clox_native_t *native = clox_new_native(&utest_fixture->alloc, "counting", 2, counting_native);
 
   EXPECT_STREQ("counting", native->name);
+  EXPECT_EQ((size_t)2, native->arity);
   ASSERT_TRUE(native->function == counting_native);
-  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), native->function(2, NULL));
+
+  clox_native_result_t result;
+  ASSERT_TRUE(native->function(2, NULL, &result));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), result.value);
+}
+
+UTEST_F(object, a_native_carries_a_variadic_arity_like_any_other) {
+  // SIZE_MAX is the arity the VM reads as "any number of arguments", so the
+  // object has to hold it unchanged rather than treat it as a count
+  clox_native_t *native = clox_new_native(&utest_fixture->alloc, "any", SIZE_MAX, counting_native);
+
+  EXPECT_EQ(SIZE_MAX, native->arity);
 }
 
 UTEST_F(object, a_native_does_not_keep_the_name_buffer) {
   char source[] = "named";
 
-  clox_native_t *native = clox_new_native(&utest_fixture->alloc, source, nil_native);
+  clox_native_t *native = clox_new_native(&utest_fixture->alloc, source, 0, nil_native);
   source[0] = 'f';
 
   EXPECT_STREQ("named", native->name);
@@ -285,7 +302,7 @@ UTEST_F(object, a_native_does_not_keep_the_name_buffer) {
 
 UTEST_F(object, a_native_renders_as_its_name) {
   char buffer[CLOX_TEST_MESSAGE_SIZE];
-  clox_value_t value = CLOX_NATIVE(&utest_fixture->alloc, "counting", counting_native);
+  clox_value_t value = CLOX_NATIVE(&utest_fixture->alloc, "counting", 2, counting_native);
 
   EXPECT_STREQ("<native counting>", clox_test_value_string(&buffer, value));
   EXPECT_STREQ("<native counting>", clox_test_value_repr_string(&buffer, value));
@@ -294,15 +311,15 @@ UTEST_F(object, a_native_renders_as_its_name) {
 UTEST_F(object, a_native_is_equal_only_to_itself) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
 
-  clox_value_t first = CLOX_NATIVE(alloc, "same", counting_native);
-  clox_value_t second = CLOX_NATIVE(alloc, "same", counting_native);
+  clox_value_t first = CLOX_NATIVE(alloc, "same", 2, counting_native);
+  clox_value_t second = CLOX_NATIVE(alloc, "same", 2, counting_native);
 
   EXPECT_TRUE(clox_object_equals(first, first));
   EXPECT_FALSE(clox_object_equals(first, second));
 }
 
 UTEST_F(object, a_native_is_truthy) {
-  clox_value_t value = CLOX_NATIVE(&utest_fixture->alloc, "counting", counting_native);
+  clox_value_t value = CLOX_NATIVE(&utest_fixture->alloc, "counting", 2, counting_native);
 
   EXPECT_TRUE(clox_value_is_truthy(value));
 }
@@ -312,7 +329,7 @@ UTEST_F(object, the_three_object_types_are_never_equal_to_each_other) {
 
   clox_value_t string = CLOX_STRING_COPY(alloc, "same", 4);
   clox_value_t function = CLOX_OBJECT(clox_new_function(alloc, "same", 4, 0));
-  clox_value_t native = CLOX_NATIVE(alloc, "same", counting_native);
+  clox_value_t native = CLOX_NATIVE(alloc, "same", 2, counting_native);
 
   EXPECT_FALSE(clox_value_equals(string, function));
   EXPECT_FALSE(clox_value_equals(function, native));
@@ -347,7 +364,7 @@ UTEST(object_lifetime, freeing_the_allocator_releases_functions_and_natives) {
     }
     (void)clox_write_constant(&function->chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "k", 1),
                               (clox_pos_t){.line = 1, .col = 1});
-    (void)clox_new_native(&alloc, "counting", counting_native);
+    (void)clox_new_native(&alloc, "counting", 2, counting_native);
   }
   // an unnamed function has nothing to release for its name
   (void)clox_new_function(&alloc, NULL, 0, 0);

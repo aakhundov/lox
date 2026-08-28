@@ -1,6 +1,8 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <utest.h>
@@ -157,17 +159,26 @@ static void emit_call(struct vm *fixture, size_t arg_count) {
 
 // Native bodies for the tests. Each reports something about the call it got,
 // so a test can tell what the VM handed over from what it did not.
-static clox_value_t counting_native(size_t arg_count, clox_value_t *args) {
+static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
   (void)args;
-  return CLOX_NUMBER((double)arg_count);
+
+  result->value = CLOX_NUMBER((double)arg_count);
+  return true;
 }
 
-static clox_value_t first_arg_native(size_t arg_count, clox_value_t *args) {
-  if (arg_count == 0) {
-    return CLOX_NIL;
-  }
+static bool first_arg_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+  result->value = (arg_count == 0) ? CLOX_NIL : args[0];
+  return true;
+}
 
-  return args[0];
+// A body that always fails, so a test can follow the message a native writes
+// all the way out to the error handler.
+static bool failing_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+  (void)arg_count;
+  (void)args;
+
+  (void)snprintf(result->error_msg, sizeof(result->error_msg), "native said no");
+  return false;
 }
 
 UTEST_F(vm, an_empty_chunk_returns_without_printing) {
@@ -1126,7 +1137,7 @@ UTEST_F(vm, a_run_that_overflowed_the_frames_leaves_the_vm_usable) {
 }
 
 UTEST_F(vm, a_native_call_leaves_its_result_in_place_of_the_callee) {
-  clox_vm_define_native(&utest_fixture->vm, "counting", counting_native);
+  clox_vm_define_native(&utest_fixture->vm, "counting", 2, counting_native);
 
   emit_global(utest_fixture, OP_GET_GLOBAL, "counting");
   emit_constant(utest_fixture, CLOX_NUMBER(1.0));
@@ -1140,7 +1151,7 @@ UTEST_F(vm, a_native_call_leaves_its_result_in_place_of_the_callee) {
 }
 
 UTEST_F(vm, a_native_receives_its_arguments_in_push_order) {
-  clox_vm_define_native(&utest_fixture->vm, "first_arg", first_arg_native);
+  clox_vm_define_native(&utest_fixture->vm, "first_arg", 2, first_arg_native);
 
   emit_global(utest_fixture, OP_GET_GLOBAL, "first_arg");
   emit_constant(utest_fixture, CLOX_NUMBER(10.0));
@@ -1152,8 +1163,113 @@ UTEST_F(vm, a_native_receives_its_arguments_in_push_order) {
   EXPECT_VALUE_EQ(CLOX_NUMBER(10.0), utest_fixture->printed.values[0]);
 }
 
+UTEST_F(vm, a_native_called_with_too_few_arguments_is_a_runtime_error) {
+  clox_vm_define_native(&utest_fixture->vm, "counting", 2, counting_native);
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "counting");
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_call(utest_fixture, 1);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 2") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "got 1") != NULL);
+}
+
+UTEST_F(vm, a_native_called_with_too_many_arguments_is_a_runtime_error) {
+  clox_vm_define_native(&utest_fixture->vm, "counting", 0, counting_native);
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "counting");
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_call(utest_fixture, 1);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 0") != NULL);
+}
+
+UTEST_F(vm, an_arity_mismatch_does_not_reach_the_native_body) {
+  // counting_native would report a count of its own, so a printed value here
+  // would mean the VM handed the call over before checking it
+  clox_vm_define_native(&utest_fixture->vm, "counting", 2, counting_native);
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "counting");
+  emit_call(utest_fixture, 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+}
+
+UTEST_F(vm, a_variadic_native_takes_any_number_of_arguments) {
+  clox_vm_define_native(&utest_fixture->vm, "counting", SIZE_MAX, counting_native);
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "counting");
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit_constant(utest_fixture, CLOX_NUMBER(3.0));
+  emit_call(utest_fixture, 3);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  // the count the body saw, so the arguments reached it rather than being
+  // counted by the VM alone
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_variadic_native_takes_no_arguments_at_all) {
+  clox_vm_define_native(&utest_fixture->vm, "counting", SIZE_MAX, counting_native);
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "counting");
+  emit_call(utest_fixture, 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_native_that_fails_reports_the_message_it_wrote) {
+  clox_vm_define_native(&utest_fixture->vm, "refusing", 0, failing_native);
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "refusing");
+  emit_call(utest_fixture, 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_STREQ("native said no", utest_fixture->errors.messages[0]);
+}
+
+UTEST_F(vm, a_native_that_fails_prints_nothing) {
+  clox_vm_define_native(&utest_fixture->vm, "refusing", 0, failing_native);
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "refusing");
+  emit_call(utest_fixture, 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+}
+
+UTEST_F(vm, a_run_that_a_native_failed_leaves_the_vm_usable) {
+  clox_vm_define_native(&utest_fixture->vm, "refusing", 0, failing_native);
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "refusing");
+  emit_call(utest_fixture, 0);
+  ASSERT_FALSE(interpret(utest_fixture, 1));
+
+  // the callee and its arguments were popped before the error was reported,
+  // so the next run starts on a stack the failed one did not leave behind
+  clox_function_t *next = clox_new_function(&utest_fixture->alloc, NULL, 0, 0);
+  clox_chunk_write(&next->chunk, OP_NIL, POS);
+  clox_chunk_write(&next->chunk, OP_PRINT, POS);
+  clox_chunk_write(&next->chunk, OP_NIL, POS);
+  clox_chunk_write(&next->chunk, OP_RETURN, POS);
+
+  utest_fixture->printed = (clox_test_printed_t){0};
+  EXPECT_TRUE(clox_interpret(&utest_fixture->vm, next));
+  EXPECT_EQ((size_t)1, utest_fixture->printed.count);
+}
+
 UTEST_F(vm, a_defined_native_is_a_global_holding_a_native_object) {
-  clox_vm_define_native(&utest_fixture->vm, "counting", counting_native);
+  clox_vm_define_native(&utest_fixture->vm, "counting", 2, counting_native);
 
   clox_value_t value;
   const clox_string_t *name = clox_test_intern(&utest_fixture->alloc, "counting");
@@ -1166,9 +1282,10 @@ UTEST_F(vm, a_defined_native_is_a_global_holding_a_native_object) {
 UTEST_F(vm, a_fresh_vm_defines_every_library_native_as_a_global) {
   for (size_t i = 0; i < CLOX_LIBRARY_SIZE; i++) {
     clox_value_t value;
-    const clox_string_t *name = clox_test_intern(&utest_fixture->alloc, clox_library_fn_names[i]);
+    const clox_string_t *name = clox_test_intern(&utest_fixture->alloc, clox_library_fns[i].name);
     ASSERT_TRUE(clox_table_get(&utest_fixture->vm.globals, name, &value));
     ASSERT_TRUE(CLOX_IS_NATIVE(value));
-    EXPECT_TRUE(CLOX_AS_NATIVE(value)->function == clox_library_fns[i]);
+    EXPECT_TRUE(CLOX_AS_NATIVE(value)->function == clox_library_fns[i].fn);
+    EXPECT_EQ(clox_library_fns[i].arity, CLOX_AS_NATIVE(value)->arity);
   }
 }
