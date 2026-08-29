@@ -45,6 +45,9 @@ typedef struct clox_compile_frame_t {
 } clox_compile_frame_t;
 
 typedef struct {
+  // source
+  const char *file_name;
+  char *source;
   // parser
   clox_scanner_t scanner;
   clox_token_t previous;
@@ -68,7 +71,8 @@ void clox_compiler_set_error_handler(clox_compiler_t *compiler, clox_error_handl
                                      void *error_ctx);
 void clox_compiler_reset_error_handler(clox_compiler_t *compiler);
 
-// modifies source internally, but guarantees identical content on return
-bool clox_compile(clox_compiler_t *compiler, char *source, clox_function_t **function);
+// modifies (source) internally, but guarantees identical content on return
+bool clox_compile(clox_compiler_t *compiler, const char *file_name, char *source,
+                  clox_function_t **function);
 
 #endif

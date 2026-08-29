@@ -199,6 +199,23 @@ UTEST(scanner, a_newline_starts_a_line_and_resets_the_column) {
   clox_scanner_free(&scanner);
 }
 
+UTEST(scanner, an_error_token_is_placed_where_the_offending_character_stands) {
+  // an error token is positioned like any other, so a reporter can point at
+  // the character itself and not at the start of the line
+  clox_scanner_t scanner;
+  clox_scanner_init(&scanner, "1 + @");
+
+  ASSERT_TOKEN_TYPE(TOKEN_NUMBER, clox_scan(&scanner).type);
+  ASSERT_TOKEN_TYPE(TOKEN_PLUS, clox_scan(&scanner).type);
+
+  clox_token_t unknown = clox_scan(&scanner);
+  ASSERT_TOKEN_TYPE(TOKEN_ERROR, unknown.type);
+  EXPECT_EQ((size_t)1, unknown.pos.line);
+  EXPECT_EQ((size_t)5, unknown.pos.col);
+
+  clox_scanner_free(&scanner);
+}
+
 UTEST(scanner, an_unknown_character_is_an_error_token_carrying_a_message) {
   clox_token_t token = scan_first("@");
 

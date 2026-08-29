@@ -17,14 +17,20 @@ typedef enum {
   CLOX_EX_IOERR = 74,
 } clox_exit_code_t;
 
+#define CLOX_MAX_ERROR_STACK_SIZE 16
+
 typedef struct {
   // message is guaranteed to be alive
   // only during the callback call
   const char *message;
-  clox_pos_t pos;
+  size_t num_locations;
+  clox_pos_t positions[CLOX_MAX_ERROR_STACK_SIZE];
+  const char *function_names[CLOX_MAX_ERROR_STACK_SIZE];
+  const char *file_names[CLOX_MAX_ERROR_STACK_SIZE];
+  const char *sources[CLOX_MAX_ERROR_STACK_SIZE];
 } clox_error_info_t;
 
-typedef void clox_error_handler_t(clox_error_info_t error, void *ctx);
+typedef void clox_error_handler_t(const clox_error_info_t *error, void *ctx);
 
 #define MAX_ERROR_LENGTH 1024
 

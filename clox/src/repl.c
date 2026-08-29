@@ -10,6 +10,7 @@
 
 #include <isocline.h>
 
+#include "common.h"
 #include "compiler.h"
 #include "error.h"
 #include "object.h"
@@ -23,6 +24,8 @@
 #define PROMPT_MARKER ">>> "
 #define CONTINUATION_MARKER "... "
 #define REPL_QUIT_COMMAND "q"
+#define MAX_REPL_FILE_NAME_LEN 10
+#define REPL_ERROR_LEFT_SIZE 16
 
 #define DASHES /* 256 dashes */                                                                    \
   "----------------------------------------------------------------"                               \
@@ -32,8 +35,13 @@
 
 typedef struct {
   const char *domain;
-  char *source;
 } clox_error_ctx_t;
+
+typedef struct clox_repl_prompt_t {
+  char *file_name;
+  char *source;
+  struct clox_repl_prompt_t *next;
+} clox_repl_prompt_t;
 
 typedef struct {
   clox_allocator_t allocator;
@@ -65,41 +73,59 @@ __attribute__((format(printf, 1, 2))) static int print_error(const char *restric
   return (result >= 0) ? len : -1;
 }
 
-static void print_clox_error(clox_error_info_t e, void *ctx) {
+static void print_clox_error(const clox_error_info_t *e, void *ctx) {
   clox_error_ctx_t *error_ctx = ctx;
-  assert(e.pos.line > 0);
-  assert(e.pos.col > 0);
 
-  int printed =
-      print_error("%s error [at %zu:%zu]: %s", error_ctx->domain, e.pos.line, e.pos.col, e.message);
+  int printed = print_error("%s error: %s", error_ctx->domain, e->message);
 
   if (printed <= 0) {
     return;
   }
 
-  // pos line / col are 1-based
-  size_t line = e.pos.line - 1;
-  size_t col = e.pos.col - 1;
-
-  // assume source is NUL-terminated
-  char *line_start = error_ctx->source;
-  size_t current_line = 0;
-  while (current_line < line) {
-    if (*line_start++ == '\n') {
-      current_line++;
-    }
-  }
-  char *line_end = line_start;
-  while (*line_end != '\n' && *line_end != '\0') {
-    line_end++;
-  }
-  char prev_line_end = *line_end;
-
   print_error("%.*s", printed, DASHES); // underline
-  *line_end = '\0';                     // temp modify
-  print_error("%s", line_start);        // error line
-  *line_end = prev_line_end;            // restore
-  print_error("%*s^", (int)col, "");    // spaces + caret
+
+  for (size_t i = 0; i < e->num_locations; i++) {
+    clox_pos_t pos = e->positions[i];
+    const char *fn_name = e->function_names[i];
+    const char *file_name = e->file_names[i];
+    const char *source = e->sources[i];
+
+    assert(pos.line > 0);
+    assert(pos.col > 0);
+
+    // pos line / col are 1-based
+    size_t line = pos.line - 1;
+    size_t col = pos.col - 1;
+
+    // assume source is NUL-terminated
+    // cast is safe: original source is non-const
+    char *line_start = (char *)source;
+    size_t current_line = 0;
+    while (current_line < line) {
+      if (*line_start++ == '\n') {
+        current_line++;
+      }
+    }
+    char *line_end = line_start;
+    while (*line_end != '\n' && *line_end != '\0') {
+      line_end++;
+    }
+    char prev_line_end = *line_end;
+
+    char left[REPL_ERROR_LEFT_SIZE + 1];
+    *line_end = '\0'; // temp modify
+    if (snprintf(left, sizeof(left), "%s [%zu:%zu]", file_name, pos.line, pos.col) >
+        REPL_ERROR_LEFT_SIZE) {
+      memset(left + (REPL_ERROR_LEFT_SIZE - 3), '.', 3);
+    }
+    print_error("%-*s |  %s", REPL_ERROR_LEFT_SIZE, left, line_start);
+    *line_end = prev_line_end; // restore
+    if (snprintf(left, sizeof(left), "in %s", fn_name) > REPL_ERROR_LEFT_SIZE) {
+      memset(left + (REPL_ERROR_LEFT_SIZE - 3), '.', 3);
+    }
+    print_error("%-*s |  %*s^", REPL_ERROR_LEFT_SIZE, left, (int)col, "");
+  }
+  print_error(""); // newline
 }
 
 static void clox_harness_setup(clox_harness_t *harness) {
@@ -114,19 +140,19 @@ static void clox_harness_teardown(clox_harness_t *harness) {
   clox_allocator_free(&harness->allocator);
 }
 
-static clox_exit_code_t run_code(clox_harness_t *h, char *source) {
+static clox_exit_code_t run_code(clox_harness_t *h, const char *file_name, char *source) {
   clox_exit_code_t ret = CLOX_EX_OK;
 
   clox_function_t *script;
 
-  clox_error_ctx_t compile_ctx = {.domain = "Compilation", .source = source};
+  clox_error_ctx_t compile_ctx = {.domain = "Compilation"};
   clox_compiler_set_error_handler(&h->compiler, print_clox_error, &compile_ctx);
-  if (!clox_compile(&h->compiler, source, &script)) {
+  if (!clox_compile(&h->compiler, file_name, source, &script)) {
     ret = CLOX_EX_DATAERR;
     goto out;
   }
 
-  clox_error_ctx_t interpret_ctx = {.domain = "Runtime", .source = source};
+  clox_error_ctx_t interpret_ctx = {.domain = "Runtime"};
   clox_vm_set_error_handler(&h->vm, print_clox_error, &interpret_ctx);
   if (!clox_interpret(&h->vm, script)) {
     ret = CLOX_EX_SOFTWARE;
@@ -195,8 +221,11 @@ static void run_repl(void) {
   clox_harness_t harness;
   clox_harness_setup(&harness);
 
+  size_t prompt_count = 0;
+  clox_repl_prompt_t *head = NULL;
+
   while (1) {
-    char *text = ic_readline(NULL); // alloc
+    char *text = ic_readline(NULL); // alloc text
     if (text == NULL) {
       break; // Ctrl-D, Ctrl-C or read error: exit REPL
     }
@@ -229,10 +258,34 @@ static void run_repl(void) {
         handle_repl_command(&harness, command);
       }
     } else {
-      run_code(&harness, source);
+      size_t source_len = strlen(source);
+      char *source_copy = malloc(source_len + 1); // alloc source_copy
+      memcpy(source_copy, source, source_len);
+      source_copy[source_len] = '\0';
+
+      char *file_name = malloc(MAX_REPL_FILE_NAME_LEN + 1); // alloc file_name
+      (void)snprintf(file_name, MAX_REPL_FILE_NAME_LEN + 1, "repl-%zu", ++prompt_count);
+
+      run_code(&harness, file_name, source_copy);
+
+      // save till the end of the REPL session for
+      // potential multi-source error reporting
+      clox_repl_prompt_t *new_head = malloc(sizeof *new_head); // alloc head
+      new_head->file_name = file_name;
+      new_head->source = source_copy;
+      new_head->next = head;
+      head = new_head;
     }
 
-    ic_free(text); // free
+    ic_free(text); // free text
+  }
+
+  while (head != NULL) {
+    clox_repl_prompt_t *next = head->next;
+    free(head->file_name); // free file_name
+    free(head->source);    // free source_copy
+    free(head);            // free head
+    head = next;
   }
 
   clox_harness_teardown(&harness);
@@ -279,9 +332,17 @@ static char *read_file(const char *path) {
 static void run_file(const char *path) {
   char *source = read_file(path); // alloc
 
+  // if reached, path is a valid file path
+  const char *file_name = strrchr(path, '/');
+  if (file_name == NULL) {
+    file_name = path; // path is the file name
+  } else {
+    file_name++; // skip leading /
+  }
+
   clox_harness_t harness;
   clox_harness_setup(&harness);
-  clox_exit_code_t result = run_code(&harness, source);
+  clox_exit_code_t result = run_code(&harness, file_name, source);
   clox_harness_teardown(&harness);
 
   free(source); // free

@@ -10,7 +10,6 @@
 #include <string.h>
 
 #include "chunk.h"
-#include "common.h"
 #include "debug.h"
 #include "error.h"
 #include "library.h"
@@ -88,20 +87,28 @@ __attribute__((format(printf, 2, 3))) static inline void error(const clox_vm_t *
   clox_format_error(&message, fmt, ap);
   va_end(ap);
 
-  const clox_call_frame_t *frame = &vm->frames[vm->frame_count - 1];
+  clox_error_info_t info = {
+      .message = message,
+      .num_locations = 0,
+  };
 
-  // ip is incremented before processing instruction
-  assert(frame->ip > frame->function->chunk.code); // non-zero difference
-  size_t offset = (size_t)(frame->ip - frame->function->chunk.code - 1);
-  clox_pos_t pos = frame->function->chunk.positions[offset];
+  // unwind the stack inside out
+  for (int i = (int)vm->frame_count - 1; i >= 0; i--) {
+    const clox_call_frame_t *frame = &vm->frames[i];
+    // ip is incremented before processing instruction
+    assert(frame->ip > frame->function->chunk.code); // non-zero difference
+    size_t offset = (size_t)(frame->ip - frame->function->chunk.code - 1);
+    info.positions[info.num_locations] = frame->function->chunk.positions[offset];
+    info.function_names[info.num_locations] = frame->function->name;
+    info.file_names[info.num_locations] = frame->function->file_name;
+    info.sources[info.num_locations] = frame->function->source;
+    if (++info.num_locations == CLOX_MAX_ERROR_STACK_SIZE) {
+      break;
+    }
+  }
 
   // report the error
-  vm->error_handler(
-      (clox_error_info_t){
-          .message = message,
-          .pos = pos,
-      },
-      vm->error_ctx);
+  vm->error_handler(&info, vm->error_ctx);
 }
 
 static inline clox_value_t peek_stack(const clox_vm_t *vm, size_t distance) {

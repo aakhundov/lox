@@ -85,12 +85,24 @@ void clox_test_print_fn(const clox_value_t *vals, size_t n, void *ctx) {
   }
 }
 
-void clox_test_error_handler(clox_error_info_t error, void *ctx) {
+void clox_test_error_handler(const clox_error_info_t *error, void *ctx) {
   clox_test_errors_t *errors = ctx;
   if (errors->count < CLOX_TEST_MAX_ERRORS) {
     // the message is only alive during this call
-    (void)snprintf(errors->messages[errors->count], CLOX_TEST_MESSAGE_SIZE, "%s", error.message);
-    errors->positions[errors->count] = error.pos;
+    (void)snprintf(errors->messages[errors->count], CLOX_TEST_MESSAGE_SIZE, "%s", error->message);
+
+    assert(error->num_locations <= CLOX_MAX_ERROR_STACK_SIZE);
+    errors->stack_sizes[errors->count] = error->num_locations;
+    for (size_t i = 0; i < error->num_locations; i++) {
+      clox_test_frame_t *frame = &errors->stacks[errors->count][i];
+      frame->pos = error->positions[i];
+      // a name belongs to a function object, which the run being
+      // watched may outlive no longer than the allocator holding it
+      (void)snprintf(frame->fn_name, CLOX_TEST_NAME_SIZE, "%s", error->function_names[i]);
+      (void)snprintf(frame->file_name, CLOX_TEST_NAME_SIZE, "%s", error->file_names[i]);
+      // a source is the caller's own buffer, which outlives the run
+      frame->source = error->sources[i];
+    }
   }
   errors->count++;
 }

@@ -12,6 +12,7 @@
 #define CLOX_TEST_MESSAGE_SIZE 256
 #define CLOX_TEST_MAX_PRINTED 16
 #define CLOX_TEST_MAX_ERRORS 8
+#define CLOX_TEST_NAME_SIZE 64
 
 // Collects what a run printed. One print can carry several values; they are
 // collected flat, so count is a total of values and not of print calls. count
@@ -22,19 +23,35 @@ typedef struct {
   clox_value_t values[CLOX_TEST_MAX_PRINTED];
 } clox_test_printed_t;
 
-// Collects what a run reported as errors. Messages are copied, since the
-// handler only owns its message for the duration of the call.
+// One frame of the stack an error reports: where it happened, the name of the
+// function it happened in, and the file name and source text that function was
+// compiled from.
+typedef struct {
+  clox_pos_t pos;
+  char fn_name[CLOX_TEST_NAME_SIZE];
+  char file_name[CLOX_TEST_NAME_SIZE];
+  // kept by pointer rather than copied, so a test can compare it
+  // against the very buffer it handed the compiler
+  const char *source;
+} clox_test_frame_t;
+
+// Collects what a run reported as errors. Messages, function names and file
+// names are copied, since the handler only owns what it is handed for the
+// duration of the call. Frames come in the order the error carried them, innermost first,
+// so stacks[i][0] is where error i happened and stack_sizes[i] is how far out
+// it was traced.
 typedef struct {
   size_t count;
   char messages[CLOX_TEST_MAX_ERRORS][CLOX_TEST_MESSAGE_SIZE];
-  clox_pos_t positions[CLOX_TEST_MAX_ERRORS];
+  size_t stack_sizes[CLOX_TEST_MAX_ERRORS];
+  clox_test_frame_t stacks[CLOX_TEST_MAX_ERRORS][CLOX_MAX_ERROR_STACK_SIZE];
 } clox_test_errors_t;
 
 // matches clox_print_fn_t; ctx is a clox_test_printed_t
 void clox_test_print_fn(const clox_value_t *vals, size_t n, void *ctx);
 
 // matches clox_error_handler_t; ctx is a clox_test_errors_t
-void clox_test_error_handler(clox_error_info_t error, void *ctx);
+void clox_test_error_handler(const clox_error_info_t *error, void *ctx);
 
 // Interns a NUL-terminated C string in the allocator's string table. Table
 // keys are compared by identity, so equal content must yield the same key.

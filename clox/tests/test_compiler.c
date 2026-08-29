@@ -14,6 +14,9 @@
 
 #include "support/harness.h"
 
+// The name a compilation is opened under. It is stamped on every function the
+// compiler builds and reported alongside a position, and never opened as a file.
+#define SOURCE_NAME "test.lox"
 // room for a declaration per local slot, several times over
 #define SOURCE_SIZE 8192
 // more digits than a double can hold, and fewer than the source buffer
@@ -78,7 +81,7 @@ UTEST_F_TEARDOWN(compiler) {
 static bool compile(struct compiler *fixture, const char *source) {
   (void)snprintf(fixture->source, SOURCE_SIZE, "%s", source);
 
-  return clox_compile(&fixture->compiler, fixture->source, &fixture->function);
+  return clox_compile(&fixture->compiler, SOURCE_NAME, fixture->source, &fixture->function);
 }
 
 // Renders a block declaring count locals -- "{var v0;var v1;...}" -- into
@@ -832,7 +835,8 @@ UTEST_F(compiler, a_forward_jump_too_long_to_encode_is_reported) {
   char *source = long_body_alloc("if (false) ", OVER_TWO_BYTE_JUMP);
   ASSERT_TRUE(source != NULL);
 
-  bool compiled = clox_compile(&utest_fixture->compiler, source, &utest_fixture->function);
+  bool compiled =
+      clox_compile(&utest_fixture->compiler, SOURCE_NAME, source, &utest_fixture->function);
   free(source);
 
   EXPECT_FALSE(compiled);
@@ -844,7 +848,8 @@ UTEST_F(compiler, a_backward_jump_too_long_to_encode_is_reported) {
   char *source = long_body_alloc("while (false) ", OVER_TWO_BYTE_JUMP);
   ASSERT_TRUE(source != NULL);
 
-  bool compiled = clox_compile(&utest_fixture->compiler, source, &utest_fixture->function);
+  bool compiled =
+      clox_compile(&utest_fixture->compiler, SOURCE_NAME, source, &utest_fixture->function);
   free(source);
 
   EXPECT_FALSE(compiled);
@@ -979,7 +984,7 @@ UTEST_F(compiler, a_number_too_large_to_represent_is_reported) {
   EXPECT_FALSE(compile(utest_fixture, digits));
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
-  EXPECT_EQ((size_t)1, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(compiler, an_unfinished_expression_is_reported) {
@@ -987,15 +992,15 @@ UTEST_F(compiler, an_unfinished_expression_is_reported) {
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
   EXPECT_TRUE(strlen(utest_fixture->errors.messages[0]) > 0);
-  EXPECT_EQ((size_t)1, utest_fixture->errors.positions[0].line);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stacks[0][0].pos.line);
 }
 
 UTEST_F(compiler, an_unknown_character_is_reported_where_it_stands) {
   EXPECT_FALSE(compile(utest_fixture, "1 + @"));
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
-  EXPECT_EQ((size_t)1, utest_fixture->errors.positions[0].line);
-  EXPECT_EQ((size_t)5, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)5, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(compiler, an_unclosed_group_is_reported) {
@@ -1008,14 +1013,14 @@ UTEST_F(compiler, trailing_input_after_an_expression_is_reported) {
   EXPECT_FALSE(compile(utest_fixture, "1 2"));
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
-  EXPECT_EQ((size_t)3, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)3, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(compiler, an_error_on_a_later_line_carries_that_line) {
   EXPECT_FALSE(compile(utest_fixture, "1 +\n\n@"));
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
-  EXPECT_EQ((size_t)3, utest_fixture->errors.positions[0].line);
+  EXPECT_EQ((size_t)3, utest_fixture->errors.stacks[0][0].pos.line);
 }
 
 UTEST_F(compiler, a_statement_without_its_semicolon_is_reported) {
@@ -1037,7 +1042,7 @@ UTEST_F(compiler, a_declaration_without_a_name_is_reported_where_the_name_should
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
   EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "variable name") != NULL);
-  EXPECT_EQ((size_t)5, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)5, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(compiler, assigning_to_something_that_is_not_a_variable_is_reported) {
@@ -1045,7 +1050,7 @@ UTEST_F(compiler, assigning_to_something_that_is_not_a_variable_is_reported) {
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
   EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "assignment target") != NULL);
-  EXPECT_EQ((size_t)3, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)3, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(compiler, assignment_reaching_past_a_binary_operator_is_reported) {
@@ -1054,7 +1059,7 @@ UTEST_F(compiler, assignment_reaching_past_a_binary_operator_is_reported) {
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
   EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "assignment target") != NULL);
-  EXPECT_EQ((size_t)7, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)7, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(compiler, an_error_in_a_later_statement_is_reported_too) {
@@ -1062,14 +1067,77 @@ UTEST_F(compiler, an_error_in_a_later_statement_is_reported_too) {
   EXPECT_FALSE(compile(utest_fixture, "1 + ;\n2 + ;"));
 
   ASSERT_EQ((size_t)2, utest_fixture->errors.count);
-  EXPECT_EQ((size_t)1, utest_fixture->errors.positions[0].line);
-  EXPECT_EQ((size_t)2, utest_fixture->errors.positions[1].line);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)2, utest_fixture->errors.stacks[1][0].pos.line);
 }
 
 UTEST_F(compiler, one_broken_statement_reports_one_error) {
   EXPECT_FALSE(compile(utest_fixture, "print 1 + ;"));
 
   EXPECT_EQ((size_t)1, utest_fixture->errors.count);
+}
+
+UTEST_F(compiler, a_reported_error_carries_the_name_the_source_was_compiled_under) {
+  EXPECT_FALSE(compile(utest_fixture, "1 + @"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_STREQ(SOURCE_NAME, utest_fixture->errors.stacks[0][0].file_name);
+}
+
+UTEST_F(compiler, a_reported_error_points_back_at_the_source_it_was_found_in) {
+  // the buffer handed to the compiler is the one a reporter reads the
+  // offending line out of, so the frame carries that buffer itself
+  EXPECT_FALSE(compile(utest_fixture, "1 + @"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_EQ((const char *)utest_fixture->source, utest_fixture->errors.stacks[0][0].source);
+}
+
+UTEST_F(compiler, every_function_a_run_builds_is_stamped_with_the_name_and_the_source) {
+  // a nested function reports against the same file and the same text as the
+  // script it was declared in, so a trace out through it names one source
+  // throughout
+  ASSERT_TRUE(compile(utest_fixture, "fun f() { return 1; }"));
+
+  clox_function_t *script = utest_fixture->function;
+  ASSERT_TRUE(script != NULL);
+  EXPECT_STREQ(SOURCE_NAME, script->file_name);
+  EXPECT_EQ((const char *)utest_fixture->source, script->source);
+
+  clox_function_t *declared = function_constant(&script->chunk, 0);
+  ASSERT_TRUE(declared != NULL);
+  EXPECT_STREQ(SOURCE_NAME, declared->file_name);
+  EXPECT_EQ((const char *)utest_fixture->source, declared->source);
+}
+
+UTEST_F(compiler, an_error_at_the_top_level_stands_in_the_script) {
+  EXPECT_FALSE(compile(utest_fixture, "1 + @"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, utest_fixture->errors.stacks[0][0].fn_name);
+}
+
+UTEST_F(compiler, an_error_inside_a_function_stands_in_that_function) {
+  EXPECT_FALSE(compile(utest_fixture, "fun f() { 1 + ; }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_STREQ("f", utest_fixture->errors.stacks[0][0].fn_name);
+}
+
+UTEST_F(compiler, an_error_inside_a_nested_function_stands_in_the_innermost_one) {
+  EXPECT_FALSE(compile(utest_fixture, "fun outer() { fun inner() { 1 + ; } }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_STREQ("inner", utest_fixture->errors.stacks[0][0].fn_name);
+}
+
+UTEST_F(compiler, a_compile_error_reports_the_one_place_it_was_found) {
+  // nothing is running yet, so there is no call stack to trace an error out
+  // through: a compile error stands where the parser stood and nowhere else
+  EXPECT_FALSE(compile(utest_fixture, "fun outer() { fun inner() { 1 + ; } }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stack_sizes[0]);
 }
 
 UTEST_F(compiler, a_compiler_without_a_handler_still_reports_failure) {
@@ -1098,10 +1166,12 @@ UTEST_F(compiler, a_compiled_function_carries_its_name_and_arity) {
   EXPECT_EQ((size_t)3, compiled->arity);
 }
 
-UTEST_F(compiler, the_script_itself_has_no_name) {
+UTEST_F(compiler, the_script_itself_is_named_as_a_script) {
   ASSERT_TRUE(compile(utest_fixture, "1;"));
 
-  EXPECT_TRUE(utest_fixture->function->name == NULL);
+  // the top-level frame has no declared name, and is given the standing one
+  // rather than none: an error reported in it has a function to name
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, utest_fixture->function->name);
 }
 
 UTEST_F(compiler, an_empty_function_body_returns_nil) {
@@ -1329,7 +1399,7 @@ UTEST_F(compiler, a_return_at_the_top_level_is_reported) {
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
   EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "top-level") != NULL);
-  EXPECT_EQ((size_t)1, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(compiler, a_return_in_a_top_level_block_is_reported_too) {

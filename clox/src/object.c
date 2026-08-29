@@ -51,9 +51,7 @@ static inline void free_object(clox_object_t *obj) {
   }
   case OBJ_FUNCTION: {
     clox_function_t *function = (clox_function_t *)obj;
-    if (function->name != NULL) {
-      CLOX_FREE_ARRAY(char, (void *)function->name, strlen(function->name) + 1);
-    }
+    CLOX_FREE_ARRAY(char, (void *)function->name, strlen(function->name) + 1);
     clox_chunk_free(&function->chunk);
     CLOX_FREE_OBJECT(clox_function_t, function);
     break;
@@ -142,16 +140,14 @@ clox_value_t clox_string_concat(clox_allocator_t *a, clox_value_t s1, clox_value
 }
 
 clox_function_t *clox_new_function(clox_allocator_t *alloc, const char *name, size_t length,
-                                   size_t arity) {
+                                   size_t arity, const char *file_name, const char *source) {
+  assert(name != NULL);
+
   clox_function_t *function = ALLOCATE_OBJECT(alloc, clox_function_t, OBJ_FUNCTION);
+  function->name = duplicate_cstring(name, length);
   function->arity = arity;
-
-  if (name != NULL) {
-    function->name = duplicate_cstring(name, length);
-  } else {
-    function->name = NULL;
-  }
-
+  function->file_name = file_name;
+  function->source = source;
   clox_chunk_init(&function->chunk);
 
   LOG_ALLOCATE(function);
@@ -160,6 +156,9 @@ clox_function_t *clox_new_function(clox_allocator_t *alloc, const char *name, si
 
 clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, size_t arity,
                                clox_native_fn_t *fn) {
+  assert(name != NULL);
+  assert(fn != NULL);
+
   clox_native_t *native = ALLOCATE_OBJECT(alloc, clox_native_t, OBJ_NATIVE);
   native->name = duplicate_cstring(name, strlen(name));
   native->arity = arity;
@@ -210,10 +209,10 @@ void clox_object_fprintf(FILE *stream, clox_value_t val) {
     break;
   case OBJ_FUNCTION: {
     clox_function_t *function = CLOX_AS_FUNCTION(val);
-    if (function->name != NULL) {
-      (void)fprintf(stream, "<fn %s>", function->name);
+    if (strcmp(function->name, CLOX_SCRIPT_NAME) == 0) {
+      (void)fprintf(stream, "%s", CLOX_SCRIPT_NAME);
     } else {
-      (void)fprintf(stream, "<script>");
+      (void)fprintf(stream, "<fn %s>", function->name);
     }
     break;
   }

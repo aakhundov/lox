@@ -6,12 +6,15 @@
 #include <utest.h>
 
 #include "compiler.h"
+#include "error.h"
 #include "object.h"
 #include "value.h"
 #include "vm.h"
 
 #include "support/harness.h"
 
+// The name a run is opened under, the way a file or a REPL prompt gives one
+#define SOURCE_NAME "test.lox"
 #define SOURCE_SIZE 256
 
 // Source in, printed values and reported errors out: the two halves of the
@@ -52,7 +55,7 @@ UTEST_F_TEARDOWN(lox) {
 static bool run(struct lox *fixture, const char *source) {
   (void)snprintf(fixture->source, SOURCE_SIZE, "%s", source);
 
-  if (!clox_compile(&fixture->compiler, fixture->source, &fixture->script)) {
+  if (!clox_compile(&fixture->compiler, SOURCE_NAME, fixture->source, &fixture->script)) {
     return false;
   }
 
@@ -560,7 +563,7 @@ UTEST_F(lox, a_type_error_is_reported_at_run_time) {
 
   EXPECT_EQ((size_t)0, utest_fixture->printed.count);
   ASSERT_EQ((size_t)1, utest_fixture->errors.count);
-  EXPECT_EQ((size_t)1, utest_fixture->errors.positions[0].line);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stacks[0][0].pos.line);
 }
 
 UTEST_F(lox, reading_an_undefined_variable_is_a_runtime_error) {
@@ -601,8 +604,8 @@ UTEST_F(lox, a_runtime_error_points_at_the_operator_not_the_operand) {
   EXPECT_FALSE(run(utest_fixture, "print 1 +\n2 *\n\"text\";"));
 
   ASSERT_TRUE(utest_fixture->errors.count > 0);
-  EXPECT_EQ((size_t)2, utest_fixture->errors.positions[0].line);
-  EXPECT_EQ((size_t)3, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)2, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)3, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(lox, a_function_returns_the_value_it_names) {
@@ -796,7 +799,39 @@ UTEST_F(lox, a_runtime_error_inside_a_function_points_into_its_body) {
   EXPECT_FALSE(run(utest_fixture, "fun broken() {\n  return -true;\n}\nprint broken();"));
 
   ASSERT_EQ((size_t)1, utest_fixture->errors.count);
-  EXPECT_EQ((size_t)2, utest_fixture->errors.positions[0].line);
+  EXPECT_EQ((size_t)2, utest_fixture->errors.stacks[0][0].pos.line);
+}
+
+UTEST_F(lox, a_runtime_error_inside_nested_calls_is_traced_out_to_the_script) {
+  EXPECT_FALSE(run(utest_fixture, "fun inner() {\n"
+                                  "  return -true;\n"
+                                  "}\n"
+                                  "fun outer() {\n"
+                                  "  return inner();\n"
+                                  "}\n"
+                                  "outer();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)3, utest_fixture->errors.stack_sizes[0]);
+
+  // where it broke, then each call that led there, out to the script
+  EXPECT_STREQ("inner", utest_fixture->errors.stacks[0][0].fn_name);
+  EXPECT_EQ((size_t)2, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_STREQ("outer", utest_fixture->errors.stacks[0][1].fn_name);
+  EXPECT_EQ((size_t)5, utest_fixture->errors.stacks[0][1].pos.line);
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, utest_fixture->errors.stacks[0][2].fn_name);
+  EXPECT_EQ((size_t)7, utest_fixture->errors.stacks[0][2].pos.line);
+}
+
+UTEST_F(lox, every_frame_of_a_trace_names_the_source_it_was_compiled_from) {
+  EXPECT_FALSE(run(utest_fixture, "fun broken() {\n  return -true;\n}\nbroken();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)2, utest_fixture->errors.stack_sizes[0]);
+  for (size_t i = 0; i < utest_fixture->errors.stack_sizes[0]; i++) {
+    ASSERT_STREQ(SOURCE_NAME, utest_fixture->errors.stacks[0][i].file_name);
+    ASSERT_EQ((const char *)utest_fixture->source, utest_fixture->errors.stacks[0][i].source);
+  }
 }
 
 UTEST_F(lox, recursion_without_a_base_case_is_a_runtime_error) {
@@ -804,6 +839,14 @@ UTEST_F(lox, recursion_without_a_base_case_is_a_runtime_error) {
 
   ASSERT_EQ((size_t)1, utest_fixture->errors.count);
   EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "stack overflow") != NULL);
+}
+
+UTEST_F(lox, a_trace_of_runaway_recursion_is_cut_to_what_an_error_can_carry) {
+  // the call stack is deeper than the frames an error has room for
+  EXPECT_FALSE(run(utest_fixture, "fun forever() { return forever(); } forever();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_EQ((size_t)CLOX_MAX_ERROR_STACK_SIZE, utest_fixture->errors.stack_sizes[0]);
 }
 
 UTEST_F(lox, a_run_that_overflowed_the_frames_leaves_the_interpreter_usable) {

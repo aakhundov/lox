@@ -35,6 +35,8 @@ typedef struct clox_string_t {
   clox_hash_t hash;  // fixed per object
 } clox_string_t;
 
+#define CLOX_SCRIPT_NAME "<script>"
+
 typedef struct clox_function_t {
   // "inherits" from clox_object_t
   clox_object_t object;
@@ -42,6 +44,8 @@ typedef struct clox_function_t {
   const char *name; // NUL-terminated
   size_t arity;
   clox_chunk_t chunk;
+  const char *file_name; // not owned
+  const char *source;    // not owned
 } clox_function_t;
 
 typedef union {
@@ -64,8 +68,8 @@ typedef struct clox_native_t {
 
 #define CLOX_STRING_COPY(alloc, chars, length) CLOX_OBJECT(clox_string_copy(alloc, chars, length))
 #define CLOX_STRING_MOVE(alloc, chars, length) CLOX_OBJECT(clox_string_move(alloc, chars, length))
-#define CLOX_FUNCTION(alloc, name, length, arity)                                                  \
-  CLOX_OBJECT(clox_new_function(alloc, name, length, arity))
+#define CLOX_FUNCTION(alloc, name, length, arity, file_name, source)                               \
+  CLOX_OBJECT(clox_new_function(alloc, name, length, arity, file_name, source))
 #define CLOX_NATIVE(alloc, name, arity, fn) CLOX_OBJECT(clox_new_native(alloc, name, arity, fn))
 
 #define CLOX_IS_STRING(val) is_object_type((val), OBJ_STRING)
@@ -97,7 +101,7 @@ clox_value_t clox_string_concat(clox_allocator_t *alloc, clox_value_t s1, clox_v
 // (name) should be NULL for script
 // (length) is the number of chars in (name) not counting NUL
 clox_function_t *clox_new_function(clox_allocator_t *alloc, const char *name, size_t length,
-                                   size_t arity);
+                                   size_t arity, const char *file_name, const char *source);
 
 // (name) is NULL-terminated C-string
 clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, size_t arity,

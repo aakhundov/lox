@@ -11,6 +11,12 @@
 
 #include "support/harness.h"
 
+// What a function is compiled under. A function carries both for a reporter to
+// name and quote the code it holds; nothing here reports an error, so the text
+// is empty and is never read through.
+#define FILE_NAME "test.lox"
+#define SOURCE ""
+
 struct object {
   clox_allocator_t alloc;
 };
@@ -173,14 +179,16 @@ UTEST_F(object, an_empty_string_reprs_as_a_bare_pair_of_quotes) {
 }
 
 UTEST_F(object, a_function_carries_the_name_it_is_given) {
-  clox_function_t *function = clox_new_function(&utest_fixture->alloc, "named", 5, 0);
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE);
 
   ASSERT_TRUE(function->name != NULL);
   EXPECT_STREQ("named", function->name);
 }
 
 UTEST_F(object, a_function_takes_only_the_name_length_it_is_given) {
-  clox_function_t *function = clox_new_function(&utest_fixture->alloc, "namedly", 5, 0);
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "namedly", 5, 0, FILE_NAME, SOURCE);
 
   EXPECT_STREQ("named", function->name);
 }
@@ -188,33 +196,72 @@ UTEST_F(object, a_function_takes_only_the_name_length_it_is_given) {
 UTEST_F(object, a_function_does_not_keep_the_name_buffer) {
   char source[] = "named";
 
-  clox_function_t *function = clox_new_function(&utest_fixture->alloc, source, 5, 0);
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, source, 5, 0, FILE_NAME, SOURCE);
   source[0] = 'f';
 
   EXPECT_STREQ("named", function->name);
 }
 
-UTEST_F(object, a_function_without_a_name_is_the_script) {
-  clox_function_t *script = clox_new_function(&utest_fixture->alloc, NULL, 0, 0);
+UTEST_F(object, the_script_is_a_function_named_like_one) {
+  // the script has no name of its own in the source, so it is given the one
+  // standing name every part of the interpreter recognises it by
+  clox_function_t *script = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
+                                              strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
 
-  EXPECT_TRUE(script->name == NULL);
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, script->name);
+}
+
+UTEST_F(object, a_function_of_no_name_at_all_still_owns_an_empty_one) {
+  // a name is duplicated whatever its length, so no function carries a null
+  // one and whoever reports a name need not check for it
+  clox_function_t *function = clox_new_function(&utest_fixture->alloc, "", 0, 0, FILE_NAME, SOURCE);
+
+  ASSERT_TRUE(function->name != NULL);
+  EXPECT_STREQ("", function->name);
+}
+
+UTEST_F(object, a_function_carries_the_file_name_and_source_it_is_given) {
+  // a position holds a line and a column only, so it is the function that says
+  // which file and which text those count in
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE);
+
+  EXPECT_STREQ(FILE_NAME, function->file_name);
+  EXPECT_EQ((const char *)SOURCE, function->source);
+}
+
+UTEST_F(object, a_function_does_not_copy_the_file_name_or_the_source) {
+  // unlike its name, neither is owned: both are borrowed from whoever compiled
+  // the function and outlive it, so the buffers are kept as they were handed in
+  char file_name[] = "other.lox";
+  char source[] = "1 + 2";
+
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 0, file_name, source);
+
+  EXPECT_EQ((const char *)file_name, function->file_name);
+  EXPECT_EQ((const char *)source, function->source);
 }
 
 UTEST_F(object, a_function_keeps_the_arity_it_is_given) {
-  clox_function_t *function = clox_new_function(&utest_fixture->alloc, "three", 5, 3);
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "three", 5, 3, FILE_NAME, SOURCE);
 
   EXPECT_EQ((size_t)3, function->arity);
 }
 
 UTEST_F(object, a_new_function_starts_with_an_empty_chunk) {
-  clox_function_t *function = clox_new_function(&utest_fixture->alloc, "empty", 5, 0);
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "empty", 5, 0, FILE_NAME, SOURCE);
 
   EXPECT_EQ((size_t)0, function->chunk.length);
   EXPECT_EQ((size_t)0, function->chunk.constants.length);
 }
 
 UTEST_F(object, a_function_owns_what_is_written_into_its_chunk) {
-  clox_function_t *function = clox_new_function(&utest_fixture->alloc, "body", 4, 0);
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "body", 4, 0, FILE_NAME, SOURCE);
 
   // the chunk goes with the object: LSan reports it if it does not
   clox_chunk_write(&function->chunk, OP_NIL, (clox_pos_t){.line = 1, .col = 1});
@@ -227,8 +274,8 @@ UTEST_F(object, functions_are_not_interned_the_way_strings_are) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
 
   // two declarations of one name are two functions, however alike
-  clox_function_t *first = clox_new_function(alloc, "same", 4, 0);
-  clox_function_t *second = clox_new_function(alloc, "same", 4, 0);
+  clox_function_t *first = clox_new_function(alloc, "same", 4, 0, FILE_NAME, SOURCE);
+  clox_function_t *second = clox_new_function(alloc, "same", 4, 0, FILE_NAME, SOURCE);
 
   EXPECT_NE(first, second);
 }
@@ -236,8 +283,8 @@ UTEST_F(object, functions_are_not_interned_the_way_strings_are) {
 UTEST_F(object, a_function_is_equal_only_to_itself) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
 
-  clox_value_t first = CLOX_OBJECT(clox_new_function(alloc, "same", 4, 0));
-  clox_value_t second = CLOX_OBJECT(clox_new_function(alloc, "same", 4, 0));
+  clox_value_t first = CLOX_OBJECT(clox_new_function(alloc, "same", 4, 0, FILE_NAME, SOURCE));
+  clox_value_t second = CLOX_OBJECT(clox_new_function(alloc, "same", 4, 0, FILE_NAME, SOURCE));
 
   EXPECT_TRUE(clox_object_equals(first, first));
   EXPECT_FALSE(clox_object_equals(first, second));
@@ -245,28 +292,33 @@ UTEST_F(object, a_function_is_equal_only_to_itself) {
 
 UTEST_F(object, a_function_renders_as_its_name) {
   char buffer[CLOX_TEST_MESSAGE_SIZE];
-  clox_value_t value = CLOX_OBJECT(clox_new_function(&utest_fixture->alloc, "named", 5, 0));
+  clox_value_t value =
+      CLOX_OBJECT(clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE));
 
   EXPECT_STREQ("<fn named>", clox_test_value_string(&buffer, value));
 }
 
-UTEST_F(object, a_function_without_a_name_renders_as_the_script) {
+UTEST_F(object, the_script_renders_as_itself_and_not_as_a_named_function) {
   char buffer[CLOX_TEST_MESSAGE_SIZE];
-  clox_value_t value = CLOX_OBJECT(clox_new_function(&utest_fixture->alloc, NULL, 0, 0));
+  clox_value_t value = CLOX_OBJECT(clox_new_function(
+      &utest_fixture->alloc, CLOX_SCRIPT_NAME, strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE));
 
-  EXPECT_STREQ("<script>", clox_test_value_string(&buffer, value));
+  // the script's name is a rendering already: it takes no "<fn ...>" around it
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, clox_test_value_string(&buffer, value));
 }
 
 UTEST_F(object, a_function_reprs_the_way_it_renders) {
   char buffer[CLOX_TEST_MESSAGE_SIZE];
-  clox_value_t value = CLOX_OBJECT(clox_new_function(&utest_fixture->alloc, "named", 5, 0));
+  clox_value_t value =
+      CLOX_OBJECT(clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE));
 
   // unlike a string, a function has no quoted form to fall back on
   EXPECT_STREQ("<fn named>", clox_test_value_repr_string(&buffer, value));
 }
 
 UTEST_F(object, a_function_is_truthy) {
-  clox_value_t value = CLOX_OBJECT(clox_new_function(&utest_fixture->alloc, "named", 5, 0));
+  clox_value_t value =
+      CLOX_OBJECT(clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE));
 
   EXPECT_TRUE(clox_value_is_truthy(value));
 }
@@ -328,7 +380,7 @@ UTEST_F(object, the_three_object_types_are_never_equal_to_each_other) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
 
   clox_value_t string = CLOX_STRING_COPY(alloc, "same", 4);
-  clox_value_t function = CLOX_OBJECT(clox_new_function(alloc, "same", 4, 0));
+  clox_value_t function = CLOX_OBJECT(clox_new_function(alloc, "same", 4, 0, FILE_NAME, SOURCE));
   clox_value_t native = CLOX_NATIVE(alloc, "same", 2, counting_native);
 
   EXPECT_FALSE(clox_value_equals(string, function));
@@ -358,7 +410,7 @@ UTEST(object_lifetime, freeing_the_allocator_releases_functions_and_natives) {
   clox_allocator_init(&alloc);
 
   for (size_t i = 0; i < 32; i++) {
-    clox_function_t *function = clox_new_function(&alloc, "named", 5, 0);
+    clox_function_t *function = clox_new_function(&alloc, "named", 5, 0, FILE_NAME, SOURCE);
     for (size_t j = 0; j < 64; j++) {
       clox_chunk_write(&function->chunk, OP_NIL, (clox_pos_t){.line = 1, .col = 1});
     }
@@ -366,8 +418,8 @@ UTEST(object_lifetime, freeing_the_allocator_releases_functions_and_natives) {
                               (clox_pos_t){.line = 1, .col = 1});
     (void)clox_new_native(&alloc, "counting", 2, counting_native);
   }
-  // an unnamed function has nothing to release for its name
-  (void)clox_new_function(&alloc, NULL, 0, 0);
+  // a name of no length is still a buffer of its own to release
+  (void)clox_new_function(&alloc, "", 0, 0, FILE_NAME, SOURCE);
 
   clox_allocator_free(&alloc);
 }

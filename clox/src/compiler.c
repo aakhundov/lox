@@ -46,9 +46,13 @@ error(clox_compiler_t *c, const clox_token_t *token, const char *fmt, ...) {
 
     // report the error
     c->error_handler(
-        (clox_error_info_t){
+        &(clox_error_info_t){
             .message = message,
-            .pos = token->pos,
+            .num_locations = 1,
+            .positions = {token->pos},
+            .function_names = {c->frame->function->name},
+            .file_names = {c->frame->function->file_name},
+            .sources = {c->frame->function->source},
         },
         c->error_ctx);
   }
@@ -229,13 +233,18 @@ static inline void emit_return(const clox_compiler_t *c, const clox_token_t *tok
 }
 
 static inline void start_frame(clox_compiler_t *c, clox_compile_frame_t *frame,
-                               clox_function_type_t type, const char *name, size_t length) {
+                               clox_function_type_t type, const char *fn_name,
+                               size_t fn_name_length) {
+  assert(fn_name != NULL);
+  assert(fn_name_length > 0);
+
   frame->local_count = 0;
   frame->scope_depth = 0;
   frame->loop = (clox_loop_state_t){0};
 
   // arity set to zero here may be incremented in parameter parsing
-  frame->function = clox_new_function(c->allocator, name, length, 0);
+  frame->function =
+      clox_new_function(c->allocator, fn_name, fn_name_length, 0, c->file_name, c->source);
   frame->type = type;
 
   // first local in a frame is reserved for the function object itself
@@ -1013,9 +1022,12 @@ void clox_compiler_reset_error_handler(clox_compiler_t *compiler) {
   compiler->error_ctx = NULL;
 }
 
-bool clox_compile(clox_compiler_t *compiler, char *source, clox_function_t **function) {
+bool clox_compile(clox_compiler_t *compiler, const char *file_name, char *source,
+                  clox_function_t **function) {
   // init parser
   clox_scanner_init(&compiler->scanner, source);
+  compiler->file_name = file_name;
+  compiler->source = source;
   compiler->had_error = false;
   compiler->panic_mode = false;
   compiler->parser_depth = 0;
@@ -1025,7 +1037,7 @@ bool clox_compile(clox_compiler_t *compiler, char *source, clox_function_t **fun
   compiler->frame = NULL;
 
   clox_compile_frame_t script;
-  start_frame(compiler, &script, FUNCTION_SCRIPT, NULL, 0);
+  start_frame(compiler, &script, FUNCTION_SCRIPT, CLOX_SCRIPT_NAME, strlen(CLOX_SCRIPT_NAME));
   advance(compiler); // scan the first token
   while (!match(compiler, TOKEN_EOF)) {
     // sequence of declaration statements

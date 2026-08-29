@@ -9,6 +9,7 @@
 
 #include "chunk.h"
 #include "common.h"
+#include "error.h"
 #include "library.h"
 #include "object.h"
 #include "table.h"
@@ -34,6 +35,12 @@
 #define WIDE_JUMP_UNITS ((size_t)171)
 #define WIDE_JUMP_OFFSET (WIDE_JUMP_UNITS * WIDE_JUMP_UNIT)
 
+// What every function a test builds is compiled under. The VM carries both
+// into what it reports without ever reading through them, so the name and the
+// text here are only what a reporter would be handed.
+#define FILE_NAME "test.lox"
+#define SOURCE ""
+
 static const clox_pos_t POS = {.line = 1, .col = 1};
 
 struct vm {
@@ -47,7 +54,8 @@ struct vm {
 UTEST_F_SETUP(vm) {
   clox_allocator_init(&utest_fixture->alloc);
   clox_vm_init(&utest_fixture->vm, &utest_fixture->alloc);
-  utest_fixture->function = clox_new_function(&utest_fixture->alloc, NULL, 0, 0);
+  utest_fixture->function = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
+                                              strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
   utest_fixture->printed = (clox_test_printed_t){0};
   utest_fixture->errors = (clox_test_errors_t){0};
   clox_vm_set_print_fn(&utest_fixture->vm, clox_test_print_fn, &utest_fixture->printed);
@@ -135,7 +143,7 @@ static bool interpret(struct vm *fixture, size_t left_on_stack) {
 // fixture's own function goes through the three helpers here, so a call is
 // always a real second chunk and not the same one re-entered.
 static clox_function_t *make_callee(struct vm *fixture, const char *name, size_t arity) {
-  return clox_new_function(&fixture->alloc, name, strlen(name), arity);
+  return clox_new_function(&fixture->alloc, name, strlen(name), arity, FILE_NAME, SOURCE);
 }
 
 static void emit_to(clox_function_t *callee, clox_byte_t byte) {
@@ -538,7 +546,8 @@ UTEST_F(vm, a_global_outlives_the_run_that_defined_it) {
   emit_global(utest_fixture, OP_DEF_GLOBAL, "kept");
   ASSERT_TRUE(interpret(utest_fixture, 0));
 
-  clox_function_t *next = clox_new_function(&utest_fixture->alloc, NULL, 0, 0);
+  clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
+                                            strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
   (void)clox_write_constant(&next->chunk, OP_GET_GLOBAL,
                             CLOX_STRING_COPY(&utest_fixture->alloc, "kept", 4), POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
@@ -737,7 +746,8 @@ UTEST_F(vm, a_failed_assignment_leaves_the_global_undefined) {
   emit_global(utest_fixture, OP_SET_GLOBAL, "missing");
   ASSERT_FALSE(interpret(utest_fixture, 1));
 
-  clox_function_t *next = clox_new_function(&utest_fixture->alloc, NULL, 0, 0);
+  clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
+                                            strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
   (void)clox_write_constant(&next->chunk, OP_GET_GLOBAL,
                             CLOX_STRING_COPY(&utest_fixture->alloc, "missing", 7), POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
@@ -794,8 +804,8 @@ UTEST_F(vm, a_runtime_error_carries_the_position_of_its_instruction) {
 
   EXPECT_FALSE(clox_interpret(&utest_fixture->vm, utest_fixture->function));
   ASSERT_EQ((size_t)1, utest_fixture->errors.count);
-  EXPECT_EQ((size_t)7, utest_fixture->errors.positions[0].line);
-  EXPECT_EQ((size_t)3, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)7, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)3, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(vm, overflowing_the_stack_is_a_runtime_error) {
@@ -831,7 +841,8 @@ UTEST_F(vm, a_run_that_failed_leaves_the_vm_usable) {
   emit(utest_fixture, OP_NEGATE);
   ASSERT_FALSE(interpret(utest_fixture, 1));
 
-  clox_function_t *next = clox_new_function(&utest_fixture->alloc, NULL, 0, 0);
+  clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
+                                            strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
@@ -1035,8 +1046,8 @@ UTEST_F(vm, an_arity_error_points_at_the_call_and_not_at_the_callee) {
 
   EXPECT_FALSE(interpret(utest_fixture, 1));
   ASSERT_EQ((size_t)1, utest_fixture->errors.count);
-  EXPECT_EQ((size_t)4, utest_fixture->errors.positions[0].line);
-  EXPECT_EQ((size_t)2, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)4, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)2, utest_fixture->errors.stacks[0][0].pos.col);
 }
 
 UTEST_F(vm, a_runtime_error_inside_a_call_carries_the_callee_position) {
@@ -1049,8 +1060,95 @@ UTEST_F(vm, a_runtime_error_inside_a_call_carries_the_callee_position) {
 
   EXPECT_FALSE(interpret(utest_fixture, 1));
   ASSERT_EQ((size_t)1, utest_fixture->errors.count);
-  EXPECT_EQ((size_t)8, utest_fixture->errors.positions[0].line);
-  EXPECT_EQ((size_t)5, utest_fixture->errors.positions[0].col);
+  EXPECT_EQ((size_t)8, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)5, utest_fixture->errors.stacks[0][0].pos.col);
+}
+
+UTEST_F(vm, a_runtime_error_outside_any_call_reports_the_frame_it_stands_in) {
+  emit(utest_fixture, OP_TRUE);
+  emit(utest_fixture, OP_NEGATE);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)1, utest_fixture->errors.stack_sizes[0]);
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, utest_fixture->errors.stacks[0][0].fn_name);
+}
+
+UTEST_F(vm, a_reported_location_carries_what_the_function_was_compiled_under) {
+  // the position says where, and the function it stands in says in which file
+  // and in which text
+  emit(utest_fixture, OP_TRUE);
+  emit(utest_fixture, OP_NEGATE);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)1, utest_fixture->errors.stack_sizes[0]);
+  EXPECT_STREQ(FILE_NAME, utest_fixture->errors.stacks[0][0].file_name);
+  EXPECT_EQ((const char *)SOURCE, utest_fixture->errors.stacks[0][0].source);
+}
+
+UTEST_F(vm, a_runtime_error_inside_a_call_is_traced_out_through_its_caller) {
+  clox_function_t *callee = make_callee(utest_fixture, "broken", 0);
+  clox_chunk_write(&callee->chunk, OP_TRUE, (clox_pos_t){.line = 8, .col = 1});
+  clox_chunk_write(&callee->chunk, OP_NEGATE, (clox_pos_t){.line = 8, .col = 5});
+
+  emit_callee(utest_fixture, callee);
+  clox_chunk_write(&utest_fixture->function->chunk, OP_CALL, (clox_pos_t){.line = 3, .col = 2});
+  clox_chunk_write(&utest_fixture->function->chunk, 0, (clox_pos_t){.line = 3, .col = 2});
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)2, utest_fixture->errors.stack_sizes[0]);
+
+  // innermost first: where it broke, then the call that led there
+  EXPECT_STREQ("broken", utest_fixture->errors.stacks[0][0].fn_name);
+  EXPECT_EQ((size_t)8, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)5, utest_fixture->errors.stacks[0][0].pos.col);
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, utest_fixture->errors.stacks[0][1].fn_name);
+  EXPECT_EQ((size_t)3, utest_fixture->errors.stacks[0][1].pos.line);
+  EXPECT_EQ((size_t)2, utest_fixture->errors.stacks[0][1].pos.col);
+}
+
+UTEST_F(vm, a_caller_frame_is_traced_at_its_call_and_not_at_what_it_ran_next) {
+  clox_function_t *callee = make_callee(utest_fixture, "broken", 0);
+  emit_to(callee, OP_TRUE);
+  emit_to(callee, OP_NEGATE);
+
+  // the caller runs on past the call once it returns, so the position traced
+  // for it has to be the call it is suspended at and not where it resumes
+  emit_callee(utest_fixture, callee);
+  clox_chunk_write(&utest_fixture->function->chunk, OP_CALL, (clox_pos_t){.line = 3, .col = 2});
+  clox_chunk_write(&utest_fixture->function->chunk, 0, (clox_pos_t){.line = 3, .col = 2});
+  clox_chunk_write(&utest_fixture->function->chunk, OP_POP, (clox_pos_t){.line = 4, .col = 1});
+
+  EXPECT_FALSE(interpret(utest_fixture, 0));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)2, utest_fixture->errors.stack_sizes[0]);
+  EXPECT_EQ((size_t)3, utest_fixture->errors.stacks[0][1].pos.line);
+  EXPECT_EQ((size_t)2, utest_fixture->errors.stacks[0][1].pos.col);
+}
+
+UTEST_F(vm, a_stack_deeper_than_an_error_can_carry_is_cut_to_its_innermost_frames) {
+  // a function that calls itself: it overflows the call stack, which is
+  // deeper than the frames an error has room for
+  clox_function_t *loops = make_callee(utest_fixture, "loops", 0);
+  emit_constant_to(loops, CLOX_OBJECT(loops));
+  emit_to(loops, OP_CALL);
+  emit_to(loops, 0);
+  emit_to(loops, OP_RETURN);
+
+  emit_callee(utest_fixture, loops);
+  emit_call(utest_fixture, 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)CLOX_MAX_ERROR_STACK_SIZE, utest_fixture->errors.stack_sizes[0]);
+
+  // what is kept is the innermost slice, so the script that started
+  // the run is among the frames left out
+  for (size_t i = 0; i < CLOX_MAX_ERROR_STACK_SIZE; i++) {
+    ASSERT_STREQ("loops", utest_fixture->errors.stacks[0][i].fn_name);
+  }
 }
 
 UTEST_F(vm, calling_a_number_is_a_runtime_error) {
@@ -1125,7 +1223,8 @@ UTEST_F(vm, a_run_that_overflowed_the_frames_leaves_the_vm_usable) {
   ASSERT_FALSE(interpret(utest_fixture, 1));
 
   // the frames the failed run left behind are not the next run's
-  clox_function_t *next = clox_new_function(&utest_fixture->alloc, NULL, 0, 0);
+  clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
+                                            strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
@@ -1257,7 +1356,8 @@ UTEST_F(vm, a_run_that_a_native_failed_leaves_the_vm_usable) {
 
   // the callee and its arguments were popped before the error was reported,
   // so the next run starts on a stack the failed one did not leave behind
-  clox_function_t *next = clox_new_function(&utest_fixture->alloc, NULL, 0, 0);
+  clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
+                                            strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
