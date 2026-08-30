@@ -650,12 +650,14 @@ UTEST_F(lox, a_function_can_be_handed_to_another_function) {
   EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
 }
 
-UTEST_F(lox, a_function_prints_as_itself) {
+UTEST_F(lox, a_function_prints_as_the_closure_it_reaches_a_value_as) {
   ASSERT_TRUE(run(utest_fixture, "fun named() {} print named;"));
 
+  // a function only ever reaches the stack wrapped in a closure, so the value
+  // a name stands for is that closure, and the function is under it
   clox_value_t printed = only_printed(utest_fixture);
-  ASSERT_TRUE(CLOX_IS_FUNCTION(printed));
-  EXPECT_STREQ("named", CLOX_AS_FUNCTION(printed)->name);
+  ASSERT_TRUE(CLOX_IS_CLOSURE(printed));
+  EXPECT_STREQ("named", CLOX_AS_CLOSURE(printed)->function->name);
 }
 
 UTEST_F(lox, recursion_runs_down_to_its_base_case) {
@@ -738,6 +740,180 @@ UTEST_F(lox, a_nested_function_is_reached_through_the_one_around_it) {
   ASSERT_TRUE(run(utest_fixture, "fun outer() { fun inner() { return 5; } return inner() + 1; }"
                                  "print outer();"));
   EXPECT_VALUE_EQ(CLOX_NUMBER(6.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_reads_a_local_of_the_function_around_it) {
+  ASSERT_TRUE(run(utest_fixture,
+                  "fun outer() { var x = 7; fun inner() { return x; } return inner(); }"
+                  "print outer();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(7.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_writes_a_local_of_the_function_around_it) {
+  ASSERT_TRUE(run(utest_fixture, "fun outer() { var x = 1; fun bump() { x = x + 1; }"
+                                 "  bump(); bump(); return x; }"
+                                 "print outer();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_reads_a_parameter_of_the_function_around_it) {
+  ASSERT_TRUE(run(utest_fixture, "fun outer(p) { fun inner() { return p * 2; } return inner(); }"
+                                 "print outer(4);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(8.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_capture_reaches_through_a_function_that_does_not_name_it) {
+  ASSERT_TRUE(run(utest_fixture, "fun outer() { var x = 1;"
+                                 "  fun mid() { fun inner() { return x; } return inner; }"
+                                 "  return mid(); }"
+                                 "print outer()();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_returned_function_still_reads_what_it_captured) {
+  // the local it reads is gone by the time it runs, and the call in between
+  // has since stood on those very slots: the value has to have been moved off
+  // the stack when the frame holding it returned
+  ASSERT_TRUE(run(utest_fixture,
+                  "fun outer() { var x = 5; fun inner() { return x; } return inner; }"
+                  "var f = outer();"
+                  "fun churn() { var p = 7; return p; } churn();"
+                  "print f();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(5.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_closure_keeps_the_state_it_captured_between_calls) {
+  ASSERT_TRUE(run(utest_fixture, "fun make() { var i = 0; fun count() { i = i + 1; return i; }"
+                                 "  return count; }"
+                                 "var c = make(); print c(); print c();"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, two_closures_from_two_calls_capture_two_separate_variables) {
+  // the two calls stand on the same slots one after the other, so the second
+  // would overwrite what the first captured had that not been closed off
+  ASSERT_TRUE(run(utest_fixture, "fun make(n) { fun get() { return n; } return get; }"
+                                 "var a = make(1); var b = make(2);"
+                                 "print a(); print b();"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, two_counters_count_on_their_own) {
+  ASSERT_TRUE(run(utest_fixture, "fun make() { var i = 0; fun count() { i = i + 1; return i; }"
+                                 "  return count; }"
+                                 "var a = make(); var b = make(); a(); print a(); print b();"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, two_closures_over_one_variable_see_each_others_writes) {
+  ASSERT_TRUE(run(utest_fixture, "var get; var set;"
+                                 "{ var x = 1; fun g() { return x; } fun s() { x = 9; }"
+                                 "  get = g; set = s; }"
+                                 "set(); print get();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(9.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_closure_outlives_the_block_its_capture_stood_in) {
+  ASSERT_TRUE(run(utest_fixture, "var f;"
+                                 "{ var x = 3; fun inner() { return x; } f = inner; }"
+                                 "print f();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_local_declared_beside_a_captured_one_is_still_dropped) {
+  // the scope closes the capture and pops the rest: getting either wrong
+  // leaves the stack out of step, and the value read back would be another's
+  ASSERT_TRUE(run(utest_fixture, "var f;"
+                                 "{ var x = 3; var y = 4; fun inner() { return x; } f = inner; }"
+                                 "print f();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_body_local_is_captured_afresh_on_every_turn_of_a_loop) {
+  ASSERT_TRUE(run(utest_fixture, "var a; var b;"
+                                 "for (var i = 0; i < 2; i = i + 1) { var j = i;"
+                                 "  fun f() { return j; } if (i == 0) { a = f; } else { b = f; } }"
+                                 "print a(); print b();"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, the_variable_a_for_loop_declares_is_one_slot_every_turn_shares) {
+  // the loop variable is declared once, outside the body, so every closure
+  // made in the body captures that one slot and reads what it last held
+  ASSERT_TRUE(run(utest_fixture, "var a; var b;"
+                                 "for (var i = 0; i < 2; i = i + 1) {"
+                                 "  fun f() { return i; } if (i == 0) { a = f; } else { b = f; } }"
+                                 "print a(); print b();"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_break_out_of_a_loop_leaves_its_captures_readable) {
+  // break pops the scope itself rather than running its end, so a capture
+  // taken under it has to be closed on that path too
+  ASSERT_TRUE(run(utest_fixture, "var f;"
+                                 "while (true) { var x = 6; fun g() { return x; } f = g; break; }"
+                                 "print f();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(6.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_continue_round_a_loop_leaves_its_captures_readable) {
+  ASSERT_TRUE(run(utest_fixture, "var f;"
+                                 "for (var i = 0; i < 2; i = i + 1) {"
+                                 "  var x = i; fun g() { return x; } f = g; continue; }"
+                                 "print f();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_local_function_calls_itself_by_its_own_name) {
+  // the name is a local of the frame around it, so the recursive call reaches
+  // it as a capture rather than as a global
+  ASSERT_TRUE(run(utest_fixture,
+                  "fun outer() {"
+                  "  fun down(n) { if (n <= 0) { return 0; } return down(n - 1) + 1; }"
+                  "  return down(4); }"
+                  "print outer();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(4.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_closure_handed_to_a_function_keeps_what_it_captured) {
+  ASSERT_TRUE(run(utest_fixture, "fun apply(f) { return f(); }"
+                                 "fun make() { var x = 8; fun get() { return x; } return get; }"
+                                 "print apply(make());"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(8.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_closure_survives_into_the_next_run) {
+  // the capture is closed by the time the run ends, so nothing of it points
+  // into the stack the next run starts over
+  ASSERT_TRUE(run(utest_fixture, "var f;"
+                                 "{ var x = 2; fun g() { x = x + 1; return x; } f = g; }"));
+  ASSERT_EQ((size_t)0, utest_fixture->printed.count);
+
+  ASSERT_TRUE(run(utest_fixture, "print f(); print f();"));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(4.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_closure_is_truthy) {
+  ASSERT_TRUE(run(utest_fixture, "var f; { var x = 1; fun g() { return x; } f = g; }"
+                                 "if (f) { print 1; } else { print 2; }"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
 }
 
 UTEST_F(lox, a_global_function_survives_into_the_next_run) {

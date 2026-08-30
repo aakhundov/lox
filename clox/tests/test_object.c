@@ -221,6 +221,15 @@ UTEST_F(object, a_function_of_no_name_at_all_still_owns_an_empty_one) {
   EXPECT_STREQ("", function->name);
 }
 
+UTEST_F(object, a_function_starts_out_capturing_nothing) {
+  // the count is raised by the compiler as it resolves upvalues, and it is
+  // what sizes the array a closure over this function allocates
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE);
+
+  EXPECT_EQ((size_t)0, function->upvalue_count);
+}
+
 UTEST_F(object, a_function_carries_the_file_name_and_source_it_is_given) {
   // a position holds a line and a column only, so it is the function that says
   // which file and which text those count in
@@ -356,8 +365,8 @@ UTEST_F(object, a_native_renders_as_its_name) {
   char buffer[CLOX_TEST_MESSAGE_SIZE];
   clox_value_t value = CLOX_NATIVE(&utest_fixture->alloc, "counting", 2, counting_native);
 
-  EXPECT_STREQ("<native counting>", clox_test_value_string(&buffer, value));
-  EXPECT_STREQ("<native counting>", clox_test_value_repr_string(&buffer, value));
+  EXPECT_STREQ("<nt counting>", clox_test_value_string(&buffer, value));
+  EXPECT_STREQ("<nt counting>", clox_test_value_repr_string(&buffer, value));
 }
 
 UTEST_F(object, a_native_is_equal_only_to_itself) {
@@ -376,16 +385,151 @@ UTEST_F(object, a_native_is_truthy) {
   EXPECT_TRUE(clox_value_is_truthy(value));
 }
 
-UTEST_F(object, the_three_object_types_are_never_equal_to_each_other) {
+UTEST_F(object, an_upvalue_points_at_the_location_it_is_given) {
+  clox_value_t slot = CLOX_NUMBER(1.0);
+  clox_upvalue_t *upvalue = clox_new_upvalue(&utest_fixture->alloc, &slot);
+
+  // while open, an upvalue reads straight through to the slot it closes over,
+  // so a write to that slot is what the upvalue reads back
+  ASSERT_TRUE(upvalue->location == &slot);
+  slot = CLOX_NUMBER(2.0);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), *upvalue->location);
+}
+
+UTEST_F(object, an_upvalue_starts_open_and_unlinked) {
+  clox_value_t slot = CLOX_NUMBER(1.0);
+  clox_upvalue_t *upvalue = clox_new_upvalue(&utest_fixture->alloc, &slot);
+
+  // closed is where the value goes once the slot is gone; until then it is
+  // untouched, and next is set only when the VM links the upvalue into its list
+  EXPECT_VALUE_EQ(CLOX_NIL, upvalue->closed);
+  EXPECT_TRUE(upvalue->next == NULL);
+}
+
+UTEST_F(object, an_upvalue_renders_with_the_value_it_stands_for) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_value_t slot = CLOX_NUMBER(1.0);
+  clox_value_t value = CLOX_UPVALUE(&utest_fixture->alloc, &slot);
+
+  // the location is an address, so only what surrounds it can be pinned: an
+  // upvalue over a number renders that number and not an object of some kind
+  const char *rendered = clox_test_value_string(&buffer, value);
+  EXPECT_TRUE(strncmp("<up ", rendered, 4) == 0);
+  EXPECT_TRUE(strstr(rendered, "(1)") != NULL);
+}
+
+UTEST_F(object, an_upvalue_is_equal_only_to_itself) {
+  clox_value_t slot = CLOX_NUMBER(1.0);
+
+  // two upvalues over one slot are still two objects: the VM keeps them
+  // unique by searching its open list, not by comparing them
+  clox_value_t first = CLOX_UPVALUE(&utest_fixture->alloc, &slot);
+  clox_value_t second = CLOX_UPVALUE(&utest_fixture->alloc, &slot);
+
+  EXPECT_TRUE(clox_object_equals(first, first));
+  EXPECT_FALSE(clox_object_equals(first, second));
+}
+
+UTEST_F(object, an_upvalue_is_truthy) {
+  clox_value_t slot = CLOX_NIL;
+  clox_value_t value = CLOX_UPVALUE(&utest_fixture->alloc, &slot);
+
+  // truthiness is the upvalue's own, not that of the falsy value it holds
+  EXPECT_TRUE(clox_value_is_truthy(value));
+}
+
+UTEST_F(object, a_closure_carries_the_function_it_wraps) {
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 2, FILE_NAME, SOURCE);
+  clox_closure_t *closure = clox_new_closure(&utest_fixture->alloc, function);
+
+  // the function is shared, not copied: one function may be closed over many
+  // times, each closure carrying different captures of it
+  EXPECT_TRUE(closure->function == function);
+}
+
+UTEST_F(object, a_closure_takes_a_slot_per_upvalue_the_function_declares) {
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE);
+  function->upvalue_count = 3;
+
+  clox_closure_t *closure = clox_new_closure(&utest_fixture->alloc, function);
+
+  ASSERT_EQ((size_t)3, closure->upvalue_count);
+  ASSERT_TRUE(closure->upvalues != NULL);
+  // the slots stand empty until the VM fills them from the OP_CLOSURE operands
+  for (size_t i = 0; i < closure->upvalue_count; i++) {
+    EXPECT_TRUE(closure->upvalues[i] == NULL);
+  }
+}
+
+UTEST_F(object, a_closure_over_a_function_capturing_nothing_takes_no_slots) {
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE);
+  clox_closure_t *closure = clox_new_closure(&utest_fixture->alloc, function);
+
+  EXPECT_EQ((size_t)0, closure->upvalue_count);
+}
+
+UTEST_F(object, a_closure_renders_as_the_name_of_its_function) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE);
+  clox_value_t value = CLOX_CLOSURE(&utest_fixture->alloc, function);
+
+  EXPECT_STREQ("<cl named>", clox_test_value_string(&buffer, value));
+  EXPECT_STREQ("<cl named>", clox_test_value_repr_string(&buffer, value));
+}
+
+UTEST_F(object, a_closure_is_equal_only_to_itself) {
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "same", 4, 0, FILE_NAME, SOURCE);
+
+  // two closures over one function are two objects, since they may yet capture
+  // different variables: identity is all that can be compared
+  clox_value_t first = CLOX_CLOSURE(&utest_fixture->alloc, function);
+  clox_value_t second = CLOX_CLOSURE(&utest_fixture->alloc, function);
+
+  EXPECT_TRUE(clox_object_equals(first, first));
+  EXPECT_FALSE(clox_object_equals(first, second));
+}
+
+UTEST_F(object, a_closure_is_not_equal_to_the_function_it_wraps) {
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "same", 4, 0, FILE_NAME, SOURCE);
+
+  clox_value_t closure = CLOX_CLOSURE(&utest_fixture->alloc, function);
+
+  EXPECT_FALSE(clox_value_equals(closure, CLOX_OBJECT(function)));
+}
+
+UTEST_F(object, a_closure_is_truthy) {
+  clox_function_t *function =
+      clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE);
+  clox_value_t value = CLOX_CLOSURE(&utest_fixture->alloc, function);
+
+  EXPECT_TRUE(clox_value_is_truthy(value));
+}
+
+UTEST_F(object, no_two_object_types_are_ever_equal_to_each_other) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_value_t slot = CLOX_NIL;
 
   clox_value_t string = CLOX_STRING_COPY(alloc, "same", 4);
-  clox_value_t function = CLOX_OBJECT(clox_new_function(alloc, "same", 4, 0, FILE_NAME, SOURCE));
+  clox_function_t *fn = clox_new_function(alloc, "same", 4, 0, FILE_NAME, SOURCE);
+  clox_value_t function = CLOX_OBJECT(fn);
   clox_value_t native = CLOX_NATIVE(alloc, "same", 2, counting_native);
+  clox_value_t upvalue = CLOX_UPVALUE(alloc, &slot);
+  clox_value_t closure = CLOX_CLOSURE(alloc, fn);
 
-  EXPECT_FALSE(clox_value_equals(string, function));
-  EXPECT_FALSE(clox_value_equals(function, native));
-  EXPECT_FALSE(clox_value_equals(native, string));
+  // every pair of them shares a name, so only the type tells them apart
+  const clox_value_t values[] = {string, function, native, upvalue, closure};
+  const size_t count = sizeof(values) / sizeof(*values);
+  for (size_t i = 0; i < count; i++) {
+    for (size_t j = 0; j < count; j++) {
+      EXPECT_TRUE(clox_value_equals(values[i], values[j]) == (i == j));
+    }
+  }
 }
 
 UTEST(object_lifetime, freeing_the_allocator_releases_every_string) {
@@ -420,6 +564,30 @@ UTEST(object_lifetime, freeing_the_allocator_releases_functions_and_natives) {
   }
   // a name of no length is still a buffer of its own to release
   (void)clox_new_function(&alloc, "", 0, 0, FILE_NAME, SOURCE);
+
+  clox_allocator_free(&alloc);
+}
+
+UTEST(object_lifetime, freeing_the_allocator_releases_closures_and_upvalues) {
+  // LSan again: a closure owns the array of pointers it holds its captures in,
+  // and that array is a second allocation the object has to take with it. The
+  // upvalues those pointers reach are not the closure's to free -- several
+  // closures may share one -- so they are released as objects in their own right.
+  clox_allocator_t alloc;
+  clox_allocator_init(&alloc);
+
+  clox_value_t slot = CLOX_NUMBER(1.0);
+  for (size_t i = 0; i < 32; i++) {
+    clox_function_t *function = clox_new_function(&alloc, "named", 5, 0, FILE_NAME, SOURCE);
+    function->upvalue_count = 4;
+
+    clox_closure_t *closure = clox_new_closure(&alloc, function);
+    for (size_t j = 0; j < closure->upvalue_count; j++) {
+      closure->upvalues[j] = clox_new_upvalue(&alloc, &slot);
+    }
+  }
+  // a closure capturing nothing allocates no array, and is freed all the same
+  (void)clox_new_closure(&alloc, clox_new_function(&alloc, "bare", 4, 0, FILE_NAME, SOURCE));
 
   clox_allocator_free(&alloc);
 }

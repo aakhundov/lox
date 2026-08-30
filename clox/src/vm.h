@@ -15,7 +15,7 @@
 typedef void clox_print_fn_t(const clox_value_t *vals, size_t n, void *ctx);
 
 typedef struct {
-  const clox_function_t *function;
+  const clox_closure_t *closure;
   const clox_byte_t *ip;
   clox_value_t *slots;
 } clox_call_frame_t;
@@ -26,6 +26,7 @@ typedef struct {
   clox_value_t stack[CLOX_STACK_SIZE];
   size_t frame_count;
   clox_call_frame_t frames[CLOX_MAX_FRAMES];
+  clox_upvalue_t *open_upvalues;
   clox_allocator_t *allocator;
   clox_error_handler_t *error_handler;
   void *error_ctx;

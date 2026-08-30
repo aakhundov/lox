@@ -8,18 +8,23 @@
 
 #include "chunk.h"
 #include "common.h"
+#include "object.h"
 #include "value.h"
 
 #define PAD_SIZE 40
 #define POS_SIZE 11
 
 static size_t const_instruction(FILE *stream, const clox_chunk_t *chunk, clox_op_code_t opcode,
-                                size_t offset) {
+                                clox_value_t *value, size_t offset) {
   const clox_byte_t *ip = chunk->code + offset + 1; // skip the opcode
   clox_value_t val = clox_read_constant(chunk, opcode, &ip);
   assert(ip > chunk->code + offset + 1); // ip has moved
 
   clox_value_repr_fprintf(stream, val);
+
+  if (value != NULL) {
+    *value = val;
+  }
 
   // cast is safe: assert above
   return (size_t)(ip - chunk->code);
@@ -41,6 +46,17 @@ static size_t jump_instruction(FILE *stream, const clox_chunk_t *chunk, int sign
   (void)fprintf(stream, "%04td", destination);
 
   return offset + 3; // opcode + 2 bytes
+}
+
+static size_t append_upvalues(FILE *stream, const clox_chunk_t *chunk, size_t count,
+                              size_t offset) {
+  for (size_t i = 0; i < count; i++) {
+    bool is_local = (chunk->code[offset++] == 1);
+    size_t index = chunk->code[offset++];
+    (void)fprintf(stream, " %c%zu", is_local ? 'L' : 'U', index);
+  }
+
+  return offset; // incremented above
 }
 
 size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *chunk,
@@ -67,6 +83,7 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_TRUE:
     case OP_FALSE:
     case OP_POP:
+    case OP_CLOSE_UPVALUE:
     case OP_EQUAL:
     case OP_NOT_EQUAL:
     case OP_GREATER:
@@ -91,10 +108,20 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_GET_GLOBAL_LONG:
     case OP_SET_GLOBAL:
     case OP_SET_GLOBAL_LONG:
-      offset = const_instruction(stream, chunk, opcode, offset);
+      offset = const_instruction(stream, chunk, opcode, NULL, offset);
       break;
+    case OP_CLOSURE:
+    case OP_CLOSURE_LONG: {
+      clox_value_t val;
+      offset = const_instruction(stream, chunk, opcode, &val, offset);
+      size_t count = CLOX_AS_FUNCTION(val)->upvalue_count;
+      offset = append_upvalues(stream, chunk, count, offset);
+      break;
+    }
     case OP_GET_LOCAL:
     case OP_SET_LOCAL:
+    case OP_GET_UPVALUE:
+    case OP_SET_UPVALUE:
     case OP_POP_N:
     case OP_PRINT_N:
     case OP_CALL:

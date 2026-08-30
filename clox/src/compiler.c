@@ -233,14 +233,14 @@ static inline void emit_return(const clox_compiler_t *c, const clox_token_t *tok
 }
 
 static inline void start_frame(clox_compiler_t *c, clox_compile_frame_t *frame,
-                               clox_function_type_t type, const char *fn_name,
+                               clox_compile_function_type_t type, const char *fn_name,
                                size_t fn_name_length) {
   assert(fn_name != NULL);
   assert(fn_name_length > 0);
 
   frame->local_count = 0;
   frame->scope_depth = 0;
-  frame->loop = (clox_loop_state_t){0};
+  frame->loop = (clox_compile_loop_state_t){0};
 
   // arity set to zero here may be incremented in parameter parsing
   frame->function =
@@ -248,11 +248,12 @@ static inline void start_frame(clox_compiler_t *c, clox_compile_frame_t *frame,
   frame->type = type;
 
   // first local in a frame is reserved for the function object itself
-  clox_local_t *func_local = &frame->locals[frame->local_count++];
+  clox_compile_local_t *func_local = &frame->locals[frame->local_count++];
   func_local->depth = 0;       // at global scope
   func_local->name.start = ""; // not resolvable
   func_local->name.length = 0;
   func_local->initialized = true;
+  func_local->is_captured = false;
 
   frame->enclosing = c->frame;
   c->frame = frame;
@@ -375,22 +376,36 @@ static inline void begin_scope(clox_compiler_t *c) {
   FRAME(c)->scope_depth++;
 }
 
-static inline size_t n_locals_above(const clox_compiler_t *c, size_t depth) {
-  size_t result = 0;
+static inline size_t pop_locals_above(clox_compiler_t *c, size_t depth, const clox_token_t *token) {
+  size_t total = 0;
+  size_t n_to_pop = 0;
+
   for (int i = (int)FRAME(c)->local_count - 1; i >= 0; i--) {
-    if (FRAME(c)->locals[i].depth <= depth) {
-      break; // in scope
+    const clox_compile_local_t *local = &FRAME(c)->locals[i];
+    if (local->depth <= depth) {
+      break;
     }
-    result++;
+    if (local->is_captured) {
+      // emit POP_N for all before
+      emit_pop_n(c, n_to_pop, token);
+      emit_byte(c, OP_CLOSE_UPVALUE, token);
+      n_to_pop = 0;
+    } else {
+      n_to_pop++;
+    }
+    total++;
   }
-  return result;
+
+  // emit POP_N for the rest
+  emit_pop_n(c, n_to_pop, token);
+  return total;
 }
 
 static inline void end_scope(clox_compiler_t *c, const clox_token_t *token) {
   FRAME(c)->scope_depth--;
-  size_t n_to_pop = n_locals_above(c, FRAME(c)->scope_depth);
-  FRAME(c)->local_count -= n_to_pop;
-  emit_pop_n(c, n_to_pop, token);
+  size_t n_popped = pop_locals_above(c, FRAME(c)->scope_depth, token);
+  assert(n_popped < FRAME(c)->local_count); // local #0 can't be popped
+  FRAME(c)->local_count -= n_popped;
 }
 
 static inline void block(clox_compiler_t *c) {
@@ -472,8 +487,8 @@ static void for_statement(clox_compiler_t *c) {
     patch_jump(c, body_jump, &keyword);
   }
 
-  clox_loop_state_t prev_state = LOOP(c);
-  LOOP(c) = (clox_loop_state_t){
+  clox_compile_loop_state_t prev_state = LOOP(c);
+  LOOP(c) = (clox_compile_loop_state_t){
       .inside = true,
       .start = loop_start,
       .exit_patch = SIZE_MAX, // sentinel
@@ -506,8 +521,8 @@ static void while_statement(clox_compiler_t *c) {
 
   size_t cond_exit_jump = emit_jump(c, OP_JUMP_FALSE_POP, &keyword);
 
-  clox_loop_state_t prev_state = LOOP(c);
-  LOOP(c) = (clox_loop_state_t){
+  clox_compile_loop_state_t prev_state = LOOP(c);
+  LOOP(c) = (clox_compile_loop_state_t){
       .inside = true,
       .start = loop_start,
       .exit_patch = SIZE_MAX, // sentinel
@@ -536,8 +551,7 @@ static void break_statement(clox_compiler_t *c) {
   }
 
   // pop all locals from above the loop's scope
-  size_t n_to_pop = n_locals_above(c, LOOP(c).scope);
-  emit_pop_n(c, n_to_pop, &keyword);
+  pop_locals_above(c, LOOP(c).scope, &keyword);
 
   // exit the loop
   if (LOOP(c).exit_patch == SIZE_MAX) {
@@ -562,8 +576,7 @@ static void continue_statement(clox_compiler_t *c) {
   }
 
   // pop all locals from above the loop's scope
-  size_t n_to_pop = n_locals_above(c, LOOP(c).scope);
-  emit_pop_n(c, n_to_pop, &keyword);
+  pop_locals_above(c, LOOP(c).scope, &keyword);
 
   // move to the loop start
   emit_loop(c, LOOP(c).start, &keyword);
@@ -628,25 +641,28 @@ static inline bool names_equal(const clox_token_t *a, const clox_token_t *b) {
   return memcmp(a->start, b->start, a->length) == 0;
 }
 
-static inline void add_local(clox_compiler_t *c, const clox_token_t *name) {
-  assert(FRAME(c)->scope_depth > 0);
+static inline void add_local(clox_compiler_t *c, clox_compile_frame_t *f,
+                             const clox_token_t *name) {
+  assert(f->scope_depth > 0);
 
-  if (FRAME(c)->local_count >= CLOX_MAX_LOCALS) {
+  if (f->local_count >= CLOX_MAX_LOCALS) {
     error(c, name, "locals limit exceeded");
     return;
   }
 
-  clox_local_t *local = FRAME(c)->locals + FRAME(c)->local_count;
+  clox_compile_local_t *local = f->locals + f->local_count;
   local->name = *name;
-  local->depth = FRAME(c)->scope_depth;
+  local->depth = f->scope_depth;
   local->initialized = false;
-  FRAME(c)->local_count++;
+  local->is_captured = false;
+  f->local_count++;
 }
 
-static inline size_t resolve_local(clox_compiler_t *c, const clox_token_t *name) {
+static inline size_t resolve_local(clox_compiler_t *c, clox_compile_frame_t *f,
+                                   const clox_token_t *name) {
   // cast is safe: MAX_LOCALS <= INT_MAX
-  for (int i = (int)FRAME(c)->local_count - 1; i >= 0; i--) {
-    clox_local_t *local = FRAME(c)->locals + i;
+  for (int i = (int)f->local_count - 1; i >= 0; i--) {
+    clox_compile_local_t *local = f->locals + i;
     if (names_equal(&local->name, name)) {
       if (!local->initialized) {
         error(c, name, "can't read '%.*s' in its own initializer", (int)name->length, name->start);
@@ -656,8 +672,54 @@ static inline size_t resolve_local(clox_compiler_t *c, const clox_token_t *name)
       return (size_t)i;
     }
   }
-  // sentinel value
-  return CLOX_MAX_LOCALS;
+
+  return CLOX_MAX_LOCALS; // sentinel
+}
+
+static inline size_t add_upvalue(clox_compiler_t *c, clox_compile_frame_t *f, size_t index,
+                                 bool is_local, const clox_token_t *name) {
+  assert(f->scope_depth > 0);
+
+  size_t count = f->function->upvalue_count;
+
+  for (size_t i = 0; i < count; i++) {
+    if (f->upvalues[i].index == index && f->upvalues[i].is_local == is_local) {
+      return i;
+    }
+  }
+
+  if (count >= CLOX_MAX_UPVALUES) {
+    error(c, name, "upvalues limit exceeded");
+    return 0; // incorrect but ok, given the error
+  }
+
+  f->upvalues[count].index = index;
+  f->upvalues[count].is_local = is_local;
+
+  return f->function->upvalue_count++;
+}
+
+static inline size_t resolve_upvalue(clox_compiler_t *c, clox_compile_frame_t *f,
+                                     const clox_token_t *name) {
+  if (f->enclosing == NULL) {
+    // no enclosing frame to resolve upvalues in
+    return CLOX_MAX_UPVALUES; // sentinel
+  }
+
+  size_t local_idx = resolve_local(c, f->enclosing, name);
+  if (local_idx < CLOX_MAX_LOCALS) {
+    // local resolved in enclosing frame
+    f->enclosing->locals[local_idx].is_captured = true;
+    return add_upvalue(c, f, local_idx, true, name);
+  }
+
+  size_t upvalue_idx = resolve_upvalue(c, f->enclosing, name);
+  if (upvalue_idx < CLOX_MAX_UPVALUES) {
+    // local resolved in transitively enclosing frame
+    return add_upvalue(c, f, upvalue_idx, false, name);
+  }
+
+  return CLOX_MAX_UPVALUES; // sentinel
 }
 
 _Static_assert(CLOX_MAX_LOCALS <= INT_MAX, "MAX_LOCALS must fit within int");
@@ -667,7 +729,7 @@ static inline void declare_variable(clox_compiler_t *c, const clox_token_t *name
 
   // cast is safe: MAX_LOCALS <= INT_MAX
   for (int i = (int)FRAME(c)->local_count - 1; i >= 0; i--) {
-    clox_local_t *local = FRAME(c)->locals + i;
+    clox_compile_local_t *local = FRAME(c)->locals + i;
     if (local->initialized && local->depth < FRAME(c)->scope_depth) {
       break;
     }
@@ -677,14 +739,16 @@ static inline void declare_variable(clox_compiler_t *c, const clox_token_t *name
     }
   }
 
-  add_local(c, name);
+  add_local(c, FRAME(c), name);
 }
 
 static inline void mark_initialized(clox_compiler_t *c) {
   FRAME(c)->locals[FRAME(c)->local_count - 1].initialized = true;
 }
 
-static inline void function(clox_compiler_t *c, clox_function_type_t type,
+_Static_assert(CLOX_MAX_UPVALUES <= UCHAR_MAX + 1, "upvalue index must fit in a byte");
+
+static inline void function(clox_compiler_t *c, clox_compile_function_type_t type,
                             const clox_token_t *name) {
   clox_compile_frame_t frame;
   start_frame(c, &frame, type, name->start, name->length);
@@ -712,9 +776,15 @@ static inline void function(clox_compiler_t *c, clox_function_type_t type,
   // end_frame always emits return which will rewind the
   // caller's stack, so no need to call end_scope
 
-  // make new function constant and put it on the stack
-  clox_value_t compiled_fn = CLOX_OBJECT(end_frame(c));
-  emit_constant(c, OP_CONSTANT, compiled_fn, name);
+  // the frame is saved before it's ended
+  clox_compile_frame_t *fn_frame = FRAME(c);
+  clox_function_t *fn = end_frame(c);
+  emit_constant(c, OP_CLOSURE, CLOX_OBJECT(fn), name);
+  for (size_t i = 0; i < fn->upvalue_count; i++) {
+    emit_byte(c, fn_frame->upvalues[i].is_local ? 1 : 0, name);
+    // cast is safe: static assert above
+    emit_byte(c, (clox_byte_t)fn_frame->upvalues[i].index, name);
+  }
 }
 
 static void fun_declaration(clox_compiler_t *c) {
@@ -723,6 +793,8 @@ static void fun_declaration(clox_compiler_t *c) {
   clox_token_t name = c->previous;
 
   if (FRAME(c)->scope_depth > 0) { // local scope
+    // for recursion: locally declared function name
+    // must be visible from within its body (via upvalue)
     declare_variable(c, &name);
     mark_initialized(c);
   }
@@ -910,34 +982,36 @@ _Static_assert(CLOX_MAX_LOCALS - 1 <= UCHAR_MAX, "local index should fit in unsi
 static void variable(clox_compiler_t *c, bool can_assign) {
   clox_token_t name = c->previous;
 
-  bool assignment = can_assign && match(c, TOKEN_EQUAL);
-  if (assignment) {
+  bool assign = can_assign && match(c, TOKEN_EQUAL);
+  if (assign) {
     // evaluate lhs
     expression(c);
   }
 
-  size_t local_idx = resolve_local(c, &name);
+  clox_op_code_t local_get_op = OP_CODE_COUNT;
+  clox_op_code_t local_set_op = OP_CODE_COUNT;
+  size_t local_idx = resolve_local(c, FRAME(c), &name);
   if (local_idx < CLOX_MAX_LOCALS) {
     // local variable
+    local_get_op = OP_GET_LOCAL;
+    local_set_op = OP_SET_LOCAL;
+  } else {
+    local_idx = resolve_upvalue(c, FRAME(c), &name);
+    if (local_idx < CLOX_MAX_UPVALUES) {
+      // non-global variable via upvalue
+      local_get_op = OP_GET_UPVALUE;
+      local_set_op = OP_SET_UPVALUE;
+    }
+  }
+
+  if (local_get_op != OP_CODE_COUNT) {
     // cast is safe: range checked above
     clox_byte_t byte_idx = (clox_byte_t)local_idx;
-    if (assignment) {
-      // set local
-      emit_byte_op(c, OP_SET_LOCAL, byte_idx, &name);
-    } else {
-      // get local
-      emit_byte_op(c, OP_GET_LOCAL, byte_idx, &name);
-    }
+    emit_byte_op(c, assign ? local_set_op : local_get_op, byte_idx, &name);
   } else {
     // global variable
     clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
-    if (assignment) {
-      // set global
-      emit_constant(c, OP_SET_GLOBAL, name_str, &name);
-    } else {
-      // get global
-      emit_constant(c, OP_GET_GLOBAL, name_str, &name);
-    }
+    emit_constant(c, assign ? OP_SET_GLOBAL : OP_GET_GLOBAL, name_str, &name);
   }
 }
 

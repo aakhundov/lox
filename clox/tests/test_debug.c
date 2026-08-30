@@ -16,20 +16,28 @@
 #define TEXT_SIZE 4096
 // one more than a single-byte constant index can address
 #define OVER_BYTE_INDEX 256
+// What a function disassembled here is compiled under. Nothing reads through
+// either: the disassembler prints code, not the text it came from.
+#define FILE_NAME "test.lox"
+#define SOURCE ""
 
 static const clox_pos_t POS = {.line = 1, .col = 1};
 
 struct debug {
+  clox_allocator_t alloc;
   clox_chunk_t chunk;
   char text[TEXT_SIZE];
 };
 
 UTEST_F_SETUP(debug) {
+  clox_allocator_init(&utest_fixture->alloc);
   clox_chunk_init(&utest_fixture->chunk);
 }
 
 UTEST_F_TEARDOWN(debug) {
+  // the chunk goes first: its constants are objects the allocator owns
   clox_chunk_free(&utest_fixture->chunk);
+  clox_allocator_free(&utest_fixture->alloc);
 }
 
 // The opcodes carrying a one-byte operand. Written out rather than derived, so
@@ -39,6 +47,8 @@ static bool takes_byte_operand(clox_op_code_t opcode) {
   switch (opcode) {
   case OP_GET_LOCAL:
   case OP_SET_LOCAL:
+  case OP_GET_UPVALUE:
+  case OP_SET_UPVALUE:
   case OP_POP_N:
   case OP_PRINT_N:
   case OP_CALL:
@@ -46,6 +56,32 @@ static bool takes_byte_operand(clox_op_code_t opcode) {
   default:
     return false;
   }
+}
+
+// The constant opcodes carrying more than their index. A closure is followed by
+// two bytes per upvalue its function declares, so its stride is not the two
+// bytes every other constant instruction takes.
+static bool takes_upvalue_operands(clox_op_code_t opcode) {
+  return opcode == OP_CLOSURE || opcode == OP_CLOSURE_LONG;
+}
+
+// A function to close over, declaring the given number of upvalues. What it
+// holds does not matter: only the count is read, to say how many operand pairs
+// follow the OP_CLOSURE that names it.
+static clox_value_t function_capturing(struct debug *fixture, const char *name,
+                                       size_t upvalue_count) {
+  clox_function_t *function =
+      clox_new_function(&fixture->alloc, name, strlen(name), 0, FILE_NAME, SOURCE);
+  function->upvalue_count = upvalue_count;
+
+  return CLOX_OBJECT(function);
+}
+
+// Writes the two operand bytes one captured upvalue takes: where it is taken
+// from, and the index it is taken at.
+static void write_upvalue(struct debug *fixture, bool is_local, clox_byte_t index) {
+  clox_chunk_write(&fixture->chunk, is_local ? 1 : 0, POS);
+  clox_chunk_write(&fixture->chunk, index, POS);
 }
 
 static bool takes_jump_operand(clox_op_code_t opcode) {
@@ -104,13 +140,96 @@ UTEST_F(debug, every_constant_opcode_disassembles_under_its_own_name) {
 
   // short forms are the even opcodes of the constant range
   for (size_t opcode = 0; opcode < CONST_OP_CODE_COUNT; opcode += 2) {
+    // a closure reads its constant as the function it is closing over, so that
+    // is what it has to be handed; every other constant opcode takes any value
+    clox_value_t constant = takes_upvalue_operands((clox_op_code_t)opcode)
+                                ? function_capturing(utest_fixture, "named", 0)
+                                : CLOX_NUMBER((double)opcode);
+
     size_t offset = chunk->length;
-    ASSERT_TRUE(
-        clox_write_constant(chunk, (clox_op_code_t)opcode, CLOX_NUMBER((double)opcode), POS));
+    ASSERT_TRUE(clox_write_constant(chunk, (clox_op_code_t)opcode, constant, POS));
 
     ASSERT_EQ(offset + 2, disassemble_one(utest_fixture, offset));
     ASSERT_TRUE(strstr(utest_fixture->text, clox_op_code_names[opcode]) != NULL);
   }
+}
+
+UTEST_F(debug, a_closure_capturing_nothing_advances_like_any_constant_instruction) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_TRUE(
+      clox_write_constant(chunk, OP_CLOSURE, function_capturing(utest_fixture, "named", 0), POS));
+
+  EXPECT_EQ((size_t)2, disassemble_one(utest_fixture, 0));
+  EXPECT_TRUE(strstr(utest_fixture->text, "OP_CLOSURE") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "<cl named>") == NULL); // the function, not a closure
+  EXPECT_TRUE(strstr(utest_fixture->text, "<fn named>") != NULL);
+}
+
+UTEST_F(debug, a_closure_advances_past_the_two_bytes_each_upvalue_takes) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_TRUE(
+      clox_write_constant(chunk, OP_CLOSURE, function_capturing(utest_fixture, "named", 3), POS));
+  write_upvalue(utest_fixture, true, 1);
+  write_upvalue(utest_fixture, false, 2);
+  write_upvalue(utest_fixture, true, 3);
+
+  // the operand count is not in the code: it comes from the function named by
+  // the constant, so a disassembler that ignored it would land mid-instruction
+  EXPECT_EQ((size_t)8, disassemble_one(utest_fixture, 0));
+}
+
+UTEST_F(debug, a_capture_is_rendered_as_where_it_is_taken_from_and_at_which_index) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_TRUE(
+      clox_write_constant(chunk, OP_CLOSURE, function_capturing(utest_fixture, "named", 2), POS));
+  write_upvalue(utest_fixture, true, 4);  // a local of the enclosing frame
+  write_upvalue(utest_fixture, false, 7); // an upvalue of the enclosing closure
+
+  ASSERT_EQ((size_t)6, disassemble_one(utest_fixture, 0));
+  EXPECT_TRUE(strstr(utest_fixture->text, "L4") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "U7") != NULL);
+}
+
+UTEST_F(debug, a_long_closure_instruction_advances_past_its_wider_index_and_its_upvalues) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
+    ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_NUMBER((double)i), POS));
+  }
+
+  size_t offset = chunk->length;
+  ASSERT_TRUE(
+      clox_write_constant(chunk, OP_CLOSURE, function_capturing(utest_fixture, "named", 1), POS));
+  write_upvalue(utest_fixture, true, 1);
+
+  // the wider index and the upvalue operands are counted independently
+  EXPECT_EQ(offset + 6, disassemble_one(utest_fixture, offset));
+  EXPECT_TRUE(strstr(utest_fixture->text, "OP_CLOSURE_LONG") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "L1") != NULL);
+}
+
+UTEST_F(debug, walking_a_chunk_of_closure_instructions_lands_exactly_on_its_end) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+
+  ASSERT_TRUE(
+      clox_write_constant(chunk, OP_CLOSURE, function_capturing(utest_fixture, "one", 2), POS));
+  write_upvalue(utest_fixture, true, 1);
+  write_upvalue(utest_fixture, false, 0);
+  ASSERT_TRUE(
+      clox_write_constant(chunk, OP_CLOSURE, function_capturing(utest_fixture, "two", 0), POS));
+  clox_chunk_write(chunk, OP_CLOSE_UPVALUE, POS);
+  clox_chunk_write(chunk, OP_RETURN, POS);
+
+  size_t offset = 0;
+  size_t instructions = 0;
+  while (offset < chunk->length) {
+    size_t next = disassemble_one(utest_fixture, offset);
+    ASSERT_TRUE(next > offset); // no instruction may stand still
+    offset = next;
+    instructions++;
+  }
+
+  EXPECT_EQ(chunk->length, offset);
+  EXPECT_EQ((size_t)4, instructions);
 }
 
 UTEST_F(debug, a_constant_is_disassembled_as_lox_source) {

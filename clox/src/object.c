@@ -62,6 +62,17 @@ static inline void free_object(clox_object_t *obj) {
     CLOX_FREE_OBJECT(clox_native_t, native);
     break;
   }
+  case OBJ_UPVALUE: {
+    clox_upvalue_t *upvalue = (clox_upvalue_t *)obj;
+    CLOX_FREE_OBJECT(clox_upvalue_t, upvalue);
+    break;
+  }
+  case OBJ_CLOSURE: {
+    clox_closure_t *closure = (clox_closure_t *)obj;
+    CLOX_FREE_ARRAY(clox_upvalue_t *, (void *)closure->upvalues, closure->upvalue_count);
+    CLOX_FREE_OBJECT(clox_closure_t, closure);
+    break;
+  }
   }
 }
 
@@ -148,6 +159,7 @@ clox_function_t *clox_new_function(clox_allocator_t *alloc, const char *name, si
   function->arity = arity;
   function->file_name = file_name;
   function->source = source;
+  function->upvalue_count = 0;
   clox_chunk_init(&function->chunk);
 
   LOG_ALLOCATE(function);
@@ -168,6 +180,37 @@ clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, size_t
   return native;
 }
 
+clox_upvalue_t *clox_new_upvalue(clox_allocator_t *alloc, clox_value_t *location) {
+  assert(location != NULL);
+
+  clox_upvalue_t *upvalue = ALLOCATE_OBJECT(alloc, clox_upvalue_t, OBJ_UPVALUE);
+  upvalue->location = location;
+  upvalue->closed = CLOX_NIL;
+  upvalue->next = NULL;
+
+  LOG_ALLOCATE(upvalue);
+  return upvalue;
+}
+
+clox_closure_t *clox_new_closure(clox_allocator_t *alloc, const clox_function_t *function) {
+  assert(function != NULL);
+
+  // allocate and NULL-initialize array of pointers to upvalues;
+  // the upvalues themselves are *not owned*, just referenced
+  clox_upvalue_t **upvalues = CLOX_ALLOCATE_ARRAY(clox_upvalue_t *, function->upvalue_count);
+  for (size_t i = 0; i < function->upvalue_count; i++) {
+    upvalues[i] = NULL;
+  }
+
+  clox_closure_t *closure = ALLOCATE_OBJECT(alloc, clox_closure_t, OBJ_CLOSURE);
+  closure->function = function;
+  closure->upvalues = upvalues;
+  closure->upvalue_count = function->upvalue_count;
+
+  LOG_ALLOCATE(closure);
+  return closure;
+}
+
 bool clox_object_is_truthy(clox_value_t val) {
   assert(CLOX_IS_OBJECT(val));
 
@@ -176,6 +219,8 @@ bool clox_object_is_truthy(clox_value_t val) {
     return CLOX_AS_STRING(val)->length > 0;
   case OBJ_FUNCTION:
   case OBJ_NATIVE:
+  case OBJ_UPVALUE:
+  case OBJ_CLOSURE:
     return true;
   }
 }
@@ -190,13 +235,15 @@ bool clox_object_equals(clox_value_t a, clox_value_t b) {
 
   switch (CLOX_AS_OBJECT(a)->type) {
   case OBJ_STRING:
-    // compare raw pointers to string objects
+    // compare raw pointers to string objects:
     // this works due to the string interning
     return CLOX_AS_STRING(a) == CLOX_AS_STRING(b);
   case OBJ_FUNCTION:
-    return CLOX_AS_FUNCTION(a) == CLOX_AS_FUNCTION(b);
   case OBJ_NATIVE:
-    return CLOX_AS_NATIVE(a) == CLOX_AS_NATIVE(b);
+  case OBJ_UPVALUE:
+  case OBJ_CLOSURE:
+    // compare object pointers
+    return CLOX_AS_OBJECT(a) == CLOX_AS_OBJECT(b);
   }
 }
 
@@ -217,7 +264,21 @@ void clox_object_fprintf(FILE *stream, clox_value_t val) {
     break;
   }
   case OBJ_NATIVE:
-    (void)fprintf(stream, "<native %s>", CLOX_AS_NATIVE(val)->name);
+    (void)fprintf(stream, "<nt %s>", CLOX_AS_NATIVE(val)->name);
+    break;
+  case OBJ_UPVALUE: {
+    clox_value_t *location = CLOX_AS_UPVALUE(val)->location;
+    (void)fprintf(stream, "<up %p", (void *)location);
+    if (location != NULL) {
+      (void)fprintf(stream, " (");
+      clox_value_repr_fprintf(stream, *location);
+      (void)fprintf(stream, ")");
+    }
+    (void)fprintf(stream, ">");
+    break;
+  }
+  case OBJ_CLOSURE:
+    (void)fprintf(stream, "<cl %s>", CLOX_AS_CLOSURE(val)->function->name);
     break;
   }
 }
@@ -235,6 +296,8 @@ void clox_object_repr_fprintf(FILE *stream, clox_value_t val) {
     break;
   case OBJ_FUNCTION:
   case OBJ_NATIVE:
+  case OBJ_UPVALUE:
+  case OBJ_CLOSURE:
     clox_object_fprintf(stream, val);
     break;
   }

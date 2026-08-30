@@ -11,35 +11,44 @@
 
 #define CLOX_MAX_ARITY UCHAR_MAX
 #define CLOX_MAX_LOCALS (UCHAR_MAX + 1)
+#define CLOX_MAX_UPVALUES (UCHAR_MAX + 1)
 
 typedef struct {
   clox_token_t name;
   size_t depth;
   bool initialized;
-} clox_local_t;
+  bool is_captured;
+} clox_compile_local_t;
+
+typedef struct {
+  size_t index;
+  bool is_local;
+} clox_compile_upvalue_t;
 
 typedef struct {
   bool inside;
   size_t scope;
   size_t start;
   size_t exit_patch;
-} clox_loop_state_t;
+} clox_compile_loop_state_t;
 
 typedef enum {
   FUNCTION_SCRIPT,
   FUNCTION_FUNCTION,
-} clox_function_type_t;
+} clox_compile_function_type_t;
 
 typedef struct clox_compile_frame_t {
   // locals
-  clox_local_t locals[CLOX_MAX_LOCALS];
   size_t local_count;
   size_t scope_depth;
+  clox_compile_local_t locals[CLOX_MAX_LOCALS];
+  // upvalues
+  clox_compile_upvalue_t upvalues[CLOX_MAX_UPVALUES];
   // loops
-  clox_loop_state_t loop;
+  clox_compile_loop_state_t loop;
   // function
   clox_function_t *function;
-  clox_function_type_t type;
+  clox_compile_function_type_t type;
   // linked list of frames
   struct clox_compile_frame_t *enclosing;
 } clox_compile_frame_t;

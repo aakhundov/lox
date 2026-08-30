@@ -29,6 +29,15 @@
 _Static_assert(LOCAL_SLOTS == UCHAR_MAX, "a full scope's pop no longer fits one byte");
 // one more local than there are slots to hold them
 #define OVER_LOCAL_SLOTS (LOCAL_SLOTS + 1)
+// A capture index is a byte like a slot index, but no slot is reserved among
+// them: every one of them can be reached.
+#define UPVALUE_SLOTS CLOX_MAX_UPVALUES
+_Static_assert(UPVALUE_SLOTS == UCHAR_MAX + 1, "a capture index no longer fits one byte");
+// one more capture than a closure has room for
+#define OVER_UPVALUE_SLOTS (UPVALUE_SLOTS + 1)
+// A frame declaring a function beside its locals spends a slot on that
+// function too, so this is as many locals as it can leave for it to capture.
+#define CAPTURABLE_LOCALS (LOCAL_SLOTS - 1)
 // the widest offset two bytes can carry
 #define TWO_BYTE_MAX ((UCHAR_MAX << CHAR_BIT) | UCHAR_MAX)
 // the statement long bodies are built from, two bytes of code each
@@ -175,6 +184,35 @@ static const char *nested_functions(char (*buffer)[SOURCE_SIZE], size_t count) {
   for (size_t i = 0; i < count; i++) {
     written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "}");
   }
+
+  return *buffer;
+}
+
+// Renders three nested functions, the outer two declaring locals of their own
+// and the innermost naming every one of them:
+//
+//   fun f0(){var a0;...fun f1(){var b0;...fun f2(){a0;...b0;...}}}
+//
+// The innermost frame therefore needs outer + middle captures, and the middle
+// one needs outer of them to pass through. Neither count may pass what a frame
+// has slots for; the sum is what the captures are measured against.
+static const char *functions_capturing(char (*buffer)[SOURCE_SIZE], size_t outer, size_t middle) {
+  size_t written = (size_t)snprintf(*buffer, SOURCE_SIZE, "fun f0(){");
+  for (size_t i = 0; i < outer; i++) {
+    written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "var a%zu;", i);
+  }
+  written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "fun f1(){");
+  for (size_t i = 0; i < middle; i++) {
+    written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "var b%zu;", i);
+  }
+  written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "fun f2(){");
+  for (size_t i = 0; i < outer; i++) {
+    written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "a%zu;", i);
+  }
+  for (size_t i = 0; i < middle; i++) {
+    written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "b%zu;", i);
+  }
+  (void)snprintf(*buffer + written, SOURCE_SIZE - written, "}}}");
 
   return *buffer;
 }
@@ -1150,8 +1188,8 @@ UTEST_F(compiler, a_compiler_without_a_handler_still_reports_failure) {
 UTEST_F(compiler, a_function_declaration_defines_a_global_holding_the_function) {
   ASSERT_TRUE(compile(utest_fixture, "fun f() {}"));
 
-  // the compiled function is pushed, then bound to its name
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_DEF_GLOBAL, 1, OP_NIL, OP_RETURN);
+  // a closure over the compiled function is made, then bound to its name
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_DEF_GLOBAL, 1, OP_NIL, OP_RETURN);
   ASSERT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
   ASSERT_TRUE(function_constant(&utest_fixture->function->chunk, 0) != NULL);
   EXPECT_STREQ("f", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[1]));
@@ -1186,7 +1224,7 @@ UTEST_F(compiler, a_function_body_compiles_into_the_functions_own_chunk) {
   ASSERT_TRUE(compile(utest_fixture, "fun f() { print 1; }"));
 
   // the body is not in the script's code
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_DEF_GLOBAL, 1, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_DEF_GLOBAL, 1, OP_NIL, OP_RETURN);
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
@@ -1247,28 +1285,182 @@ UTEST_F(compiler, a_parameter_can_be_assigned_like_any_local) {
   EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_SET_LOCAL, 1, OP_POP, OP_NIL, OP_RETURN);
 }
 
-UTEST_F(compiler, a_frame_does_not_see_the_locals_around_it) {
-  // the enclosing local is not in the function's frame, so the name falls
-  // through to a global lookup
+UTEST_F(compiler, a_frame_reaches_a_local_around_it_through_an_upvalue) {
+  // the enclosing local is not in the function's frame, so the name is
+  // resolved as a capture of it rather than as a slot or a global
   ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; fun f() { print a; } }"));
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 1);
   ASSERT_TRUE(compiled != NULL);
+  EXPECT_CODE(&compiled->chunk, OP_GET_UPVALUE, 0, OP_PRINT, OP_NIL, OP_RETURN);
+  EXPECT_EQ((size_t)1, compiled->upvalue_count);
+}
+
+UTEST_F(compiler, a_name_no_enclosing_frame_declares_is_still_a_global) {
+  // the block has closed before the function is declared, so there is no
+  // enclosing local left of that name to capture
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; } fun f() { print a; }"));
+
+  clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(compiled != NULL);
   EXPECT_CODE(&compiled->chunk, OP_GET_GLOBAL, 0, OP_PRINT, OP_NIL, OP_RETURN);
+  EXPECT_EQ((size_t)0, compiled->upvalue_count);
+}
+
+UTEST_F(compiler, a_function_capturing_nothing_carries_no_captures_after_its_constant) {
+  ASSERT_TRUE(compile(utest_fixture, "fun f() {}"));
+
+  // the operand pairs follow the constant index, so a function capturing
+  // nothing leaves OP_CLOSURE the width of any other constant instruction
+  clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
+  ASSERT_TRUE(compiled != NULL);
+  EXPECT_EQ((size_t)0, compiled->upvalue_count);
+}
+
+UTEST_F(compiler, a_capture_says_it_is_a_local_and_names_the_slot_it_is_taken_from) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; fun f() { print a; } }"));
+
+  // the two bytes after the constant index: taken from a local of this frame,
+  // standing in slot 1
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CLOSURE, 1, 1, 1, OP_POP,
+              OP_CLOSE_UPVALUE, OP_NIL, OP_RETURN);
+}
+
+UTEST_F(compiler, a_capture_from_further_out_is_taken_from_the_enclosing_closure) {
+  // two frames up: the middle function does not name a itself, but has to
+  // capture it so the innermost one can be handed it in turn
+  ASSERT_TRUE(compile(utest_fixture, "fun o() { var a = 1; fun m() { fun i() { print a; } } }"));
+
+  clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
+  ASSERT_TRUE(outer != NULL);
+  EXPECT_CODE(&outer->chunk, OP_CONSTANT, 0, OP_CLOSURE, 1, 1, 1, OP_NIL, OP_RETURN);
+
+  clox_function_t *middle = function_constant(&outer->chunk, 1);
+  ASSERT_TRUE(middle != NULL);
+  EXPECT_EQ((size_t)1, middle->upvalue_count);
+  // not a local of the middle frame, and taken at capture index 0 rather than
+  // at a slot
+  EXPECT_CODE(&middle->chunk, OP_CLOSURE, 0, 0, 0, OP_NIL, OP_RETURN);
+}
+
+UTEST_F(compiler, one_name_used_twice_is_captured_once) {
+  ASSERT_TRUE(compile(utest_fixture, "fun o() { var a = 1; fun i() { print a; print a; } }"));
+
+  clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
+  ASSERT_TRUE(outer != NULL);
+  clox_function_t *inner = function_constant(&outer->chunk, 1);
+  ASSERT_TRUE(inner != NULL);
+
+  // both reads go through the one capture, so the closure carries a single
+  // upvalue and both instructions name index 0
+  EXPECT_EQ((size_t)1, inner->upvalue_count);
+  EXPECT_CODE(&inner->chunk, OP_GET_UPVALUE, 0, OP_PRINT, OP_GET_UPVALUE, 0, OP_PRINT, OP_NIL,
+              OP_RETURN);
+}
+
+UTEST_F(compiler, assigning_to_a_captured_name_writes_through_the_upvalue) {
+  ASSERT_TRUE(compile(utest_fixture, "fun o() { var a = 1; fun i() { a = 2; } }"));
+
+  clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
+  ASSERT_TRUE(outer != NULL);
+  clox_function_t *inner = function_constant(&outer->chunk, 1);
+  ASSERT_TRUE(inner != NULL);
+  EXPECT_CODE(&inner->chunk, OP_CONSTANT, 0, OP_SET_UPVALUE, 0, OP_POP, OP_NIL, OP_RETURN);
+}
+
+UTEST_F(compiler, a_parameter_is_captured_like_any_other_local) {
+  ASSERT_TRUE(compile(utest_fixture, "fun o(p) { fun i() { print p; } }"));
+
+  clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
+  ASSERT_TRUE(outer != NULL);
+  // the parameter stands in slot 1, and is captured from there
+  EXPECT_CODE(&outer->chunk, OP_CLOSURE, 0, 1, 1, OP_NIL, OP_RETURN);
+}
+
+UTEST_F(compiler, a_local_function_reaches_itself_through_an_upvalue) {
+  // the name is declared and marked initialized before the body is compiled,
+  // so a call to it from inside resolves to the slot it is about to fill
+  ASSERT_TRUE(compile(utest_fixture, "fun o() { fun i(n) { return i(n); } }"));
+
+  clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
+  ASSERT_TRUE(outer != NULL);
+  clox_function_t *inner = function_constant(&outer->chunk, 0);
+  ASSERT_TRUE(inner != NULL);
+
+  EXPECT_EQ((size_t)1, inner->upvalue_count);
+  EXPECT_CODE(&inner->chunk, OP_GET_UPVALUE, 0, OP_GET_LOCAL, 1, OP_CALL, 1, OP_RETURN, OP_NIL,
+              OP_RETURN);
+}
+
+UTEST_F(compiler, a_captured_local_is_closed_and_not_popped_when_its_scope_ends) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; fun f() { print a; } }"));
+
+  // the closure outlives the slot, so the value has to be moved off the stack
+  // rather than dropped: the function beside it is popped as usual
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CLOSURE, 1, 1, 1, OP_POP,
+              OP_CLOSE_UPVALUE, OP_NIL, OP_RETURN);
+}
+
+UTEST_F(compiler, the_locals_above_a_captured_one_are_still_popped_in_a_group) {
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; var b = 2; fun f() { print a; } }"));
+
+  // b and f come off together, and only the capture below them is closed
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_CLOSURE, 2, 1, 1,
+              OP_POP_N, 2, OP_CLOSE_UPVALUE, OP_NIL, OP_RETURN);
+}
+
+UTEST_F(compiler, break_closes_a_captured_local_on_its_way_out_of_the_loop) {
+  // break leaves the scope without running the pops its end emits, so it
+  // carries a close of its own for anything captured under it
+  ASSERT_TRUE(compile(utest_fixture, "while (true) { var a = 1; fun f() { print a; } break; }"));
+
+  const clox_chunk_t *chunk = &utest_fixture->function->chunk;
+  ASSERT_TRUE(chunk->length > 12);
+  EXPECT_EQ((clox_byte_t)OP_POP, chunk->code[10]);
+  EXPECT_EQ((clox_byte_t)OP_CLOSE_UPVALUE, chunk->code[11]);
+  EXPECT_EQ((clox_byte_t)OP_JUMP, chunk->code[12]);
+}
+
+UTEST_F(compiler, continue_closes_a_captured_local_on_its_way_round) {
+  ASSERT_TRUE(compile(utest_fixture, "while (true) { var a = 1; fun f() { print a; } continue; }"));
+
+  const clox_chunk_t *chunk = &utest_fixture->function->chunk;
+  ASSERT_TRUE(chunk->length > 12);
+  EXPECT_EQ((clox_byte_t)OP_POP, chunk->code[10]);
+  EXPECT_EQ((clox_byte_t)OP_CLOSE_UPVALUE, chunk->code[11]);
+  EXPECT_EQ((clox_byte_t)OP_LOOP, chunk->code[12]);
+}
+
+UTEST_F(compiler, capturing_as_many_names_as_the_limit_allows_is_accepted) {
+  char source[SOURCE_SIZE];
+  // one frame holds the slots, the next holds one more, and the innermost
+  // names every one of them: exactly what a byte of capture index can count
+  ASSERT_TRUE(compile(utest_fixture, functions_capturing(&source, CAPTURABLE_LOCALS,
+                                                         UPVALUE_SLOTS - CAPTURABLE_LOCALS)));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(compiler, one_capture_too_many_is_reported) {
+  char source[SOURCE_SIZE];
+  EXPECT_FALSE(compile(utest_fixture, functions_capturing(&source, CAPTURABLE_LOCALS,
+                                                          OVER_UPVALUE_SLOTS - CAPTURABLE_LOCALS)));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "upvalues limit") != NULL);
 }
 
 UTEST_F(compiler, a_function_declared_in_a_block_is_a_local) {
   ASSERT_TRUE(compile(utest_fixture, "{ fun f() {} }"));
 
-  // no OP_DEF_GLOBAL: the constant stays in the slot it was pushed into, and
-  // the scope pops it on the way out
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_NIL, OP_RETURN);
+  // no OP_DEF_GLOBAL: the closure stays in the slot it was made into, and the
+  // scope pops it on the way out
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_POP, OP_NIL, OP_RETURN);
 }
 
 UTEST_F(compiler, a_local_function_can_be_called_through_its_slot) {
   ASSERT_TRUE(compile(utest_fixture, "{ fun f() {} f(); }"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_CALL, 0, OP_POP,
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_GET_LOCAL, 1, OP_CALL, 0, OP_POP,
               OP_POP, OP_NIL, OP_RETURN);
 }
 
