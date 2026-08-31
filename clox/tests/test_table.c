@@ -4,6 +4,7 @@
 
 #include <utest.h>
 
+#include "memory.h"
 #include "object.h"
 #include "table.h"
 #include "value.h"
@@ -19,7 +20,7 @@ struct table {
 
 UTEST_F_SETUP(table) {
   clox_allocator_init(&utest_fixture->alloc);
-  clox_table_init(&utest_fixture->table);
+  clox_table_init(&utest_fixture->table, &utest_fixture->alloc);
 }
 
 UTEST_F_TEARDOWN(table) {
@@ -200,7 +201,7 @@ UTEST_F(table, copy_adds_the_source_entries_to_the_destination) {
   ASSERT_TRUE(clox_table_set(src, clox_test_intern(alloc, "two"), CLOX_NUMBER(2.0)));
 
   clox_table_t dst;
-  clox_table_init(&dst);
+  clox_table_init(&dst, alloc);
   ASSERT_TRUE(clox_table_set(&dst, clox_test_intern(alloc, "kept"), CLOX_NUMBER(3.0)));
 
   clox_table_copy(&dst, src);
@@ -224,7 +225,7 @@ UTEST_F(table, copy_replaces_the_values_of_keys_already_in_the_destination) {
   ASSERT_TRUE(clox_table_set(src, key, CLOX_NUMBER(1.0)));
 
   clox_table_t dst;
-  clox_table_init(&dst);
+  clox_table_init(&dst, alloc);
   ASSERT_TRUE(clox_table_set(&dst, key, CLOX_NUMBER(2.0)));
 
   clox_table_copy(&dst, src);
@@ -242,7 +243,7 @@ UTEST_F(table, copy_from_an_empty_table_changes_nothing) {
   const clox_string_t *key = clox_test_intern(alloc, "kept");
 
   clox_table_t dst;
-  clox_table_init(&dst);
+  clox_table_init(&dst, alloc);
   ASSERT_TRUE(clox_table_set(&dst, key, CLOX_NUMBER(1.0)));
 
   clox_table_copy(&dst, src);
@@ -294,6 +295,9 @@ UTEST_F(table, next_finds_nothing_in_a_freed_table) {
   clox_table_free(&utest_fixture->table);
 
   EXPECT_EQ(NULL, clox_table_next(&utest_fixture->table, NULL));
+
+  // the teardown frees the fixture table, which a freed table is not ready for
+  clox_table_init(&utest_fixture->table, &utest_fixture->alloc);
 }
 
 UTEST_F(table, next_visits_the_only_entry_and_then_stops) {
@@ -370,7 +374,7 @@ UTEST_F(table, next_finds_nothing_once_every_entry_is_deleted) {
   EXPECT_EQ(NULL, clox_table_next(table, NULL));
 }
 
-UTEST_F(table, a_table_is_empty_and_reusable_after_being_freed) {
+UTEST_F(table, a_table_is_empty_after_being_freed_and_usable_after_a_second_init) {
   const clox_string_t *key = clox_test_intern(&utest_fixture->alloc, "a");
 
   ASSERT_TRUE(clox_table_set(&utest_fixture->table, key, CLOX_NUMBER(1.0)));
@@ -378,6 +382,11 @@ UTEST_F(table, a_table_is_empty_and_reusable_after_being_freed) {
 
   clox_value_t value = CLOX_NIL;
   EXPECT_FALSE(clox_table_get(&utest_fixture->table, key, &value));
+
+  // free gives the storage back and keeps no allocator; init is what makes a
+  // table writable, whether it is the first time or the second
+  clox_table_init(&utest_fixture->table, &utest_fixture->alloc);
+
   EXPECT_TRUE(clox_table_set(&utest_fixture->table, key, CLOX_NUMBER(2.0)));
   ASSERT_TRUE(clox_table_get(&utest_fixture->table, key, &value));
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), value);

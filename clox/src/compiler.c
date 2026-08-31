@@ -12,9 +12,9 @@
 #include <string.h>
 
 #include "chunk.h"
+#include "common.h"
 #include "debug.h"
 #include "error.h"
-#include "memory.h"
 #include "object.h"
 #include "scanner.h"
 #include "value.h"

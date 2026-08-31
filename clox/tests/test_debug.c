@@ -8,6 +8,7 @@
 #include "chunk.h"
 #include "common.h"
 #include "debug.h"
+#include "memory.h"
 #include "object.h"
 #include "value.h"
 
@@ -31,7 +32,7 @@ struct debug {
 
 UTEST_F_SETUP(debug) {
   clox_allocator_init(&utest_fixture->alloc);
-  clox_chunk_init(&utest_fixture->chunk);
+  clox_chunk_init(&utest_fixture->chunk, &utest_fixture->alloc);
 }
 
 UTEST_F_TEARDOWN(debug) {
@@ -233,16 +234,11 @@ UTEST_F(debug, walking_a_chunk_of_closure_instructions_lands_exactly_on_its_end)
 }
 
 UTEST_F(debug, a_constant_is_disassembled_as_lox_source) {
-  clox_allocator_t alloc;
-  clox_allocator_init(&alloc);
-
   ASSERT_TRUE(clox_write_constant(&utest_fixture->chunk, OP_CONSTANT,
-                                  CLOX_STRING_COPY(&alloc, "text", 4), POS));
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "text", 4), POS));
 
   EXPECT_EQ((size_t)2, disassemble_one(utest_fixture, 0));
   EXPECT_TRUE(strstr(utest_fixture->text, "\"text\"") != NULL);
-
-  clox_allocator_free(&alloc);
 }
 
 UTEST_F(debug, a_long_global_instruction_advances_past_its_wider_index) {

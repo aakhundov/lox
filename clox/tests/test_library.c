@@ -7,6 +7,7 @@
 #include <utest.h>
 
 #include "library.h"
+#include "memory.h"
 #include "object.h"
 #include "value.h"
 

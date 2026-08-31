@@ -6,6 +6,7 @@
 
 #include <utest.h>
 
+#include "common.h"
 #include "memory.h"
 #include "object.h"
 #include "value.h"
@@ -15,15 +16,19 @@
 #define MANY_VALUES 64
 
 struct value_array {
+  clox_allocator_t alloc;
   clox_value_array_t array;
 };
 
 UTEST_F_SETUP(value_array) {
-  clox_value_array_init(&utest_fixture->array);
+  clox_allocator_init(&utest_fixture->alloc);
+  clox_value_array_init(&utest_fixture->array, &utest_fixture->alloc);
 }
 
 UTEST_F_TEARDOWN(value_array) {
+  // the array goes first: its storage comes from the allocator
   clox_value_array_free(&utest_fixture->array);
+  clox_allocator_free(&utest_fixture->alloc);
 }
 
 UTEST_F(value_array, starts_empty) {
@@ -68,12 +73,16 @@ UTEST_F(value_array, many_writes_all_survive_the_growth) {
   }
 }
 
-UTEST_F(value_array, free_empties_it_and_leaves_it_reusable) {
+UTEST_F(value_array, free_empties_it_and_a_second_init_makes_it_usable_again) {
   clox_value_array_t *array = &utest_fixture->array;
 
   clox_value_array_write(array, CLOX_NUMBER(1.0));
   clox_value_array_free(array);
   ASSERT_EQ((size_t)0, array->length);
+
+  // free gives the storage back and keeps no allocator; init is what makes an
+  // array writable, whether it is the first time or the second
+  clox_value_array_init(array, &utest_fixture->alloc);
 
   clox_value_array_write(array, CLOX_NUMBER(2.0));
   ASSERT_EQ((size_t)1, array->length);

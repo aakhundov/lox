@@ -13,6 +13,7 @@
 #include "common.h"
 #include "compiler.h"
 #include "error.h"
+#include "memory.h"
 #include "object.h"
 #include "table.h"
 #include "value.h"

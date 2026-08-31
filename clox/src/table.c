@@ -45,9 +45,10 @@ static inline clox_table_entry_t *find_entry(clox_table_entry_t *entries, size_t
   }
 }
 
-static inline void adjust_capacity(clox_table_t *table, size_t new_capacity) {
+static inline void adjust_capacity(clox_table_t *t, size_t new_capacity) {
   // allocate new storage
-  clox_table_entry_t *new_entries = CLOX_ALLOCATE_ARRAY(clox_table_entry_t, new_capacity);
+  clox_table_entry_t *new_entries =
+      CLOX_ARRAY_ALLOCATE(t->allocator, clox_table_entry_t, new_capacity);
 
   // clear new storage
   for (clox_table_entry_t *e = new_entries; e < new_entries + new_capacity; e++) {
@@ -55,38 +56,40 @@ static inline void adjust_capacity(clox_table_t *table, size_t new_capacity) {
     e->value = CLOX_NIL;
   }
 
-  table->length = 0;
-  if (table->entries != NULL) {
+  t->length = 0;
+  if (t->entries != NULL) {
     // copy the non-empty (and non-tombstone) entries from old to storage
-    for (clox_table_entry_t *src = table->entries; src < table->entries + table->capacity; src++) {
+    for (clox_table_entry_t *src = t->entries; src < t->entries + t->capacity; src++) {
       if (src->key != NULL) {
         clox_table_entry_t *dst = find_entry(new_entries, new_capacity, src->key);
         dst->key = src->key;
         dst->value = src->value;
-        table->length++;
+        t->length++;
       }
     }
   }
 
   // free old storage
-  CLOX_FREE_ARRAY(clox_table_entry_t, table->entries, table->capacity);
+  CLOX_ARRAY_FREE(t->allocator, clox_table_entry_t, t->entries, t->capacity);
 
-  table->entries = new_entries;
-  table->capacity = new_capacity;
+  t->entries = new_entries;
+  t->capacity = new_capacity;
 }
 
-void clox_table_init(clox_table_t *table) {
+void clox_table_init(clox_table_t *table, clox_allocator_t *alloc) {
   table->length = 0;
   table->capacity = 0;
   table->entries = NULL;
+  table->allocator = alloc;
 }
 
 void clox_table_free(clox_table_t *table) {
-  CLOX_FREE_ARRAY(clox_table_entry_t, table->entries, table->capacity);
+  CLOX_ARRAY_FREE(table->allocator, clox_table_entry_t, table->entries, table->capacity);
 
   table->length = 0;
   table->capacity = 0;
   table->entries = NULL;
+  table->allocator = NULL;
 }
 
 bool clox_table_get(const clox_table_t *table, const clox_string_t *key, clox_value_t *value) {
@@ -107,7 +110,7 @@ bool clox_table_get(const clox_table_t *table, const clox_string_t *key, clox_va
 bool clox_table_set(clox_table_t *table, const clox_string_t *key, clox_value_t value) {
   assert(table->length < SIZE_MAX);
   if (table->length + 1 > MAX_LENGTH(table->capacity)) {
-    size_t new_capacity = CLOX_GROW_SIZE(table->capacity);
+    size_t new_capacity = CLOX_ARRAY_GROW_SIZE(table->capacity);
     adjust_capacity(table, new_capacity);
   }
 

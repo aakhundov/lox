@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 
+#define CLOX_ARRAY_SIZE(arr) (sizeof((arr)) / sizeof(*(arr)))
+
 typedef struct {
   size_t line;
   size_t col;

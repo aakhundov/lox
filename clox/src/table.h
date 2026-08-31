@@ -11,13 +11,16 @@ typedef struct {
   clox_value_t value;
 } clox_table_entry_t;
 
+typedef struct clox_allocator_t clox_allocator_t;
+
 typedef struct {
   size_t length;
   size_t capacity;
   clox_table_entry_t *entries;
+  clox_allocator_t *allocator;
 } clox_table_t;
 
-void clox_table_init(clox_table_t *table);
+void clox_table_init(clox_table_t *table, clox_allocator_t *alloc);
 void clox_table_free(clox_table_t *table);
 bool clox_table_get(const clox_table_t *table, const clox_string_t *key, clox_value_t *value);
 bool clox_table_set(clox_table_t *table, const clox_string_t *key, clox_value_t value);

@@ -5,6 +5,7 @@
 
 #include "chunk.h"
 #include "common.h"
+#include "memory.h"
 #include "object.h"
 #include "value.h"
 
@@ -17,15 +18,19 @@
 static const clox_pos_t POS = {.line = 1, .col = 1};
 
 struct chunk {
+  clox_allocator_t alloc;
   clox_chunk_t chunk;
 };
 
 UTEST_F_SETUP(chunk) {
-  clox_chunk_init(&utest_fixture->chunk);
+  clox_allocator_init(&utest_fixture->alloc);
+  clox_chunk_init(&utest_fixture->chunk, &utest_fixture->alloc);
 }
 
 UTEST_F_TEARDOWN(chunk) {
+  // the chunk goes first: its storage comes from the allocator
   clox_chunk_free(&utest_fixture->chunk);
+  clox_allocator_free(&utest_fixture->alloc);
 }
 
 UTEST_F(chunk, starts_empty) {
@@ -73,7 +78,7 @@ UTEST_F(chunk, many_writes_all_survive_the_growth) {
   }
 }
 
-UTEST_F(chunk, free_empties_it_and_leaves_it_reusable) {
+UTEST_F(chunk, free_empties_it_and_a_second_init_makes_it_usable_again) {
   clox_chunk_t *chunk = &utest_fixture->chunk;
 
   clox_chunk_write(chunk, OP_RETURN, POS);
@@ -82,6 +87,10 @@ UTEST_F(chunk, free_empties_it_and_leaves_it_reusable) {
   clox_chunk_free(chunk);
   ASSERT_EQ((size_t)0, chunk->length);
   ASSERT_EQ((size_t)0, chunk->constants.length);
+
+  // free gives the storage back and keeps no allocator; init is what makes a
+  // chunk writable, whether it is the first time or the second
+  clox_chunk_init(chunk, &utest_fixture->alloc);
 
   clox_chunk_write(chunk, OP_NIL, POS);
   EXPECT_EQ((size_t)1, chunk->length);
@@ -191,62 +200,50 @@ UTEST_F(chunk, constants_on_both_sides_of_the_boundary_stay_readable) {
 
 UTEST_F(chunk, the_same_string_constant_is_stored_once) {
   clox_chunk_t *chunk = &utest_fixture->chunk;
-  clox_allocator_t alloc;
-  clox_allocator_init(&alloc);
+  clox_allocator_t *alloc = &utest_fixture->alloc;
 
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "text", 4), POS));
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "text", 4), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "text", 4), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "text", 4), POS));
 
   EXPECT_EQ((size_t)1, chunk->constants.length);
   ASSERT_EQ((size_t)4, chunk->length);
   EXPECT_EQ(chunk->code[1], chunk->code[3]); // both instructions name one index
-
-  clox_allocator_free(&alloc);
 }
 
 UTEST_F(chunk, distinct_string_constants_are_stored_apart) {
   clox_chunk_t *chunk = &utest_fixture->chunk;
-  clox_allocator_t alloc;
-  clox_allocator_init(&alloc);
+  clox_allocator_t *alloc = &utest_fixture->alloc;
 
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "one", 3), POS));
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "two", 3), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "one", 3), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "two", 3), POS));
 
   EXPECT_EQ((size_t)2, chunk->constants.length);
   EXPECT_NE(chunk->code[1], chunk->code[3]);
   EXPECT_STREQ("one", CLOX_AS_CSTRING(chunk->constants.values[chunk->code[1]]));
   EXPECT_STREQ("two", CLOX_AS_CSTRING(chunk->constants.values[chunk->code[3]]));
-
-  clox_allocator_free(&alloc);
 }
 
 UTEST_F(chunk, a_string_constant_seen_again_keeps_its_first_index) {
   clox_chunk_t *chunk = &utest_fixture->chunk;
-  clox_allocator_t alloc;
-  clox_allocator_init(&alloc);
+  clox_allocator_t *alloc = &utest_fixture->alloc;
 
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "one", 3), POS));
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "two", 3), POS));
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "one", 3), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "one", 3), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "two", 3), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "one", 3), POS));
 
   EXPECT_EQ((size_t)2, chunk->constants.length);
   EXPECT_EQ(chunk->code[1], chunk->code[5]);
-
-  clox_allocator_free(&alloc);
 }
 
 UTEST_F(chunk, a_string_constant_is_shared_across_the_opcodes_that_name_it) {
   clox_chunk_t *chunk = &utest_fixture->chunk;
-  clox_allocator_t alloc;
-  clox_allocator_init(&alloc);
+  clox_allocator_t *alloc = &utest_fixture->alloc;
 
-  ASSERT_TRUE(clox_write_constant(chunk, OP_DEF_GLOBAL, CLOX_STRING_COPY(&alloc, "a", 1), POS));
-  ASSERT_TRUE(clox_write_constant(chunk, OP_GET_GLOBAL, CLOX_STRING_COPY(&alloc, "a", 1), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_DEF_GLOBAL, CLOX_STRING_COPY(alloc, "a", 1), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_GET_GLOBAL, CLOX_STRING_COPY(alloc, "a", 1), POS));
 
   EXPECT_EQ((size_t)1, chunk->constants.length);
   EXPECT_EQ(chunk->code[1], chunk->code[3]);
-
-  clox_allocator_free(&alloc);
 }
 
 UTEST_F(chunk, equal_numbers_are_stored_separately) {
@@ -260,21 +257,22 @@ UTEST_F(chunk, equal_numbers_are_stored_separately) {
 
 UTEST_F(chunk, a_freed_chunk_forgets_the_strings_it_had_stored) {
   clox_chunk_t *chunk = &utest_fixture->chunk;
-  clox_allocator_t alloc;
-  clox_allocator_init(&alloc);
+  clox_allocator_t *alloc = &utest_fixture->alloc;
 
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "one", 3), POS));
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "two", 3), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "one", 3), POS));
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "two", 3), POS));
   ASSERT_EQ((clox_byte_t)1, chunk->code[3]); // "two" landed second
 
+  // free hands the storage back and leaves no allocator behind, so a chunk
+  // that is to be written to again has to be initialized a second time
   clox_chunk_free(chunk);
-  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(&alloc, "two", 3), POS));
+  clox_chunk_init(chunk, alloc);
+
+  ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_STRING_COPY(alloc, "two", 3), POS));
 
   EXPECT_EQ((size_t)1, chunk->constants.length);
   EXPECT_EQ((clox_byte_t)0, chunk->code[1]); // and starts over at the first index
   EXPECT_STREQ("two", CLOX_AS_CSTRING(chunk->constants.values[0]));
-
-  clox_allocator_free(&alloc);
 }
 
 UTEST(opcodes, constant_opcodes_occupy_the_lowest_opcodes) {

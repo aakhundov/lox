@@ -11,6 +11,7 @@
 #include "common.h"
 #include "error.h"
 #include "library.h"
+#include "memory.h"
 #include "object.h"
 #include "table.h"
 #include "value.h"

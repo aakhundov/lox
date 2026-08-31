@@ -1,11 +1,11 @@
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include <utest.h>
 
 #include "chunk.h"
 #include "common.h"
+#include "memory.h"
 #include "object.h"
 #include "value.h"
 
@@ -93,7 +93,10 @@ UTEST_F(object, interned_strings_share_their_hash) {
 }
 
 UTEST_F(object, move_adopts_the_buffer_it_is_given) {
-  char *buffer = malloc(5); // owned by the allocator from here on
+  // the buffer is the allocator's to release from here on, so it is the
+  // allocator that has to hand it out: a block it never counted cannot be
+  // subtracted from its running total when the string is freed
+  char *buffer = CLOX_ARRAY_ALLOCATE(&utest_fixture->alloc, char, 5);
   ASSERT_TRUE(buffer != NULL);
   memcpy(buffer, "text", 5);
 
@@ -107,7 +110,7 @@ UTEST_F(object, move_adopts_the_buffer_it_is_given) {
 UTEST_F(object, move_of_content_already_interned_yields_the_existing_object) {
   clox_value_t copied = CLOX_STRING_COPY(&utest_fixture->alloc, "same", 4);
 
-  char *buffer = malloc(5);
+  char *buffer = CLOX_ARRAY_ALLOCATE(&utest_fixture->alloc, char, 5);
   ASSERT_TRUE(buffer != NULL);
   memcpy(buffer, "same", 5);
 

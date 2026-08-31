@@ -7,13 +7,7 @@
 
 #include "chunk.h"
 #include "error.h"
-#include "table.h"
 #include "value.h"
-
-typedef struct {
-  clox_object_t *head;
-  clox_table_t strings;
-} clox_allocator_t;
 
 typedef enum {
   OBJ_STRING,
@@ -25,7 +19,8 @@ typedef enum {
 
 typedef struct clox_object_t {
   clox_object_type_t type;
-  clox_object_t *next;
+  struct clox_object_t *next;
+  bool is_marked;
 } clox_object_t;
 
 typedef struct clox_string_t {
@@ -98,9 +93,6 @@ typedef struct clox_closure_t {
 #define CLOX_AS_UPVALUE(val) ((clox_upvalue_t *)CLOX_AS_OBJECT(val))
 #define CLOX_AS_CLOSURE(val) ((clox_closure_t *)CLOX_AS_OBJECT(val))
 
-void clox_allocator_init(clox_allocator_t *alloc);
-void clox_allocator_free(clox_allocator_t *alloc);
-
 bool clox_object_is_truthy(clox_value_t val);
 bool clox_object_equals(clox_value_t a, clox_value_t b);
 void clox_object_fprintf(FILE *stream, clox_value_t val);
@@ -111,7 +103,8 @@ void clox_object_repr_printf(clox_value_t val);
 // (chars) points to at least (length) chars with no NUL among them
 const clox_string_t *clox_string_copy(clox_allocator_t *alloc, const char *chars, size_t length);
 // (chars) is a heap-allocated buffer of size (length + 1)
-// holding a NUL-terminated string of (length) chars
+// holding a NUL-terminated string of (length) chars and
+// must have been allocated with the (alloc)
 const clox_string_t *clox_string_move(clox_allocator_t *alloc, const char *chars, size_t length);
 clox_value_t clox_string_concat(clox_allocator_t *alloc, clox_value_t s1, clox_value_t s2);
 

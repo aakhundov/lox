@@ -28,6 +28,8 @@ enum {
 
 extern const char *const clox_op_code_names[];
 
+typedef struct clox_allocator_t clox_allocator_t;
+
 typedef struct {
   size_t length;
   size_t capacity;
@@ -35,9 +37,10 @@ typedef struct {
   clox_pos_t *positions;
   clox_value_array_t constants;
   clox_table_t string_constants;
+  clox_allocator_t *allocator;
 } clox_chunk_t;
 
-void clox_chunk_init(clox_chunk_t *chunk);
+void clox_chunk_init(clox_chunk_t *chunk, clox_allocator_t *alloc);
 void clox_chunk_write(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos);
 void clox_chunk_free(clox_chunk_t *chunk);
 

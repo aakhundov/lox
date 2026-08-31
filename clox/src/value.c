@@ -30,16 +30,18 @@ static inline void number_repr_fprintf(FILE *stream, double num) {
   (void)fprintf(stream, "%s", text);
 }
 
-void clox_value_array_init(clox_value_array_t *arr) {
+void clox_value_array_init(clox_value_array_t *arr, clox_allocator_t *alloc) {
   arr->values = NULL;
   arr->capacity = 0;
   arr->length = 0;
+  arr->allocator = alloc;
 }
 
 void clox_value_array_write(clox_value_array_t *arr, clox_value_t val) {
   if (arr->length == arr->capacity) {
-    size_t new_capacity = CLOX_GROW_SIZE(arr->capacity);
-    arr->values = CLOX_GROW_ARRAY(clox_value_t, arr->values, arr->capacity, new_capacity);
+    size_t new_capacity = CLOX_ARRAY_GROW_SIZE(arr->capacity);
+    arr->values =
+        CLOX_ARRAY_GROW(arr->allocator, clox_value_t, arr->values, arr->capacity, new_capacity);
     arr->capacity = new_capacity;
   }
 
@@ -56,11 +58,12 @@ clox_value_t clox_value_array_pop(clox_value_array_t *arr) {
 }
 
 void clox_value_array_free(clox_value_array_t *arr) {
-  CLOX_FREE_ARRAY(clox_value_t, arr->values, arr->capacity);
+  CLOX_ARRAY_FREE(arr->allocator, clox_value_t, arr->values, arr->capacity);
 
   arr->values = NULL;
   arr->capacity = 0;
   arr->length = 0;
+  arr->allocator = NULL;
 }
 
 void clox_value_fprintf(FILE *stream, clox_value_t val) {

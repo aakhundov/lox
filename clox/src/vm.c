@@ -526,7 +526,7 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
   vm->allocator = alloc;
   reset_vm(vm);
 
-  clox_table_init(&vm->globals);
+  clox_table_init(&vm->globals, alloc);
   clox_vm_reset_error_handler(vm);
   clox_vm_set_default_print_fn(vm);
 

@@ -49,13 +49,16 @@ typedef struct {
 #define CLOX_AS_SIZE(val) ((val).as.size)
 #define CLOX_AS_OBJECT(val) ((val).as.object)
 
+typedef struct clox_allocator_t clox_allocator_t;
+
 typedef struct {
   size_t length;
   size_t capacity;
   clox_value_t *values;
+  clox_allocator_t *allocator;
 } clox_value_array_t;
 
-void clox_value_array_init(clox_value_array_t *arr);
+void clox_value_array_init(clox_value_array_t *arr, clox_allocator_t *alloc);
 void clox_value_array_write(clox_value_array_t *arr, clox_value_t val);
 clox_value_t clox_value_array_pop(clox_value_array_t *arr);
 void clox_value_array_free(clox_value_array_t *arr);

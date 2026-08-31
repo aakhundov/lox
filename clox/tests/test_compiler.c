@@ -9,6 +9,7 @@
 
 #include "chunk.h"
 #include "compiler.h"
+#include "memory.h"
 #include "object.h"
 #include "value.h"
 

@@ -77,21 +77,24 @@ static inline clox_value_t pop_constant(clox_chunk_t *c) {
   return val;
 }
 
-void clox_chunk_init(clox_chunk_t *chunk) {
+void clox_chunk_init(clox_chunk_t *chunk, clox_allocator_t *alloc) {
   chunk->code = NULL;
   chunk->positions = NULL;
   chunk->capacity = 0;
   chunk->length = 0;
+  chunk->allocator = alloc;
 
-  clox_value_array_init(&chunk->constants);
-  clox_table_init(&chunk->string_constants);
+  clox_value_array_init(&chunk->constants, alloc);
+  clox_table_init(&chunk->string_constants, alloc);
 }
 
 void clox_chunk_write(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos) {
   if (chunk->length == chunk->capacity) {
-    size_t new_capacity = CLOX_GROW_SIZE(chunk->capacity);
-    chunk->code = CLOX_GROW_ARRAY(clox_byte_t, chunk->code, chunk->capacity, new_capacity);
-    chunk->positions = CLOX_GROW_ARRAY(clox_pos_t, chunk->positions, chunk->capacity, new_capacity);
+    size_t new_capacity = CLOX_ARRAY_GROW_SIZE(chunk->capacity);
+    chunk->code =
+        CLOX_ARRAY_GROW(chunk->allocator, clox_byte_t, chunk->code, chunk->capacity, new_capacity);
+    chunk->positions = CLOX_ARRAY_GROW(chunk->allocator, clox_pos_t, chunk->positions,
+                                       chunk->capacity, new_capacity);
     chunk->capacity = new_capacity;
   }
 
@@ -101,13 +104,14 @@ void clox_chunk_write(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos) {
 }
 
 void clox_chunk_free(clox_chunk_t *chunk) {
-  CLOX_FREE_ARRAY(clox_byte_t, chunk->code, chunk->capacity);
-  CLOX_FREE_ARRAY(clox_pos_t, chunk->positions, chunk->capacity);
+  CLOX_ARRAY_FREE(chunk->allocator, clox_byte_t, chunk->code, chunk->capacity);
+  CLOX_ARRAY_FREE(chunk->allocator, clox_pos_t, chunk->positions, chunk->capacity);
 
   chunk->code = NULL;
   chunk->positions = NULL;
   chunk->capacity = 0;
   chunk->length = 0;
+  chunk->allocator = NULL;
 
   clox_value_array_free(&chunk->constants);
   clox_table_free(&chunk->string_constants);

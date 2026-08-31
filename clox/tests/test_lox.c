@@ -7,6 +7,7 @@
 
 #include "compiler.h"
 #include "error.h"
+#include "memory.h"
 #include "object.h"
 #include "value.h"
 #include "vm.h"
