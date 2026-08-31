@@ -109,7 +109,7 @@ UTEST(value, a_string_is_truthy) {
   clox_allocator_t alloc;
   clox_allocator_init(&alloc);
 
-  EXPECT_TRUE(clox_value_is_truthy(CLOX_STRING_COPY(&alloc, "text", 4)));
+  EXPECT_TRUE(clox_value_is_truthy(clox_test_string_kept(&alloc, "text", 4)));
 
   clox_allocator_free(&alloc);
 }
@@ -118,7 +118,7 @@ UTEST(value, an_empty_string_is_not_truthy) {
   clox_allocator_t alloc;
   clox_allocator_init(&alloc);
 
-  EXPECT_FALSE(clox_value_is_truthy(CLOX_STRING_COPY(&alloc, "", 0)));
+  EXPECT_FALSE(clox_value_is_truthy(clox_test_string_kept(&alloc, "", 0)));
 
   clox_allocator_free(&alloc);
 }
@@ -180,9 +180,9 @@ UTEST(value, strings_are_equal_when_their_content_is) {
   clox_allocator_t alloc;
   clox_allocator_init(&alloc);
 
-  clox_value_t first = CLOX_STRING_COPY(&alloc, "same", 4);
-  clox_value_t second = CLOX_STRING_COPY(&alloc, "same", 4);
-  clox_value_t other = CLOX_STRING_COPY(&alloc, "different", 9);
+  clox_value_t first = clox_test_string_kept(&alloc, "same", 4);
+  clox_value_t second = clox_test_string_kept(&alloc, "same", 4);
+  clox_value_t other = clox_test_string_kept(&alloc, "different", 9);
 
   EXPECT_TRUE(clox_value_equals(first, second));
   EXPECT_FALSE(clox_value_equals(first, other));
@@ -219,7 +219,7 @@ UTEST(value, a_string_renders_as_its_characters) {
   clox_allocator_init(&alloc);
   char buffer[CLOX_TEST_MESSAGE_SIZE];
 
-  EXPECT_STREQ("text", clox_test_value_string(&buffer, CLOX_STRING_COPY(&alloc, "text", 4)));
+  EXPECT_STREQ("text", clox_test_value_string(&buffer, clox_test_string_kept(&alloc, "text", 4)));
 
   clox_allocator_free(&alloc);
 }
@@ -308,7 +308,7 @@ UTEST(value, a_string_reprs_in_quotes) {
   char buffer[CLOX_TEST_MESSAGE_SIZE];
 
   EXPECT_STREQ("\"text\"",
-               clox_test_value_repr_string(&buffer, CLOX_STRING_COPY(&alloc, "text", 4)));
+               clox_test_value_repr_string(&buffer, clox_test_string_kept(&alloc, "text", 4)));
 
   clox_allocator_free(&alloc);
 }

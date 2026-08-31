@@ -14,6 +14,9 @@
 #define START_ALLOCATION(alloc, c_type, obj_type)                                                  \
   (c_type *)start_allocation(alloc, sizeof(c_type), obj_type)
 
+// this must be the last statement in allocator functions,
+// as it links the allocated object to the allocator->objects
+// list which makes it visible to GC (invisible before that)
 #define FINISH_ALLOCATION(alloc, c_type, obj)                                                      \
   do {                                                                                             \
     return (c_type *)finish_allocation(alloc, (clox_object_t *)(obj));                             \
@@ -31,8 +34,8 @@ static inline clox_object_t *start_allocation(clox_allocator_t *a, size_t size,
 
 static inline clox_object_t *finish_allocation(clox_allocator_t *a, clox_object_t *obj) {
   // add to allocator
-  obj->next = a->head;
-  a->head = obj;
+  obj->next = a->objects;
+  a->objects = obj;
 
 #if CLOX_DEBUG_ALLOCATION
   printf("---- ALLC ");
@@ -109,7 +112,13 @@ clox_value_t clox_string_concat(clox_allocator_t *a, clox_value_t s1, clox_value
   const clox_string_t *right = CLOX_AS_STRING(s2);
 
   size_t total_length = left->length + right->length;
+
+  clox_push_durable(a, CLOX_AS_OBJECT(s1));
+  clox_push_durable(a, CLOX_AS_OBJECT(s2));
   char *chars = CLOX_ARRAY_ALLOCATE(a, char, total_length + 1);
+  clox_pop_durable(a); // s2
+  clox_pop_durable(a); // s1
+
   memcpy(chars, left->chars, left->length);
   memcpy(chars + left->length, right->chars, right->length);
   chars[total_length] = '\0';
@@ -162,6 +171,8 @@ clox_upvalue_t *clox_new_upvalue(clox_allocator_t *alloc, clox_value_t *location
 clox_closure_t *clox_new_closure(clox_allocator_t *alloc, const clox_function_t *function) {
   assert(function != NULL);
 
+  clox_push_durable(alloc, (clox_object_t *)function);
+
   // allocate and NULL-initialize array of pointers to upvalues;
   // the upvalues themselves are *not owned*, just referenced
   clox_upvalue_t **upvalues = CLOX_ARRAY_ALLOCATE(alloc, clox_upvalue_t *, function->upvalue_count);
@@ -170,6 +181,8 @@ clox_closure_t *clox_new_closure(clox_allocator_t *alloc, const clox_function_t 
   }
 
   clox_closure_t *closure = START_ALLOCATION(alloc, clox_closure_t, OBJ_CLOSURE);
+
+  clox_pop_durable(alloc); // function
 
   closure->function = function;
   closure->upvalues = upvalues;

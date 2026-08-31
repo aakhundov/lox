@@ -218,3 +218,33 @@ const clox_table_entry_t *clox_table_next(const clox_table_t *table,
   // no entries past prev
   return NULL;
 }
+
+void clox_table_mark_entries(clox_table_t *table) {
+  if (table->entries == NULL || table->length == 0) {
+    return;
+  }
+
+  for (clox_table_entry_t *e = table->entries; e < table->entries + table->capacity; e++) {
+    if (e->key != NULL) {
+      // cast is safe: all string objects are allocated on the heap
+      clox_mark_object(table->allocator, (clox_object_t *)e->key);
+      clox_mark_value(table->allocator, e->value);
+    }
+  }
+}
+
+void clox_table_remove_unmarked_keys(clox_table_t *table) {
+  if (table->entries == NULL || table->length == 0) {
+    return;
+  }
+
+  // more efficient but lower-level than calling
+  // clox_table_delete on each loop iteration
+  for (clox_table_entry_t *e = table->entries; e < table->entries + table->capacity; e++) {
+    if (e->key != NULL && !((const clox_object_t *)e->key)->is_marked) {
+      // place a tombstone
+      e->key = NULL;
+      e->value = CLOX_BOOL(true);
+    }
+  }
+}

@@ -57,6 +57,12 @@ UTEST_F_SETUP(vm) {
   clox_vm_init(&utest_fixture->vm, &utest_fixture->alloc);
   utest_fixture->function = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
                                               strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
+  // The fixture holds the function the tests build in, outside any structure
+  // the VM marks from: it is not on the stack, in globals or in a call frame
+  // until interpret() runs it. Nothing in clox is in this position -- a real
+  // caller never holds an object of its own -- so the durable is the harness
+  // standing in for the root a caller would have.
+  clox_push_durable(&utest_fixture->alloc, (clox_object_t *)utest_fixture->function);
   utest_fixture->printed = (clox_test_printed_t){0};
   utest_fixture->errors = (clox_test_errors_t){0};
   clox_vm_set_print_fn(&utest_fixture->vm, clox_test_print_fn, &utest_fixture->printed);
@@ -66,6 +72,7 @@ UTEST_F_SETUP(vm) {
 UTEST_F_TEARDOWN(vm) {
   clox_vm_reset_error_handler(&utest_fixture->vm);
   clox_vm_set_default_print_fn(&utest_fixture->vm);
+  clox_pop_durable(&utest_fixture->alloc); // function
   clox_vm_free(&utest_fixture->vm);
   clox_allocator_free(&utest_fixture->alloc);
 }
@@ -82,7 +89,7 @@ static void emit_constant(struct vm *fixture, clox_value_t val) {
 // of the global opcodes; the name is interned, so equal names are one key.
 static void emit_global(struct vm *fixture, clox_op_code_t opcode, const char *name) {
   (void)clox_write_constant(&fixture->function->chunk, opcode,
-                            CLOX_STRING_COPY(&fixture->alloc, name, strlen(name)), POS);
+                            clox_test_string_kept(&fixture->alloc, name, strlen(name)), POS);
 }
 
 // Writes a jump instruction over the given offset, big-endian. The tests that
@@ -144,7 +151,13 @@ static bool interpret(struct vm *fixture, size_t left_on_stack) {
 // fixture's own function goes through the three helpers here, so a call is
 // always a real second chunk and not the same one re-entered.
 static clox_function_t *make_callee(struct vm *fixture, const char *name, size_t arity) {
-  return clox_new_function(&fixture->alloc, name, strlen(name), arity, FILE_NAME, SOURCE);
+  clox_function_t *callee =
+      clox_new_function(&fixture->alloc, name, strlen(name), arity, FILE_NAME, SOURCE);
+  // the test builds this function before anything in the interpreter holds it,
+  // and goes on writing into its chunk, which allocates
+  clox_test_keep(&fixture->alloc, callee);
+
+  return callee;
 }
 
 static void emit_to(clox_function_t *callee, clox_byte_t byte) {
@@ -364,8 +377,8 @@ UTEST_F(vm, inequality_is_the_negation_of_equality) {
 
 UTEST_F(vm, adding_two_strings_joins_them) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
-  emit_constant(utest_fixture, CLOX_STRING_COPY(alloc, "one", 3));
-  emit_constant(utest_fixture, CLOX_STRING_COPY(alloc, "two", 3));
+  emit_constant(utest_fixture, clox_test_string_kept(alloc, "one", 3));
+  emit_constant(utest_fixture, clox_test_string_kept(alloc, "two", 3));
   emit(utest_fixture, OP_ADD);
 
   ASSERT_TRUE(interpret(utest_fixture, 1));
@@ -378,8 +391,8 @@ UTEST_F(vm, adding_two_strings_joins_them) {
 
 UTEST_F(vm, equal_strings_compare_equal) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
-  emit_constant(utest_fixture, CLOX_STRING_COPY(alloc, "same", 4));
-  emit_constant(utest_fixture, CLOX_STRING_COPY(alloc, "same", 4));
+  emit_constant(utest_fixture, clox_test_string_kept(alloc, "same", 4));
+  emit_constant(utest_fixture, clox_test_string_kept(alloc, "same", 4));
   emit(utest_fixture, OP_EQUAL);
 
   ASSERT_TRUE(interpret(utest_fixture, 1));
@@ -568,8 +581,9 @@ UTEST_F(vm, a_global_outlives_the_run_that_defined_it) {
 
   clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
                                             strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, next);
   (void)clox_write_constant(&next->chunk, OP_GET_GLOBAL,
-                            CLOX_STRING_COPY(&utest_fixture->alloc, "kept", 4), POS);
+                            clox_test_string_kept(&utest_fixture->alloc, "kept", 4), POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_RETURN, POS);
@@ -768,8 +782,9 @@ UTEST_F(vm, a_failed_assignment_leaves_the_global_undefined) {
 
   clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
                                             strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, next);
   (void)clox_write_constant(&next->chunk, OP_GET_GLOBAL,
-                            CLOX_STRING_COPY(&utest_fixture->alloc, "missing", 7), POS);
+                            clox_test_string_kept(&utest_fixture->alloc, "missing", 7), POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_RETURN, POS);
@@ -781,7 +796,7 @@ UTEST_F(vm, a_failed_assignment_leaves_the_global_undefined) {
 
 UTEST_F(vm, adding_a_number_to_a_string_is_a_runtime_error) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
-  emit_constant(utest_fixture, CLOX_STRING_COPY(alloc, "text", 4));
+  emit_constant(utest_fixture, clox_test_string_kept(alloc, "text", 4));
   emit_constant(utest_fixture, CLOX_NUMBER(1.0));
   emit(utest_fixture, OP_ADD);
 
@@ -863,6 +878,7 @@ UTEST_F(vm, a_run_that_failed_leaves_the_vm_usable) {
 
   clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
                                             strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, next);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
@@ -1181,7 +1197,7 @@ UTEST_F(vm, calling_a_number_is_a_runtime_error) {
 }
 
 UTEST_F(vm, calling_a_string_is_a_runtime_error) {
-  emit_constant(utest_fixture, CLOX_STRING_COPY(&utest_fixture->alloc, "text", 4));
+  emit_constant(utest_fixture, clox_test_string_kept(&utest_fixture->alloc, "text", 4));
   emit_call(utest_fixture, 0);
 
   EXPECT_FALSE(interpret(utest_fixture, 1));
@@ -1213,7 +1229,7 @@ UTEST_F(vm, nesting_calls_past_the_frame_limit_is_a_runtime_error) {
   // reach itself by name today
   clox_function_t *callee = make_callee(utest_fixture, "again", 0);
   (void)clox_write_constant(&callee->chunk, OP_GET_GLOBAL,
-                            CLOX_STRING_COPY(&utest_fixture->alloc, "again", 5), POS);
+                            clox_test_string_kept(&utest_fixture->alloc, "again", 5), POS);
   emit_to(callee, OP_CALL);
   emit_to(callee, 0);
   emit_to(callee, OP_RETURN);
@@ -1231,7 +1247,7 @@ UTEST_F(vm, nesting_calls_past_the_frame_limit_is_a_runtime_error) {
 UTEST_F(vm, a_run_that_overflowed_the_frames_leaves_the_vm_usable) {
   clox_function_t *callee = make_callee(utest_fixture, "again", 0);
   (void)clox_write_constant(&callee->chunk, OP_GET_GLOBAL,
-                            CLOX_STRING_COPY(&utest_fixture->alloc, "again", 5), POS);
+                            clox_test_string_kept(&utest_fixture->alloc, "again", 5), POS);
   emit_to(callee, OP_CALL);
   emit_to(callee, 0);
   emit_to(callee, OP_RETURN);
@@ -1245,6 +1261,7 @@ UTEST_F(vm, a_run_that_overflowed_the_frames_leaves_the_vm_usable) {
   // the frames the failed run left behind are not the next run's
   clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
                                             strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, next);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
@@ -1626,6 +1643,7 @@ UTEST_F(vm, a_run_that_failed_with_upvalues_open_leaves_the_vm_usable) {
 
   clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
                                             strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, next);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
@@ -1759,6 +1777,7 @@ UTEST_F(vm, a_run_that_a_native_failed_leaves_the_vm_usable) {
   // so the next run starts on a stack the failed one did not leave behind
   clox_function_t *next = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
                                             strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, next);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
   clox_chunk_write(&next->chunk, OP_NIL, POS);

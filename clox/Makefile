@@ -78,6 +78,11 @@ COVERAGE_FLAGS := -fprofile-instr-generate -fcoverage-mapping
 PROFRAW := $(BUILD)/tests.profraw
 PROFDATA := $(BUILD)/tests.profdata
 
+# The stress build differs from the ordinary one by a single define, but that
+# define reaches every translation unit, so it gets a directory of its own for
+# the same reason coverage does.
+STRESS_BUILD := $(BUILD)/stress
+
 # The release build is the same sources with the development scaffolding taken
 # out: the sanitizers, the debug info and the pinned frame pointer come off,
 # optimization goes on, and NDEBUG compiles the internal-invariant asserts
@@ -121,7 +126,7 @@ FLAGS_STAMP := $(BUILD)/.flags
 # `force` deliberately has no rule anywhere: a phony target that never exists
 # is always out of date, which is what keeps the flags stamp reconsidered on
 # every run.
-.PHONY: run check test release run-release coverage coverage-report doctor clean format format-check tidy force
+.PHONY: run check test test-stress release run-release coverage coverage-report doctor clean format format-check tidy force
 
 $(EXEC): $(OBJS) $(VENDOR_OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $(EXEC)
@@ -187,9 +192,12 @@ format-check:
 tidy:
 	$(CLANG_TIDY) $(SRCS) -- $(CFLAGS) $(CPPFLAGS)
 
-# what has to hold for every change, in one command; anything slower than a
-# keystroke -- coverage, a fuzzing run -- earns its own target instead
-check: format-check tidy test
+# What has to hold for every change, in one command; anything slower than a
+# keystroke -- coverage, a fuzzing run -- earns its own target instead. The
+# stress run is in because it is nearly free once built: the suite itself takes
+# a fifth of a second either way, and what the second entry costs is compiling
+# the tree again rather than collecting at every allocation.
+check: format-check tidy test test-stress
 
 # Recursive for the same reason coverage is: BUILD and CFLAGS have to differ
 # for the whole tree, flags stamp included, not for a single recipe. No goal is
@@ -203,6 +211,17 @@ release:
 # compiled into this binary, so there is nothing for those variables to tune.
 run-release: release
 	@$(RELEASE_BUILD)/$(APP) $(ARGS)
+
+# The suite again, with a collection at every allocation. Its value is that it
+# costs no new tests: every case already written allocates, and under stress
+# each of those allocations is a point where an object the code failed to root
+# is swept out from under it. What it cannot show is the collector doing its
+# job -- one that marked everything and freed nothing would pass all of this --
+# so the GC suite skips itself here and runs against the ordinary build, where
+# it says when collections happen.
+test-stress:
+	@$(MAKE) --no-print-directory BUILD=$(STRESS_BUILD) \
+	         CPPFLAGS='-DCLOX_STRESS_GC=1' test
 
 # A report rather than a gate, so it stays out of check and a failing test does
 # not stop it: what it is good for is naming code that has never run at all.

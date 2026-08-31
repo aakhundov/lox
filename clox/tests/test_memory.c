@@ -8,6 +8,8 @@
 #include "object.h"
 #include "value.h"
 
+#include "support/harness.h"
+
 #define ELEMENTS 8
 #define GROWN_ELEMENTS ((size_t)ELEMENTS * 4)
 #define BLOCK_BYTES 16
@@ -129,7 +131,7 @@ UTEST(memory, grow_size_starts_at_the_initial_size_and_then_doubles) {
 
 UTEST_F(memory, a_new_allocator_holds_nothing) {
   EXPECT_EQ((size_t)0, utest_fixture->alloc.allocated_size);
-  EXPECT_EQ(NULL, utest_fixture->alloc.head);
+  EXPECT_EQ(NULL, utest_fixture->alloc.objects);
 }
 
 UTEST_F(memory, the_total_counts_the_bytes_asked_for) {
@@ -206,7 +208,7 @@ UTEST_F(memory, separate_blocks_add_up) {
 // Whether the list runs in allocation order or against it is the allocator's
 // own business, so the tests below only ask whether an object is on it.
 static bool is_recorded(const clox_allocator_t *alloc, const void *object) {
-  for (const clox_object_t *obj = alloc->head; obj != NULL; obj = obj->next) {
+  for (const clox_object_t *obj = alloc->objects; obj != NULL; obj = obj->next) {
     if (obj == object) {
       return true;
     }
@@ -218,6 +220,7 @@ UTEST_F(memory, an_allocated_object_is_recorded) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
 
   const clox_string_t *string = clox_string_copy(alloc, "text", 4);
+  clox_test_keep(alloc, string);
   ASSERT_TRUE(string != NULL);
 
   EXPECT_TRUE(is_recorded(alloc, string));
@@ -227,11 +230,18 @@ UTEST_F(memory, an_object_of_every_kind_is_recorded) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
   clox_value_t slot = CLOX_NIL;
 
+  // each is held by the test alone, so each has to be kept before the next
+  // allocation is free to take it
   const clox_string_t *string = clox_string_copy(alloc, "text", 4);
+  clox_test_keep(alloc, string);
   const clox_function_t *function = clox_new_function(alloc, "fn", 2, 0, "test.lox", "");
+  clox_test_keep(alloc, function);
   const clox_native_t *native = clox_new_native(alloc, "nt", 0, a_native);
+  clox_test_keep(alloc, native);
   const clox_upvalue_t *upvalue = clox_new_upvalue(alloc, &slot);
+  clox_test_keep(alloc, upvalue);
   const clox_closure_t *closure = clox_new_closure(alloc, function);
+  clox_test_keep(alloc, closure);
 
   EXPECT_TRUE(is_recorded(alloc, string));
   EXPECT_TRUE(is_recorded(alloc, function));
@@ -245,6 +255,7 @@ UTEST_F(memory, an_object_adds_its_own_size_to_the_total) {
 
   size_t before = alloc->allocated_size;
   const clox_string_t *string = clox_string_copy(alloc, "text", 4);
+  clox_test_keep(alloc, string);
   ASSERT_TRUE(string != NULL);
 
   // the object, its characters and the NUL; the intern table it goes into
@@ -256,6 +267,7 @@ UTEST_F(memory, an_interned_string_is_not_allocated_a_second_time) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
 
   const clox_string_t *first = clox_string_copy(alloc, "text", 4);
+  clox_test_keep(alloc, first);
   ASSERT_TRUE(first != NULL);
 
   size_t after_first = alloc->allocated_size;
@@ -277,5 +289,5 @@ UTEST(memory, freeing_the_allocator_frees_everything_it_handed_out) {
 
   clox_allocator_free(&alloc);
 
-  EXPECT_EQ(NULL, alloc.head);
+  EXPECT_EQ(NULL, alloc.objects);
 }

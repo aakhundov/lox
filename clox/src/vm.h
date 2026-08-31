@@ -32,6 +32,7 @@ typedef struct {
   void *error_ctx;
   clox_print_fn_t *print_fn;
   void *print_ctx;
+  void *mark_callback_handle;
 } clox_vm_t;
 
 void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc);

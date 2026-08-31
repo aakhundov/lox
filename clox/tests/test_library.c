@@ -470,7 +470,7 @@ UTEST_F_TEARDOWN(library_strings) {
 
 UTEST_F(library_strings, len_reports_the_length_of_a_string) {
   clox_native_result_t result;
-  clox_value_t text = CLOX_STRING_COPY(&utest_fixture->alloc, "hello", 5);
+  clox_value_t text = clox_test_string_kept(&utest_fixture->alloc, "hello", 5);
 
   ASSERT_TRUE(call_library_fn_1("len", text, &result));
   EXPECT_VALUE_EQ(CLOX_NUMBER(5.0), result.value);
@@ -478,7 +478,7 @@ UTEST_F(library_strings, len_reports_the_length_of_a_string) {
 
 UTEST_F(library_strings, len_of_the_empty_string_is_zero) {
   clox_native_result_t result;
-  clox_value_t text = CLOX_STRING_COPY(&utest_fixture->alloc, "", 0);
+  clox_value_t text = clox_test_string_kept(&utest_fixture->alloc, "", 0);
 
   ASSERT_TRUE(call_library_fn_1("len", text, &result));
   EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), result.value);
@@ -488,7 +488,7 @@ UTEST_F(library_strings, len_counts_bytes_and_not_characters) {
   clox_native_result_t result;
   // two characters, five bytes: the scanner does not decode UTF-8, so neither
   // does this
-  clox_value_t text = CLOX_STRING_COPY(&utest_fixture->alloc, "e\xcc\x81z", 4);
+  clox_value_t text = clox_test_string_kept(&utest_fixture->alloc, "e\xcc\x81z", 4);
 
   ASSERT_TRUE(call_library_fn_1("len", text, &result));
   EXPECT_VALUE_EQ(CLOX_NUMBER(4.0), result.value);
@@ -503,7 +503,7 @@ UTEST_F(library_strings, len_rejects_a_value_that_is_not_a_string) {
 
 UTEST_F(library_strings, ord_reports_the_byte_value_of_a_one_byte_string) {
   clox_native_result_t result;
-  clox_value_t text = CLOX_STRING_COPY(&utest_fixture->alloc, "A", 1);
+  clox_value_t text = clox_test_string_kept(&utest_fixture->alloc, "A", 1);
 
   ASSERT_TRUE(call_library_fn_1("ord", text, &result));
   EXPECT_VALUE_EQ(CLOX_NUMBER(65.0), result.value);
@@ -513,7 +513,7 @@ UTEST_F(library_strings, ord_reports_a_high_byte_as_an_unsigned_value) {
   clox_native_result_t result;
   // char may be signed, so this byte would come back negative if it were read
   // as one
-  clox_value_t text = CLOX_STRING_COPY(&utest_fixture->alloc, "\xff", 1);
+  clox_value_t text = clox_test_string_kept(&utest_fixture->alloc, "\xff", 1);
 
   ASSERT_TRUE(call_library_fn_1("ord", text, &result));
   EXPECT_VALUE_EQ(CLOX_NUMBER(255.0), result.value);
@@ -521,8 +521,8 @@ UTEST_F(library_strings, ord_reports_a_high_byte_as_an_unsigned_value) {
 
 UTEST_F(library_strings, ord_rejects_a_string_that_is_not_one_byte_long) {
   clox_native_result_t result;
-  clox_value_t two = CLOX_STRING_COPY(&utest_fixture->alloc, "ab", 2);
-  clox_value_t none = CLOX_STRING_COPY(&utest_fixture->alloc, "", 0);
+  clox_value_t two = clox_test_string_kept(&utest_fixture->alloc, "ab", 2);
+  clox_value_t none = clox_test_string_kept(&utest_fixture->alloc, "", 0);
 
   EXPECT_FALSE(call_library_fn_1("ord", two, &result));
   EXPECT_TRUE(strstr(result.error_msg, "one byte") != NULL);
@@ -540,7 +540,7 @@ UTEST_F(library_strings, ord_rejects_a_value_that_is_not_a_string) {
 
 UTEST_F(library_strings, is_string_tells_a_string_from_every_other_value) {
   clox_native_result_t result;
-  clox_value_t text = CLOX_STRING_COPY(&utest_fixture->alloc, "text", 4);
+  clox_value_t text = clox_test_string_kept(&utest_fixture->alloc, "text", 4);
 
   ASSERT_TRUE(call_library_fn_1("is_string", text, &result));
   EXPECT_VALUE_EQ(CLOX_BOOL(true), result.value);

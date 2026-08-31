@@ -12,10 +12,14 @@
 #include "chunk.h"
 #include "debug.h"
 #include "error.h"
-#include "library.h"
+#include "memory.h"
 #include "object.h"
 #include "table.h"
 #include "value.h"
+
+#if CLOX_ENABLE_LIBRARY
+#include "library.h"
+#endif
 
 #if CLOX_DEBUG_EXECUTION
 static void print_stack(const clox_vm_t *vm) {
@@ -522,6 +526,28 @@ static inline void reset_vm(clox_vm_t *vm) {
   vm->frame_count = 0;
 }
 
+static inline void mark_callback(clox_allocator_t *alloc, void *ctx) {
+  clox_vm_t *vm = ctx;
+
+  // values on the stack stack
+  for (clox_value_t *slot = vm->stack; slot < vm->stack_top; slot++) {
+    clox_mark_value(alloc, *slot);
+  }
+
+  // globals
+  clox_table_mark_entries(&vm->globals);
+
+  // active closures
+  for (clox_call_frame_t *frame = vm->frames; frame < vm->frames + vm->frame_count; frame++) {
+    clox_mark_object(alloc, (clox_object_t *)frame->closure);
+  }
+
+  // open upvalues
+  for (clox_upvalue_t *upvalue = vm->open_upvalues; upvalue != NULL; upvalue = upvalue->next) {
+    clox_mark_object(alloc, (clox_object_t *)upvalue);
+  }
+}
+
 void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
   vm->allocator = alloc;
   reset_vm(vm);
@@ -530,14 +556,22 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
   clox_vm_reset_error_handler(vm);
   clox_vm_set_default_print_fn(vm);
 
+  vm->mark_callback_handle = clox_register_mark_callback(vm->allocator, mark_callback, vm);
+
+#if CLOX_ENABLE_LIBRARY
   // define built-in native functions
   for (size_t i = 0; i < CLOX_LIBRARY_SIZE; i++) {
     clox_library_fn_t lib_fn = clox_library_fns[i];
     clox_vm_define_native(vm, lib_fn.name, lib_fn.arity, lib_fn.fn);
   }
+#endif
 }
 
 void clox_vm_free(clox_vm_t *vm) {
+  bool unregistered = clox_unregister_mark_callback(vm->allocator, vm->mark_callback_handle);
+  assert(unregistered);
+  (void)unregistered;
+
   vm->allocator = NULL;
   reset_vm(vm);
 
@@ -568,12 +602,13 @@ void clox_vm_set_default_print_fn(clox_vm_t *vm) {
 }
 
 void clox_vm_define_native(clox_vm_t *vm, const char *name, size_t arity, clox_native_fn_t *fn) {
-  // temporary stack placement to avoid in-flight GC
-  push_stack(vm, CLOX_NATIVE(vm->allocator, name, arity, fn));
-  push_stack(vm, CLOX_STRING_COPY(vm->allocator, name, strlen(name)));
-  clox_table_set(&vm->globals, CLOX_AS_STRING(peek_stack(vm, 0)), peek_stack(vm, 1));
-  pop_stack(vm); // name
-  pop_stack(vm); // native
+  clox_native_t *native = clox_new_native(vm->allocator, name, arity, fn);
+  clox_push_durable(vm->allocator, (clox_object_t *)native);
+  const clox_string_t *str_name = clox_string_copy(vm->allocator, name, strlen(name));
+  clox_push_durable(vm->allocator, (clox_object_t *)str_name);
+  clox_table_set(&vm->globals, str_name, CLOX_OBJECT(native));
+  clox_pop_durable(vm->allocator); // str_name
+  clox_pop_durable(vm->allocator); // native
 }
 
 bool clox_interpret(clox_vm_t *vm, const clox_function_t *script) {

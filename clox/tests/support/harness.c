@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "error.h"
+#include "memory.h"
 #include "object.h"
 #include "value.h"
 
@@ -21,6 +22,37 @@ const clox_string_t *clox_test_intern_indexed(clox_allocator_t *alloc, size_t in
   assert(length > 0 && (size_t)length <= MAX_INDEXED_KEY_LENGTH);
 
   return clox_string_copy(alloc, chars, (size_t)length);
+}
+
+void clox_test_keep(clox_allocator_t *alloc, const void *object) {
+  assert(object != NULL);
+
+  // The durable stack is not const-aware, and it has no reason to be: it holds
+  // objects so a collection can reach them, and reaching one never writes to
+  // it. Tests hand these pointers around as const, so the cast is here rather
+  // than at every call.
+  clox_push_durable(alloc, (clox_object_t *)object);
+}
+
+const clox_string_t *clox_test_intern_kept(clox_allocator_t *alloc, const char *chars) {
+  const clox_string_t *string = clox_test_intern(alloc, chars);
+  clox_test_keep(alloc, string);
+
+  return string;
+}
+
+const clox_string_t *clox_test_intern_indexed_kept(clox_allocator_t *alloc, size_t index) {
+  const clox_string_t *string = clox_test_intern_indexed(alloc, index);
+  clox_test_keep(alloc, string);
+
+  return string;
+}
+
+clox_value_t clox_test_string_kept(clox_allocator_t *alloc, const char *chars, size_t length) {
+  const clox_string_t *string = clox_string_copy(alloc, chars, length);
+  clox_test_keep(alloc, string);
+
+  return CLOX_OBJECT(string);
 }
 
 FILE *clox_test_open_buffer(char *buffer, size_t size) {

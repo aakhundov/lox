@@ -8,6 +8,7 @@
 #include "error.h"
 #include "object.h"
 #include "scanner.h"
+#include "value.h"
 
 #define CLOX_MAX_ARITY UCHAR_MAX
 #define CLOX_MAX_LOCALS (UCHAR_MAX + 1)
@@ -72,6 +73,8 @@ typedef struct {
   // error handling
   clox_error_handler_t *error_handler;
   void *error_ctx;
+  // callbacks
+  void *mark_callback_handle;
 } clox_compiler_t;
 
 void clox_compiler_init(clox_compiler_t *compiler, clox_allocator_t *alloc);

@@ -5,9 +5,25 @@
 #include <stdio.h>
 
 #include "common.h"
+#include "debug.h"
 #include "error.h"
 #include "object.h"
 #include "value.h"
+
+// A build that collects at every allocation is the wrong ground for a test
+// that says where the collection happens, or that sets a mark by hand and
+// expects it to still be there after allocating: a sweep clears every mark it
+// passes. Such a test skips itself rather than being compiled out, so the
+// stress run names what it did not cover instead of running quietly without
+// it. Requires <utest.h> at the use site, and works in a fixture's setup as
+// well as in a test body -- utest runs no teardown for a test its setup
+// skipped, so the skip belongs before anything is initialized.
+#if CLOX_STRESS_GC
+#define CLOX_TEST_SKIP_UNDER_STRESS()                                                              \
+  UTEST_SKIP("collections here have to happen only where the test asks for them")
+#else
+#define CLOX_TEST_SKIP_UNDER_STRESS() ((void)0)
+#endif
 
 #define CLOX_TEST_MESSAGE_SIZE 256
 #define CLOX_TEST_MAX_PRINTED 16
@@ -60,6 +76,33 @@ const clox_string_t *clox_test_intern(clox_allocator_t *alloc, const char *chars
 // Interns one distinct key per index, for tests needing more
 // keys than are worth spelling out one by one.
 const clox_string_t *clox_test_intern_indexed(clox_allocator_t *alloc, size_t index);
+
+// Roots an object for as long as its allocator lives.
+//
+// A test that holds an object of its own is in a position no caller inside
+// clox is ever in: the interpreter reaches everything it owns from the value
+// stack, the globals, a call frame or a compile frame, and a test reaches its
+// objects from a C local the collector cannot see. Under a build that collects
+// at every allocation, such an object is swept the moment the test allocates
+// again. Keeping it is the harness standing in for the root a real caller
+// would have had, and it is only ever correct for that: an object clox handed
+// back and is about to take again is clox's to root, and a keep there would
+// hide the bug rather than fix the test.
+//
+// There is no matching release. The durable stack is freed with the allocator,
+// and a fixture's allocator does not outlive its test.
+void clox_test_keep(clox_allocator_t *alloc, const void *object);
+
+// clox_test_intern and clox_test_intern_indexed, for the common case of a key
+// the test goes on to hold. Interning alone hands back an object nothing roots,
+// and the very next allocation -- the table's own storage, often enough -- is
+// free to take it.
+const clox_string_t *clox_test_intern_kept(clox_allocator_t *alloc, const char *chars);
+const clox_string_t *clox_test_intern_indexed_kept(clox_allocator_t *alloc, size_t index);
+
+// CLOX_STRING_COPY for a string the test then holds as a value: the same
+// keeping, for the tests that work in clox_value_t rather than in objects.
+clox_value_t clox_test_string_kept(clox_allocator_t *alloc, const char *chars, size_t length);
 
 // Opens a stream that writes into buffer, and closes it leaving NUL-terminated
 // text behind. Text longer than the buffer is truncated.

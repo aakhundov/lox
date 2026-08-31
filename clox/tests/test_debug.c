@@ -24,18 +24,35 @@
 
 static const clox_pos_t POS = {.line = 1, .col = 1};
 
+// A chunk on its own is nothing a collection can reach. In the interpreter a
+// chunk always belongs to a function, and it is that function being marked
+// that reaches the constants inside it -- so a chunk a test owns needs the
+// fixture to stand in for the owner, marking exactly what a function's own
+// marking would and nothing besides.
+static void mark_chunk_constants(clox_allocator_t *alloc, void *ctx) {
+  const clox_chunk_t *chunk = ctx;
+
+  for (size_t i = 0; i < chunk->constants.length; i++) {
+    clox_mark_value(alloc, chunk->constants.values[i]);
+  }
+}
+
 struct debug {
   clox_allocator_t alloc;
   clox_chunk_t chunk;
   char text[TEXT_SIZE];
+  void *mark_callback_handle;
 };
 
 UTEST_F_SETUP(debug) {
   clox_allocator_init(&utest_fixture->alloc);
   clox_chunk_init(&utest_fixture->chunk, &utest_fixture->alloc);
+  utest_fixture->mark_callback_handle = clox_register_mark_callback(
+      &utest_fixture->alloc, mark_chunk_constants, &utest_fixture->chunk);
 }
 
 UTEST_F_TEARDOWN(debug) {
+  (void)clox_unregister_mark_callback(&utest_fixture->alloc, utest_fixture->mark_callback_handle);
   // the chunk goes first: its constants are objects the allocator owns
   clox_chunk_free(&utest_fixture->chunk);
   clox_allocator_free(&utest_fixture->alloc);

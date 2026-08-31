@@ -15,6 +15,7 @@
 #include "common.h"
 #include "debug.h"
 #include "error.h"
+#include "memory.h"
 #include "object.h"
 #include "scanner.h"
 #include "value.h"
@@ -1075,13 +1076,35 @@ static inline clox_parse_rule_t get_rule(clox_token_type_t type) {
   return parse_rules[type];
 }
 
+static inline void mark_callback(clox_allocator_t *alloc, void *ctx) {
+  clox_compiler_t *compiler = ctx;
+
+  // active functions
+  clox_compile_frame_t *frame = compiler->frame;
+  while (frame != NULL) {
+    clox_mark_object(alloc, (clox_object_t *)frame->function);
+    frame = frame->enclosing;
+  }
+}
+
 void clox_compiler_init(clox_compiler_t *compiler, clox_allocator_t *alloc) {
   compiler->allocator = alloc;
+  compiler->frame = NULL;
+
   clox_compiler_reset_error_handler(compiler);
+
+  compiler->mark_callback_handle =
+      clox_register_mark_callback(compiler->allocator, mark_callback, compiler);
 }
 
 void clox_compiler_free(clox_compiler_t *compiler) {
+  bool unregistered =
+      clox_unregister_mark_callback(compiler->allocator, compiler->mark_callback_handle);
+  assert(unregistered);
+  (void)unregistered;
+
   compiler->allocator = NULL;
+
   clox_compiler_reset_error_handler(compiler);
 }
 

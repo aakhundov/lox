@@ -43,12 +43,20 @@ static inline size_t add_constant(clox_chunk_t *c, clox_value_t val, bool *cache
     }
   }
 
+  if (CLOX_IS_OBJECT(val)) {
+    clox_push_durable(c->allocator, CLOX_AS_OBJECT(val));
+  }
+
   size_t index = c->constants.length; // where new value will land
   clox_value_array_write(&c->constants, val);
 
   if (CLOX_IS_STRING(val)) {
     // add the new index to the cache
     clox_table_set(&c->string_constants, CLOX_AS_STRING(val), CLOX_SIZE(index));
+  }
+
+  if (CLOX_IS_OBJECT(val)) {
+    clox_pop_durable(c->allocator); // val
   }
 
   *cached = false;

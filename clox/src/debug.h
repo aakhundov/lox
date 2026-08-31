@@ -21,8 +21,13 @@
 #ifndef CLOX_DEBUG_GC
 #define CLOX_DEBUG_GC 0
 #endif
+
 #ifndef CLOX_STRESS_GC
-#define CLOX_STRESS_GC 1
+#define CLOX_STRESS_GC 0
+#endif
+
+#ifndef CLOX_ENABLE_LIBRARY
+#define CLOX_ENABLE_LIBRARY 1
 #endif
 
 void clox_disassemble_chunk_fprintf(FILE *stream, const clox_chunk_t *chunk, const char *name);
