@@ -167,17 +167,24 @@ static void emit_constant_to(clox_function_t *callee, clox_value_t val) {
   (void)clox_write_constant(&callee->chunk, OP_CONSTANT, val, POS);
 }
 
-// A callee as a call reaches it. Only a closure is callable, so a function
-// standing alone is not what any of these tests can push: it is wrapped here,
-// once per use, the way OP_CLOSURE would wrap it at run time.
+// A callee as a call reaches it. Both a closure and a bare function are
+// callable, and the compiler emits whichever the callee's captures call for:
+// this wraps one, once per use, the way OP_CLOSURE would at run time.
 static clox_value_t closure_of(struct vm *fixture, const clox_function_t *callee) {
   return CLOX_CLOSURE(&fixture->alloc, callee);
 }
 
 // Writes the callee onto the stack, ready for the arguments and the OP_CALL
-// the caller writes next.
+// the caller writes next. The callee goes on wrapped, so the tests that only
+// need something to call keep exercising the closure path.
 static void emit_callee(struct vm *fixture, const clox_function_t *callee) {
   emit_constant(fixture, closure_of(fixture, callee));
+}
+
+// The same, with the callee pushed as itself: what the compiler emits for a
+// function capturing nothing.
+static void emit_bare_callee(struct vm *fixture, const clox_function_t *callee) {
+  emit_constant(fixture, CLOX_OBJECT(callee));
 }
 
 static void emit_call(struct vm *fixture, size_t arg_count) {
@@ -1380,7 +1387,24 @@ UTEST_F(vm, one_function_closed_over_twice_gives_two_closures) {
 
   // each pass over the instruction makes its own closure, since each may
   // capture a different set of slots
-  EXPECT_FALSE(
+  clox_value_t first = utest_fixture->printed.values[0];
+  clox_value_t second = utest_fixture->printed.values[1];
+  ASSERT_TRUE(CLOX_IS_CLOSURE(first));
+  ASSERT_TRUE(CLOX_IS_CLOSURE(second));
+  EXPECT_NE(CLOX_AS_OBJECT(first), CLOX_AS_OBJECT(second));
+}
+
+UTEST_F(vm, two_closures_over_one_function_are_one_value_to_a_program) {
+  clox_function_t *callee = make_callee(utest_fixture, "named", 0);
+  emit_closure(utest_fixture, callee, NULL);
+  emit_closure(utest_fixture, callee, NULL);
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+
+  // two objects, but one declaration: what a program compares is the function
+  // they were both made over
+  EXPECT_TRUE(
       clox_value_equals(utest_fixture->printed.values[0], utest_fixture->printed.values[1]));
 }
 
@@ -1719,19 +1743,95 @@ UTEST_F(vm, a_runtime_error_inside_a_closure_names_the_function_it_closed_over) 
   EXPECT_STREQ("broken", utest_fixture->errors.stacks[0][0].fn_name);
 }
 
-UTEST_F(vm, a_function_that_is_not_closed_over_is_not_callable) {
-  // only a closure is a callable object: a function reaching a call is a value
-  // the compiler never emits, and the VM refuses it like any other
+UTEST_F(vm, a_function_that_is_not_closed_over_is_callable_on_its_own) {
+  // a function capturing nothing is pushed as itself, so the value OP_CALL
+  // finds is the function: it is called without a wrapper around it
   clox_function_t *callee = make_callee(utest_fixture, "bare", 0);
+  emit_constant_to(callee, CLOX_NUMBER(42.0));
+  emit_to(callee, OP_RETURN);
+
+  emit_bare_callee(utest_fixture, callee);
+  emit_call(utest_fixture, 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_bare_function_is_called_with_its_arguments_in_the_frame) {
+  // the callee sits below its arguments whichever form it took, so the slots
+  // a parameter is read from are the same ones
+  clox_function_t *callee = make_callee(utest_fixture, "takes_two", 2);
+  emit_to(callee, OP_GET_LOCAL);
+  emit_to(callee, 2); // the second argument
+  emit_to(callee, OP_RETURN);
+
+  emit_bare_callee(utest_fixture, callee);
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit_call(utest_fixture, 2);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, an_arity_mismatch_on_a_bare_function_is_a_runtime_error) {
+  clox_function_t *callee = make_callee(utest_fixture, "needs_two", 2);
   emit_to(callee, OP_NIL);
   emit_to(callee, OP_RETURN);
 
-  emit_constant(utest_fixture, CLOX_OBJECT(callee));
+  emit_bare_callee(utest_fixture, callee);
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_call(utest_fixture, 1);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 2") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "got 1") != NULL);
+}
+
+UTEST_F(vm, a_runtime_error_inside_a_bare_function_names_it) {
+  // the frame has no closure to reach the function through, and the name an
+  // error reports has to come off the frame itself
+  clox_function_t *callee = make_callee(utest_fixture, "broken", 0);
+  clox_chunk_write(&callee->chunk, OP_TRUE, (clox_pos_t){.line = 8, .col = 1});
+  clox_chunk_write(&callee->chunk, OP_NEGATE, (clox_pos_t){.line = 8, .col = 5});
+
+  emit_bare_callee(utest_fixture, callee);
   emit_call(utest_fixture, 0);
 
   EXPECT_FALSE(interpret(utest_fixture, 1));
   ASSERT_EQ((size_t)1, utest_fixture->errors.count);
-  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "call") != NULL);
+  EXPECT_STREQ("broken", utest_fixture->errors.stacks[0][0].fn_name);
+  EXPECT_EQ((size_t)8, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)5, utest_fixture->errors.stacks[0][0].pos.col);
+}
+
+UTEST_F(vm, a_closure_made_inside_a_bare_function_captures_its_locals) {
+  // the frame the capture is taken from carries no closure of its own, so the
+  // local has to be read off its slots rather than through a wrapper
+  clox_function_t *inner = make_callee(utest_fixture, "reads", 0);
+  inner->upvalue_count = 1;
+  emit_to(inner, OP_GET_UPVALUE);
+  emit_to(inner, 0);
+  emit_to(inner, OP_RETURN);
+
+  clox_function_t *outer = make_callee(utest_fixture, "holds", 0);
+  emit_constant_to(outer, CLOX_NUMBER(42.0)); // the outer frame's slot 1
+  (void)clox_write_constant(&outer->chunk, OP_CLOSURE, CLOX_OBJECT(inner), POS);
+  emit_to(outer, 1);          // taken from a local of this frame
+  emit_to(outer, FIRST_SLOT); // standing at that slot
+  emit_to(outer, OP_CALL);
+  emit_to(outer, 0);
+  emit_to(outer, OP_RETURN);
+
+  emit_bare_callee(utest_fixture, outer);
+  emit_call(utest_fixture, 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
 }
 
 UTEST_F(vm, a_run_that_failed_with_upvalues_open_leaves_the_vm_usable) {

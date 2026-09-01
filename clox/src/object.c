@@ -232,10 +232,13 @@ bool clox_object_equals(clox_value_t a, clox_value_t b) {
     // compare raw pointers to string objects:
     // this works due to the string interning
     return CLOX_AS_STRING(a) == CLOX_AS_STRING(b);
+  case OBJ_CLOSURE:
+    // compare closures' functions
+    return clox_object_equals(CLOX_OBJECT(CLOX_AS_CLOSURE(a)->function),
+                              CLOX_OBJECT(CLOX_AS_CLOSURE(b)->function));
   case OBJ_FUNCTION:
   case OBJ_NATIVE:
   case OBJ_UPVALUE:
-  case OBJ_CLOSURE:
     // compare object pointers
     return CLOX_AS_OBJECT(a) == CLOX_AS_OBJECT(b);
   }
@@ -273,7 +276,7 @@ void clox_object_fprintf(FILE *stream, clox_value_t val) {
     break;
   }
   case OBJ_CLOSURE:
-    (void)fprintf(stream, "<cl %s>", CLOX_AS_CLOSURE(val)->function->name);
+    clox_object_fprintf(stream, CLOX_OBJECT(CLOX_AS_CLOSURE(val)->function));
     break;
   }
 }
@@ -290,10 +293,12 @@ void clox_object_repr_fprintf(FILE *stream, clox_value_t val) {
   case OBJ_STRING:
     (void)fprintf(stream, "\"%s\"", CLOX_AS_CSTRING(val));
     break;
+  case OBJ_CLOSURE:
+    (void)fprintf(stream, "<cl %s>", CLOX_AS_CLOSURE(val)->function->name);
+    break;
   case OBJ_FUNCTION:
   case OBJ_NATIVE:
   case OBJ_UPVALUE:
-  case OBJ_CLOSURE:
     clox_object_fprintf(stream, val);
     break;
   }

@@ -1256,8 +1256,9 @@ UTEST_F(compiler, a_compiler_without_a_handler_still_reports_failure) {
 UTEST_F(compiler, a_function_declaration_defines_a_global_holding_the_function) {
   ASSERT_TRUE(compile(utest_fixture, "fun f() {}"));
 
-  // a closure over the compiled function is made, then bound to its name
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_DEF_GLOBAL, 1, OP_RETURN_NIL);
+  // the compiled function is pushed as the constant it is, then bound to its
+  // name: capturing nothing, it needs nothing wrapped around it
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_DEF_GLOBAL, 1, OP_RETURN_NIL);
   ASSERT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
   ASSERT_TRUE(function_constant(&utest_fixture->function->chunk, 0) != NULL);
   EXPECT_STREQ("f", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[1]));
@@ -1292,7 +1293,7 @@ UTEST_F(compiler, a_function_body_compiles_into_the_functions_own_chunk) {
   ASSERT_TRUE(compile(utest_fixture, "fun f() { print 1; }"));
 
   // the body is not in the script's code
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_DEF_GLOBAL, 1, OP_RETURN_NIL);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_DEF_GLOBAL, 1, OP_RETURN_NIL);
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
@@ -1374,14 +1375,55 @@ UTEST_F(compiler, a_name_no_enclosing_frame_declares_is_still_a_global) {
   EXPECT_EQ((size_t)0, compiled->upvalue_count);
 }
 
-UTEST_F(compiler, a_function_capturing_nothing_carries_no_captures_after_its_constant) {
+UTEST_F(compiler, a_function_capturing_nothing_is_emitted_as_a_plain_constant) {
   ASSERT_TRUE(compile(utest_fixture, "fun f() {}"));
 
-  // the operand pairs follow the constant index, so a function capturing
-  // nothing leaves OP_CLOSURE the width of any other constant instruction
+  // there is nothing for a closure to hold, so none is made: the function
+  // reaches the stack the way any other constant does
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
   EXPECT_EQ((size_t)0, compiled->upvalue_count);
+  EXPECT_EQ((clox_byte_t)OP_CONSTANT, utest_fixture->function->chunk.code[0]);
+}
+
+UTEST_F(compiler, a_function_capturing_nothing_at_a_long_index_takes_the_long_constant) {
+  char source[SOURCE_SIZE];
+  ASSERT_TRUE(compile(utest_fixture, past_a_byte_of_constants(&source, "fun f() {}")));
+
+  // the choice of instruction is made before the index is written, so the
+  // plain-constant form has to reach its long variant like any other constant
+  const clox_chunk_t *chunk = &utest_fixture->function->chunk;
+  ASSERT_TRUE(chunk->length >= 9);
+  // the function's long constant, the long define of its name, and the return
+  EXPECT_EQ(OP_CONSTANT_LONG, chunk->code[chunk->length - 9]);
+  EXPECT_EQ(OP_DEF_GLOBAL_LONG, chunk->code[chunk->length - 5]);
+  EXPECT_EQ(OP_RETURN_NIL, chunk->code[chunk->length - 1]);
+}
+
+UTEST_F(compiler, whether_a_function_is_wrapped_is_decided_one_function_at_a_time) {
+  // two declarations side by side in one scope, one naming the local around
+  // them and one naming nothing: only the one that captures is wrapped
+  ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; fun plain() {} fun capturing() { print a; } }"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_CLOSURE, 2, 1, 1,
+              OP_POP_N, 2, OP_CLOSE_UPVALUE, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_function_capturing_nothing_inside_one_that_does_is_still_a_plain_constant) {
+  // the middle function is wrapped, and the innermost one is not: what decides
+  // the form is the function's own captures, not those of the frame around it
+  ASSERT_TRUE(compile(utest_fixture, "fun o() { var a = 1; fun m() { print a; fun i() {} } }"));
+
+  clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
+  ASSERT_TRUE(outer != NULL);
+  EXPECT_CODE(&outer->chunk, OP_CONSTANT, 0, OP_CLOSURE, 1, 1, 1, OP_RETURN_NIL);
+
+  clox_function_t *middle = function_constant(&outer->chunk, 1);
+  ASSERT_TRUE(middle != NULL);
+  EXPECT_EQ((size_t)1, middle->upvalue_count);
+  // the innermost function stays in the slot it was made into; the return
+  // rewinds the frame, so the scope emits no pop for it
+  EXPECT_CODE(&middle->chunk, OP_GET_UPVALUE, 0, OP_PRINT, OP_CONSTANT, 0, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_capture_says_it_is_a_local_and_names_the_slot_it_is_taken_from) {
@@ -1519,15 +1561,15 @@ UTEST_F(compiler, one_capture_too_many_is_reported) {
 UTEST_F(compiler, a_function_declared_in_a_block_is_a_local) {
   ASSERT_TRUE(compile(utest_fixture, "{ fun f() {} }"));
 
-  // no OP_DEF_GLOBAL: the closure stays in the slot it was made into, and the
-  // scope pops it on the way out
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_POP, OP_RETURN_NIL);
+  // no OP_DEF_GLOBAL: the function stays in the slot it was pushed into, and
+  // the scope pops it on the way out
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_local_function_can_be_called_through_its_slot) {
   ASSERT_TRUE(compile(utest_fixture, "{ fun f() {} f(); }"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_GET_LOCAL, 1, OP_CALL, 0, OP_POP,
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_CALL, 0, OP_POP,
               OP_POP, OP_RETURN_NIL);
 }
 

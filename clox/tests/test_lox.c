@@ -711,14 +711,39 @@ UTEST_F(lox, a_function_can_be_handed_to_another_function) {
   EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
 }
 
-UTEST_F(lox, a_function_prints_as_the_closure_it_reaches_a_value_as) {
+UTEST_F(lox, a_function_capturing_nothing_reaches_a_value_as_itself) {
   ASSERT_TRUE(run(utest_fixture, "fun named() {} print named;"));
 
-  // a function only ever reaches the stack wrapped in a closure, so the value
-  // a name stands for is that closure, and the function is under it
+  // there is nothing for a closure to hold, so none is made: the value the
+  // name stands for is the compiled function
+  clox_value_t printed = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_FUNCTION(printed));
+  EXPECT_STREQ("named", CLOX_AS_FUNCTION(printed)->name);
+}
+
+UTEST_F(lox, a_function_that_captures_reaches_a_value_as_a_closure) {
+  ASSERT_TRUE(run(utest_fixture, "var f;"
+                                 "{ var x = 1; fun named() { return x; } f = named; }"
+                                 "print f;"));
+
   clox_value_t printed = only_printed(utest_fixture);
   ASSERT_TRUE(CLOX_IS_CLOSURE(printed));
   EXPECT_STREQ("named", CLOX_AS_CLOSURE(printed)->function->name);
+}
+
+UTEST_F(lox, both_forms_of_a_function_print_the_same_way) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+
+  // which form a declaration took is the compiler's business: a program is
+  // shown a function either way
+  ASSERT_TRUE(run(utest_fixture, "fun plain() {}"
+                                 "var closed;"
+                                 "{ var x = 1; fun capturing() { return x; } closed = capturing; }"
+                                 "print plain; print closed;"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_STREQ("<fn plain>", clox_test_value_string(&buffer, utest_fixture->printed.values[0]));
+  EXPECT_STREQ("<fn capturing>", clox_test_value_string(&buffer, utest_fixture->printed.values[1]));
 }
 
 UTEST_F(lox, recursion_runs_down_to_its_base_case) {
@@ -969,6 +994,69 @@ UTEST_F(lox, a_closure_survives_into_the_next_run) {
   ASSERT_EQ((size_t)2, utest_fixture->printed.count);
   EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), utest_fixture->printed.values[0]);
   EXPECT_VALUE_EQ(CLOX_NUMBER(4.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, two_closures_over_one_declaration_are_equal) {
+  // one declaration was written, so one function is what a program compares:
+  // that two closures were made over it is not something it is shown
+  ASSERT_TRUE(run(utest_fixture, "fun make() { var x = 1; fun inner() { return x; } return inner; }"
+                                 "print make() == make();"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, closures_over_two_declarations_are_not_equal) {
+  ASSERT_TRUE(run(utest_fixture, "var a; var b;"
+                                 "{ var x = 1;"
+                                 "  fun one() { return x; }"
+                                 "  fun two() { return x; }"
+                                 "  a = one; b = two; }"
+                                 "print a == b;"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, two_equal_closures_still_count_on_their_own) {
+  // equality reaches through to the declaration, and the captures do not: the
+  // two compare equal and still hold a variable each
+  ASSERT_TRUE(run(utest_fixture,
+                  "fun counter() { var n = 0; fun bump() { n = n + 1; return n; } return bump; }"
+                  "var f = counter(); var g = counter();"
+                  "print f == g; print f(); print f(); print g();"));
+
+  ASSERT_EQ((size_t)4, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[1]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[2]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[3]);
+}
+
+UTEST_F(lox, a_function_capturing_nothing_is_one_value_however_often_it_is_reached) {
+  ASSERT_TRUE(run(utest_fixture, "fun make() { fun inner() { return 1; } return inner; }"
+                                 "print make() == make();"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_capturing_nothing_declared_inside_one_that_does_still_runs) {
+  // the frame the innermost function is made in carries a closure, and the
+  // innermost one needs none of it
+  ASSERT_TRUE(run(utest_fixture, "fun outer() {"
+                                 "  var x = 7;"
+                                 "  fun middle() { fun inner() { return 1; } return inner() + x; }"
+                                 "  return middle();"
+                                 "}"
+                                 "print outer();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(8.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_function_that_captures_declared_inside_one_that_does_not_still_runs) {
+  // and the other way round: the frame the capture is taken from is a bare
+  // function, so the local comes off its slots and not through a wrapper
+  ASSERT_TRUE(run(utest_fixture,
+                  "fun outer() {"
+                  "  fun middle() { var x = 7; fun inner() { return x; } return inner; }"
+                  "  return middle()();"
+                  "}"
+                  "print outer();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(7.0), only_printed(utest_fixture));
 }
 
 UTEST_F(lox, a_closure_is_truthy) {

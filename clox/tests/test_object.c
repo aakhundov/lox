@@ -512,7 +512,7 @@ UTEST_F(object, a_closure_over_a_function_capturing_nothing_takes_no_slots) {
   EXPECT_EQ((size_t)0, closure->upvalue_count);
 }
 
-UTEST_F(object, a_closure_renders_as_the_name_of_its_function) {
+UTEST_F(object, a_closure_renders_as_its_function_and_reprs_as_a_closure) {
   char buffer[CLOX_TEST_MESSAGE_SIZE];
   clox_function_t *function =
       clox_new_function(&utest_fixture->alloc, "named", 5, 0, FILE_NAME, SOURCE);
@@ -520,23 +520,57 @@ UTEST_F(object, a_closure_renders_as_the_name_of_its_function) {
   clox_value_t value = CLOX_CLOSURE(&utest_fixture->alloc, function);
   clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(value));
 
-  EXPECT_STREQ("<cl named>", clox_test_value_string(&buffer, value));
+  // rendering is what a program sees, and a program is not told that closures
+  // exist: what it gets is the function underneath. the repr form is the
+  // debugging one, and names the closure that is actually there
+  EXPECT_STREQ("<fn named>", clox_test_value_string(&buffer, value));
   EXPECT_STREQ("<cl named>", clox_test_value_repr_string(&buffer, value));
 }
 
-UTEST_F(object, a_closure_is_equal_only_to_itself) {
+UTEST_F(object, a_closure_over_the_script_renders_as_the_script_does) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_function_t *function = clox_new_function(&utest_fixture->alloc, CLOX_SCRIPT_NAME,
+                                                strlen(CLOX_SCRIPT_NAME), 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, function);
+  clox_value_t value = CLOX_CLOSURE(&utest_fixture->alloc, function);
+  clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(value));
+
+  // rendering hands the whole job to the function, so the script's own form
+  // comes through the closure unchanged rather than being wrapped again
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, clox_test_value_string(&buffer, value));
+}
+
+UTEST_F(object, a_closure_is_equal_to_any_closure_over_the_same_function) {
   clox_function_t *function =
       clox_new_function(&utest_fixture->alloc, "same", 4, 0, FILE_NAME, SOURCE);
   clox_test_keep(&utest_fixture->alloc, function);
 
-  // two closures over one function are two objects, since they may yet capture
-  // different variables: identity is all that can be compared
+  // two closures over one function are two objects, but they stand for the one
+  // declaration a program wrote: equality is asked of the function under them
   clox_value_t first = CLOX_CLOSURE(&utest_fixture->alloc, function);
   clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(first));
   clox_value_t second = CLOX_CLOSURE(&utest_fixture->alloc, function);
   clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(second));
 
+  ASSERT_NE(CLOX_AS_OBJECT(first), CLOX_AS_OBJECT(second));
   EXPECT_TRUE(clox_object_equals(first, first));
+  EXPECT_TRUE(clox_object_equals(first, second));
+}
+
+UTEST_F(object, a_closure_is_not_equal_to_a_closure_over_another_function) {
+  // the two functions carry one name, so only the objects tell them apart:
+  // reaching through to the function is not reaching through to its name
+  clox_function_t *one = clox_new_function(&utest_fixture->alloc, "same", 4, 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, one);
+  clox_function_t *other =
+      clox_new_function(&utest_fixture->alloc, "same", 4, 0, FILE_NAME, SOURCE);
+  clox_test_keep(&utest_fixture->alloc, other);
+
+  clox_value_t first = CLOX_CLOSURE(&utest_fixture->alloc, one);
+  clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(first));
+  clox_value_t second = CLOX_CLOSURE(&utest_fixture->alloc, other);
+  clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(second));
+
   EXPECT_FALSE(clox_object_equals(first, second));
 }
 
@@ -548,6 +582,9 @@ UTEST_F(object, a_closure_is_not_equal_to_the_function_it_wraps) {
   clox_value_t closure = CLOX_CLOSURE(&utest_fixture->alloc, function);
   clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(closure));
 
+  // the kinds are compared before anything inside them, so reaching through a
+  // closure to its function stops at another closure. no program can hold both
+  // of these: the compiler picks one form per declaration and emits only that
   EXPECT_FALSE(clox_value_equals(closure, CLOX_OBJECT(function)));
 }
 

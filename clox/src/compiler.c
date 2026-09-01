@@ -287,7 +287,7 @@ static inline clox_function_t *end_frame(clox_compiler_t *c) {
 #if CLOX_DEBUG_COMPILATION
   if (!c->had_error) {
     printf("---- CODE ");
-    clox_value_printf(CLOX_OBJECT(function));
+    clox_value_repr_printf(CLOX_OBJECT(function));
     printf("\n");
     for (size_t offset = 0; offset < function->chunk.length;) {
       printf("---- CODE ");
@@ -821,11 +821,17 @@ static inline void function(clox_compiler_t *c, clox_compile_function_type_t typ
   // the frame is saved before it's ended
   clox_compile_frame_t *fn_frame = FRAME(c);
   clox_function_t *fn = end_frame(c);
-  emit_constant(c, OP_CLOSURE, CLOX_OBJECT(fn), name);
-  for (size_t i = 0; i < fn->upvalue_count; i++) {
-    emit_byte(c, fn_frame->upvalues[i].is_local ? 1 : 0, name);
-    // cast is safe: static assert above
-    emit_byte(c, (clox_byte_t)fn_frame->upvalues[i].index, name);
+
+  if (fn->upvalue_count > 0) {
+    emit_constant(c, OP_CLOSURE, CLOX_OBJECT(fn), name);
+    for (size_t i = 0; i < fn->upvalue_count; i++) {
+      emit_byte(c, fn_frame->upvalues[i].is_local ? 1 : 0, name);
+      // cast is safe: static assert above
+      emit_byte(c, (clox_byte_t)fn_frame->upvalues[i].index, name);
+    }
+  } else {
+    // function without upvalues doesn't need a closure
+    emit_constant(c, OP_CONSTANT, CLOX_OBJECT(fn), name);
   }
 }
 

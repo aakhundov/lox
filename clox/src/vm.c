@@ -101,12 +101,12 @@ __attribute__((format(printf, 2, 3))) static inline void error(const clox_vm_t *
   for (int i = (int)vm->frame_count - 1; i >= 0; i--) {
     const clox_call_frame_t *frame = &vm->frames[i];
     // ip is incremented before processing instruction
-    assert(frame->ip > frame->closure->function->chunk.code); // non-zero difference
-    size_t offset = (size_t)(frame->ip - frame->closure->function->chunk.code - 1);
-    info.positions[info.num_locations] = frame->closure->function->chunk.positions[offset];
-    info.function_names[info.num_locations] = frame->closure->function->name;
-    info.file_names[info.num_locations] = frame->closure->function->file_name;
-    info.sources[info.num_locations] = frame->closure->function->source;
+    assert(frame->ip > frame->function->chunk.code); // non-zero difference
+    size_t offset = (size_t)(frame->ip - frame->function->chunk.code - 1);
+    info.positions[info.num_locations] = frame->function->chunk.positions[offset];
+    info.function_names[info.num_locations] = frame->function->name;
+    info.file_names[info.num_locations] = frame->function->file_name;
+    info.sources[info.num_locations] = frame->function->source;
     if (++info.num_locations == CLOX_MAX_ERROR_STACK_SIZE) {
       break;
     }
@@ -144,22 +144,35 @@ static inline void pop_n_stack(clox_vm_t *vm, size_t n) {
   vm->stack_top -= n;
 }
 
-static inline bool call_closure(clox_vm_t *vm, const clox_closure_t *closure, size_t arg_count) {
+static inline bool call_function(clox_vm_t *vm, const clox_function_t *function, size_t arg_count) {
   if (vm->frame_count >= CLOX_MAX_FRAMES) {
     error(vm, "call stack overflow");
     return false;
   }
-  if (arg_count != closure->function->arity) {
-    error(vm, "expected %zu args but got %zu", closure->function->arity, arg_count);
+  if (arg_count != function->arity) {
+    error(vm, "expected %zu args but got %zu", function->arity, arg_count);
     return false;
   }
 
   // set up new call frame
   clox_call_frame_t *frame = &vm->frames[vm->frame_count++];
-  frame->closure = closure;
-  frame->ip = closure->function->chunk.code;
+  frame->closure = NULL;
+  frame->function = function;
+  frame->ip = function->chunk.code;
   // function and args are in the new call frame
   frame->slots = vm->stack_top - arg_count - 1;
+
+  return true;
+}
+
+static inline bool call_closure(clox_vm_t *vm, const clox_closure_t *closure, size_t arg_count) {
+  if (!call_function(vm, closure->function, arg_count)) {
+    return false;
+  }
+
+  // patch the frame with the closure
+  clox_call_frame_t *frame = &vm->frames[vm->frame_count - 1];
+  frame->closure = closure;
 
   return true;
 }
@@ -190,12 +203,13 @@ static inline bool call_value(clox_vm_t *vm, clox_value_t val, size_t arg_count)
 
   if (CLOX_IS_OBJECT(val)) {
     switch (CLOX_AS_OBJECT(val)->type) {
+    case OBJ_FUNCTION:
+      return call_function(vm, CLOX_AS_FUNCTION(val), arg_count);
     case OBJ_CLOSURE:
       return call_closure(vm, CLOX_AS_CLOSURE(val), arg_count);
     case OBJ_NATIVE:
       return call_native(vm, CLOX_AS_NATIVE(val), arg_count);
     case OBJ_STRING:
-    case OBJ_FUNCTION:
     case OBJ_UPVALUE:
       break; // non-callable object type
     }
@@ -264,7 +278,7 @@ static bool run(clox_vm_t *vm) {
 #define PEEK(distance) peek_stack(vm, (distance))
 #define READ_BYTE() (*ip++)
 #define READ_TWO_BYTES() (ip += 2, ((size_t)ip[-2] << CHAR_BIT) | ip[-1])
-#define READ_CONSTANT(opcode) clox_read_constant(&frame->closure->function->chunk, (opcode), &ip)
+#define READ_CONSTANT(opcode) clox_read_constant(&frame->function->chunk, (opcode), &ip)
 #define READ_STRING(opcode) CLOX_AS_STRING(READ_CONSTANT(opcode))
 #define BINARY_OP(op, RESULT_TYPE)                                                                 \
   do {                                                                                             \
@@ -277,15 +291,15 @@ static bool run(clox_vm_t *vm) {
   } while (0)
 
   while (1) {
-    assert(ip >= frame->closure->function->chunk.code);
-    assert(ip < frame->closure->function->chunk.code + frame->closure->function->chunk.length);
+    assert(ip >= frame->function->chunk.code);
+    assert(ip < frame->function->chunk.code + frame->function->chunk.length);
 
 #if CLOX_DEBUG_EXECUTION
     print_stack(vm);
     print_globals(vm);
     printf("---- EXEC ");
-    clox_disassemble_instruction(&frame->closure->function->chunk,
-                                 (size_t)(ip - frame->closure->function->chunk.code));
+    clox_disassemble_instruction(&frame->function->chunk,
+                                 (size_t)(ip - frame->function->chunk.code));
 #endif
 
     clox_byte_t byte = READ_BYTE();
@@ -318,6 +332,7 @@ static bool run(clox_vm_t *vm) {
       PUSH(frame->slots[READ_BYTE()]);
       break;
     case OP_GET_UPVALUE:
+      assert(frame->closure != NULL); // must be in a closure
       PUSH(*frame->closure->upvalues[READ_BYTE()]->location);
       break;
     case OP_SET_GLOBAL:
@@ -350,10 +365,14 @@ static bool run(clox_vm_t *vm) {
       frame->slots[READ_BYTE()] = POP();
       break;
     case OP_SET_UPVALUE:
+      // must be in a closure
+      assert(frame->closure != NULL);
       // no POP: assignment is expression
       *frame->closure->upvalues[READ_BYTE()]->location = PEEK(0);
       break;
     case OP_SET_UPVALUE_POP:
+      // must be in a closure
+      assert(frame->closure != NULL);
       *frame->closure->upvalues[READ_BYTE()]->location = POP();
       break;
     case OP_NIL:
@@ -495,6 +514,9 @@ static bool run(clox_vm_t *vm) {
         if (is_local) {
           closure->upvalues[i] = capture_upvalue(vm, frame->slots + index);
         } else {
+          // with non-local upvalues, the surrounding
+          // function must be a closure by construction
+          assert(frame->closure != NULL);
           closure->upvalues[i] = frame->closure->upvalues[index];
         }
       }
@@ -557,9 +579,13 @@ static inline void mark_callback(clox_allocator_t *alloc, void *ctx) {
   // globals
   clox_table_mark_entries(&vm->globals);
 
-  // active closures
+  // active functions or closures in the call stack
   for (clox_call_frame_t *frame = vm->frames; frame < vm->frames + vm->frame_count; frame++) {
-    clox_mark_object(alloc, (clox_object_t *)frame->closure);
+    if (frame->closure != NULL) {
+      clox_mark_object(alloc, (clox_object_t *)frame->closure);
+    } else {
+      clox_mark_object(alloc, (clox_object_t *)frame->function);
+    }
   }
 
   // open upvalues
@@ -657,10 +683,10 @@ bool clox_interpret(clox_vm_t *vm, const clox_function_t *script) {
   // init
   reset_vm(vm);
 
-  // set up the script's call frame
-  clox_closure_t *closure = clox_new_closure(vm->allocator, script);
-  push_stack(vm, CLOX_OBJECT(closure));
-  call_closure(vm, closure, 0);
+  // set up the script's call frame with the function, not
+  // a closure: scripts can't have upvalues by construction
+  push_stack(vm, CLOX_OBJECT(script));
+  call_function(vm, script, 0);
 
   if (!run(vm)) {
     return false;
