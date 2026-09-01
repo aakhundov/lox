@@ -12,7 +12,7 @@ enum {
 #undef X
 };
 
-typedef struct {
+typedef struct clox_library_fn_t {
   const char *name;
   size_t arity;
   clox_native_fn_t *fn;

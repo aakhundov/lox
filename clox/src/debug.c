@@ -61,6 +61,9 @@ static size_t append_upvalues(FILE *stream, const clox_chunk_t *chunk, size_t co
 
 size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *chunk,
                                             size_t offset) {
+  assert(stream != NULL);
+  assert(chunk != NULL);
+
   assert(offset < chunk->length);
   clox_byte_t byte = chunk->code[offset];
   clox_pos_t pos = chunk->positions[offset];
@@ -148,11 +151,17 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
   return offset;
 }
 
-void clox_disassemble_chunk(const clox_chunk_t *chunk, const char *name) {
-  clox_disassemble_chunk_fprintf(stdout, chunk, name);
+size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
+  assert(chunk != NULL);
+
+  return clox_disassemble_instruction_fprintf(stdout, chunk, offset);
 }
 
 void clox_disassemble_chunk_fprintf(FILE *stream, const clox_chunk_t *chunk, const char *name) {
+  assert(stream != NULL);
+  assert(chunk != NULL);
+  assert(name != NULL);
+
   char pad[PAD_SIZE + 1];
   size_t name_len = strlen(name) + 2; // two spaces on the sides
   size_t pad_len = (name_len > PAD_SIZE ? 0 : PAD_SIZE - name_len) / 2;
@@ -177,6 +186,9 @@ void clox_disassemble_chunk_fprintf(FILE *stream, const clox_chunk_t *chunk, con
   (void)fprintf(stream, "%s\n", pad);
 }
 
-size_t clox_disassemble_instruction(const clox_chunk_t *chunk, size_t offset) {
-  return clox_disassemble_instruction_fprintf(stdout, chunk, offset);
+void clox_disassemble_chunk(const clox_chunk_t *chunk, const char *name) {
+  assert(chunk != NULL);
+  assert(name != NULL);
+
+  clox_disassemble_chunk_fprintf(stdout, chunk, name);
 }

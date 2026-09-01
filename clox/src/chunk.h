@@ -8,7 +8,7 @@
 #include "table.h"
 #include "value.h"
 
-typedef enum {
+typedef enum clox_op_code_t {
 #define X(name) OP_##name,
 #define XC(short, long) X(short) X(long)
 #include "opcodes.def"
@@ -30,7 +30,7 @@ extern const char *const clox_op_code_names[];
 
 typedef struct clox_allocator_t clox_allocator_t;
 
-typedef struct {
+typedef struct clox_chunk_t {
   size_t length;
   size_t capacity;
   clox_byte_t *code;

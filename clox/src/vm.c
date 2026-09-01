@@ -549,6 +549,9 @@ static inline void mark_callback(clox_allocator_t *alloc, void *ctx) {
 }
 
 void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
+  assert(vm != NULL);
+  assert(alloc != NULL);
+
   vm->allocator = alloc;
   reset_vm(vm);
 
@@ -568,6 +571,8 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
 }
 
 void clox_vm_free(clox_vm_t *vm) {
+  assert(vm != NULL);
+
   bool unregistered = clox_unregister_mark_callback(vm->allocator, vm->mark_callback_handle);
   assert(unregistered);
   (void)unregistered;
@@ -582,26 +587,40 @@ void clox_vm_free(clox_vm_t *vm) {
 
 void clox_vm_set_error_handler(clox_vm_t *vm, clox_error_handler_t *error_handler,
                                void *error_ctx) {
+  assert(vm != NULL);
+  assert(error_handler != NULL);
+
   vm->error_handler = error_handler;
   vm->error_ctx = error_ctx;
 }
 
 void clox_vm_reset_error_handler(clox_vm_t *vm) {
+  assert(vm != NULL);
+
   vm->error_handler = NULL;
   vm->error_ctx = NULL;
 }
 
 void clox_vm_set_print_fn(clox_vm_t *vm, clox_print_fn_t *print_fn, void *print_ctx) {
+  assert(vm != NULL);
+  assert(print_fn != NULL);
+
   vm->print_fn = print_fn;
   vm->print_ctx = print_ctx;
 }
 
 void clox_vm_set_default_print_fn(clox_vm_t *vm) {
+  assert(vm != NULL);
+
   vm->print_fn = default_print_fn;
   vm->print_ctx = NULL;
 }
 
 void clox_vm_define_native(clox_vm_t *vm, const char *name, size_t arity, clox_native_fn_t *fn) {
+  assert(vm != NULL);
+  assert(name != NULL);
+  assert(fn != NULL);
+
   clox_native_t *native = clox_new_native(vm->allocator, name, arity, fn);
   clox_push_durable(vm->allocator, (clox_object_t *)native);
   const clox_string_t *str_name = clox_string_copy(vm->allocator, name, strlen(name));
@@ -612,6 +631,9 @@ void clox_vm_define_native(clox_vm_t *vm, const char *name, size_t arity, clox_n
 }
 
 bool clox_interpret(clox_vm_t *vm, const clox_function_t *script) {
+  assert(vm != NULL);
+  assert(script != NULL);
+
   // init
   reset_vm(vm);
 

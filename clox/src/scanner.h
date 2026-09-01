@@ -5,7 +5,7 @@
 
 #include "common.h"
 
-typedef enum {
+typedef enum clox_token_type_t {
 #define X(name, ...) TOKEN_##name,
 #include "tokens.def"
 #undef X
@@ -14,14 +14,14 @@ typedef enum {
 
 extern const char *const clox_token_type_names[];
 
-typedef struct {
+typedef struct clox_token_t {
   clox_token_type_t type;
   const char *start;
   size_t length;
   clox_pos_t pos;
 } clox_token_t;
 
-typedef struct {
+typedef struct clox_scanner_t {
   const char *start;
   const char *current;
   clox_pos_t start_pos;

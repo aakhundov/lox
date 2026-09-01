@@ -14,26 +14,26 @@
 #define CLOX_MAX_LOCALS (UCHAR_MAX + 1)
 #define CLOX_MAX_UPVALUES (UCHAR_MAX + 1)
 
-typedef struct {
+typedef struct clox_compile_local_t {
   clox_token_t name;
   size_t depth;
   bool initialized;
   bool is_captured;
 } clox_compile_local_t;
 
-typedef struct {
+typedef struct clox_compile_upvalue_t {
   size_t index;
   bool is_local;
 } clox_compile_upvalue_t;
 
-typedef struct {
+typedef struct clox_compile_loop_state_t {
   bool inside;
   size_t scope;
   size_t start;
   size_t exit_patch;
 } clox_compile_loop_state_t;
 
-typedef enum {
+typedef enum clox_compile_function_type_t {
   FUNCTION_SCRIPT,
   FUNCTION_FUNCTION,
 } clox_compile_function_type_t;
@@ -54,7 +54,7 @@ typedef struct clox_compile_frame_t {
   struct clox_compile_frame_t *enclosing;
 } clox_compile_frame_t;
 
-typedef struct {
+typedef struct clox_compiler_t {
   // source
   const char *file_name;
   char *source;

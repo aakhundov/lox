@@ -7,7 +7,7 @@
 
 #include "common.h"
 
-typedef enum {
+typedef enum clox_exit_code_t {
   CLOX_EX_OK = 0,
   CLOX_EX_USAGE = 64,
   CLOX_EX_DATAERR = 65,
@@ -19,7 +19,7 @@ typedef enum {
 
 #define CLOX_MAX_ERROR_STACK_SIZE 16
 
-typedef struct {
+typedef struct clox_error_info_t {
   // message is guaranteed to be alive
   // only during the callback call
   const char *message;

@@ -77,6 +77,9 @@ static inline void adjust_capacity(clox_table_t *t, size_t new_capacity) {
 }
 
 void clox_table_init(clox_table_t *table, clox_allocator_t *alloc) {
+  assert(table != NULL);
+  assert(alloc != NULL);
+
   table->length = 0;
   table->capacity = 0;
   table->entries = NULL;
@@ -84,6 +87,8 @@ void clox_table_init(clox_table_t *table, clox_allocator_t *alloc) {
 }
 
 void clox_table_free(clox_table_t *table) {
+  assert(table != NULL);
+
   CLOX_ARRAY_FREE(table->allocator, clox_table_entry_t, table->entries, table->capacity);
 
   table->length = 0;
@@ -93,6 +98,10 @@ void clox_table_free(clox_table_t *table) {
 }
 
 bool clox_table_get(const clox_table_t *table, const clox_string_t *key, clox_value_t *value) {
+  assert(table != NULL);
+  assert(key != NULL);
+  assert(value != NULL);
+
   if (table->length == 0) {
     return false;
   }
@@ -108,6 +117,9 @@ bool clox_table_get(const clox_table_t *table, const clox_string_t *key, clox_va
 }
 
 bool clox_table_set(clox_table_t *table, const clox_string_t *key, clox_value_t value) {
+  assert(table != NULL);
+  assert(key != NULL);
+
   assert(table->length < SIZE_MAX);
   if (table->length + 1 > MAX_LENGTH(table->capacity)) {
     size_t new_capacity = CLOX_ARRAY_GROW_SIZE(table->capacity);
@@ -128,6 +140,9 @@ bool clox_table_set(clox_table_t *table, const clox_string_t *key, clox_value_t 
 }
 
 bool clox_table_delete(clox_table_t *table, const clox_string_t *key) {
+  assert(table != NULL);
+  assert(key != NULL);
+
   if (table->length == 0) {
     return false;
   }
@@ -145,6 +160,9 @@ bool clox_table_delete(clox_table_t *table, const clox_string_t *key) {
 }
 
 void clox_table_copy(clox_table_t *dst, const clox_table_t *src) {
+  assert(dst != NULL);
+  assert(src != NULL);
+
   if (src->entries == NULL || src->length == 0) {
     return;
   }
@@ -158,6 +176,9 @@ void clox_table_copy(clox_table_t *dst, const clox_table_t *src) {
 
 const clox_string_t *clox_table_get_key_string(const clox_table_t *table, const char *chars,
                                                size_t length, clox_hash_t hash) {
+  assert(table != NULL);
+  assert(chars != NULL);
+
   if (table->length == 0) {
     return NULL;
   }
@@ -189,6 +210,8 @@ const clox_string_t *clox_table_get_key_string(const clox_table_t *table, const 
 
 const clox_table_entry_t *clox_table_next(const clox_table_t *table,
                                           const clox_table_entry_t *prev) {
+  assert(table != NULL);
+
   if (table->entries == NULL) {
     // the table is empty
     return NULL;
@@ -220,6 +243,8 @@ const clox_table_entry_t *clox_table_next(const clox_table_t *table,
 }
 
 void clox_table_mark_entries(clox_table_t *table) {
+  assert(table != NULL);
+
   if (table->entries == NULL || table->length == 0) {
     return;
   }
@@ -234,6 +259,8 @@ void clox_table_mark_entries(clox_table_t *table) {
 }
 
 void clox_table_remove_unmarked_keys(clox_table_t *table) {
+  assert(table != NULL);
+
   if (table->entries == NULL || table->length == 0) {
     return;
   }

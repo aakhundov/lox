@@ -31,6 +31,9 @@ static inline void number_repr_fprintf(FILE *stream, double num) {
 }
 
 void clox_value_array_init(clox_value_array_t *arr, clox_allocator_t *alloc) {
+  assert(arr != NULL);
+  assert(alloc != NULL);
+
   arr->values = NULL;
   arr->capacity = 0;
   arr->length = 0;
@@ -38,6 +41,8 @@ void clox_value_array_init(clox_value_array_t *arr, clox_allocator_t *alloc) {
 }
 
 void clox_value_array_write(clox_value_array_t *arr, clox_value_t val) {
+  assert(arr != NULL);
+
   if (arr->length == arr->capacity) {
     size_t new_capacity = CLOX_ARRAY_GROW_SIZE(arr->capacity);
     arr->values =
@@ -50,6 +55,8 @@ void clox_value_array_write(clox_value_array_t *arr, clox_value_t val) {
 }
 
 clox_value_t clox_value_array_pop(clox_value_array_t *arr) {
+  assert(arr != NULL);
+
   assert(arr->length > 0);
 
   arr->length--;
@@ -58,6 +65,8 @@ clox_value_t clox_value_array_pop(clox_value_array_t *arr) {
 }
 
 void clox_value_array_free(clox_value_array_t *arr) {
+  assert(arr != NULL);
+
   CLOX_ARRAY_FREE(arr->allocator, clox_value_t, arr->values, arr->capacity);
 
   arr->values = NULL;
@@ -67,6 +76,8 @@ void clox_value_array_free(clox_value_array_t *arr) {
 }
 
 void clox_value_fprintf(FILE *stream, clox_value_t val) {
+  assert(stream != NULL);
+
   switch (val.type) {
   case VAL_BOOL:
     (void)fprintf(stream, CLOX_AS_BOOL(val) ? "true" : "false");
@@ -91,6 +102,8 @@ void clox_value_printf(clox_value_t val) {
 }
 
 void clox_value_repr_fprintf(FILE *stream, clox_value_t val) {
+  assert(stream != NULL);
+
   switch (val.type) {
   case VAL_BOOL:
   case VAL_NIL:

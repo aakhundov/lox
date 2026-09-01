@@ -34,7 +34,7 @@
 // collected flat, so count is a total of values and not of print calls. count
 // keeps rising past CLOX_TEST_MAX_PRINTED so a test can tell "more than fits"
 // from "exactly this many".
-typedef struct {
+typedef struct clox_test_printed_t {
   size_t count;
   clox_value_t values[CLOX_TEST_MAX_PRINTED];
 } clox_test_printed_t;
@@ -42,7 +42,7 @@ typedef struct {
 // One frame of the stack an error reports: where it happened, the name of the
 // function it happened in, and the file name and source text that function was
 // compiled from.
-typedef struct {
+typedef struct clox_test_frame_t {
   clox_pos_t pos;
   char fn_name[CLOX_TEST_NAME_SIZE];
   char file_name[CLOX_TEST_NAME_SIZE];
@@ -56,7 +56,7 @@ typedef struct {
 // duration of the call. Frames come in the order the error carried them, innermost first,
 // so stacks[i][0] is where error i happened and stack_sizes[i] is how far out
 // it was traced.
-typedef struct {
+typedef struct clox_test_errors_t {
   size_t count;
   char messages[CLOX_TEST_MAX_ERRORS][CLOX_TEST_MESSAGE_SIZE];
   size_t stack_sizes[CLOX_TEST_MAX_ERRORS];

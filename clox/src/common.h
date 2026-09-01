@@ -5,7 +5,7 @@
 
 #define CLOX_ARRAY_SIZE(arr) (sizeof((arr)) / sizeof(*(arr)))
 
-typedef struct {
+typedef struct clox_pos_t {
   size_t line;
   size_t col;
 } clox_pos_t;

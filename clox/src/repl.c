@@ -34,7 +34,7 @@
   "----------------------------------------------------------------"                               \
   "----------------------------------------------------------------"
 
-typedef struct {
+typedef struct clox_error_ctx_t {
   const char *domain;
 } clox_error_ctx_t;
 
@@ -44,7 +44,7 @@ typedef struct clox_repl_prompt_t {
   struct clox_repl_prompt_t *next;
 } clox_repl_prompt_t;
 
-typedef struct {
+typedef struct clox_harness_t {
   clox_allocator_t allocator;
   clox_compiler_t compiler;
   clox_vm_t vm;
@@ -293,7 +293,7 @@ static void run_repl(void) {
 }
 
 // ftell returns long, need one more byte for NUL in file buffer
-_Static_assert(LONG_MAX < SIZE_MAX, "long + 1 doesn't fit into size_t");
+_Static_assert(LONG_MAX < SIZE_MAX, "ftell's result + 1 doesn't fit into size_t");
 
 static char *read_file(const char *path) {
   FILE *file = fopen(path, "rb");

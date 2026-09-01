@@ -79,32 +79,40 @@ static inline clox_hash_t hash_string(const char *chars, size_t length) {
   return hash;
 }
 
-const clox_string_t *clox_string_copy(clox_allocator_t *a, const char *chars, size_t length) {
+const clox_string_t *clox_string_copy(clox_allocator_t *alloc, const char *chars, size_t length) {
+  assert(alloc != NULL);
+  assert(chars != NULL);
+
   clox_hash_t hash = hash_string(chars, length);
-  const clox_string_t *interned = clox_table_get_key_string(&a->strings, chars, length, hash);
+  const clox_string_t *interned = clox_table_get_key_string(&alloc->strings, chars, length, hash);
   if (interned != NULL) {
     return interned;
   }
 
   // chars are copied into new string object
-  const char *chars_copy = duplicate_cstring(a, chars, length);
-  return allocate_string(a, chars_copy, length, hash);
+  const char *chars_copy = duplicate_cstring(alloc, chars, length);
+  return allocate_string(alloc, chars_copy, length, hash);
 }
 
-const clox_string_t *clox_string_move(clox_allocator_t *a, const char *chars, size_t length) {
+const clox_string_t *clox_string_move(clox_allocator_t *alloc, const char *chars, size_t length) {
+  assert(alloc != NULL);
+  assert(chars != NULL);
+
   clox_hash_t hash = hash_string(chars, length);
-  const clox_string_t *interned = clox_table_get_key_string(&a->strings, chars, length, hash);
+  const clox_string_t *interned = clox_table_get_key_string(&alloc->strings, chars, length, hash);
   if (interned != NULL) {
     // free the moved chars as not needed
-    CLOX_ARRAY_FREE(a, char, (void *)chars, length + 1);
+    CLOX_ARRAY_FREE(alloc, char, (void *)chars, length + 1);
     return interned;
   }
 
   // ownership of chars is moved to new string object
-  return allocate_string(a, chars, length, hash);
+  return allocate_string(alloc, chars, length, hash);
 }
 
-clox_value_t clox_string_concat(clox_allocator_t *a, clox_value_t s1, clox_value_t s2) {
+clox_value_t clox_string_concat(clox_allocator_t *alloc, clox_value_t s1, clox_value_t s2) {
+  assert(alloc != NULL);
+
   assert(CLOX_IS_STRING(s1));
   assert(CLOX_IS_STRING(s2));
 
@@ -113,22 +121,25 @@ clox_value_t clox_string_concat(clox_allocator_t *a, clox_value_t s1, clox_value
 
   size_t total_length = left->length + right->length;
 
-  clox_push_durable(a, CLOX_AS_OBJECT(s1));
-  clox_push_durable(a, CLOX_AS_OBJECT(s2));
-  char *chars = CLOX_ARRAY_ALLOCATE(a, char, total_length + 1);
-  clox_pop_durable(a); // s2
-  clox_pop_durable(a); // s1
+  clox_push_durable(alloc, CLOX_AS_OBJECT(s1));
+  clox_push_durable(alloc, CLOX_AS_OBJECT(s2));
+  char *chars = CLOX_ARRAY_ALLOCATE(alloc, char, total_length + 1);
+  clox_pop_durable(alloc); // s2
+  clox_pop_durable(alloc); // s1
 
   memcpy(chars, left->chars, left->length);
   memcpy(chars + left->length, right->chars, right->length);
   chars[total_length] = '\0';
 
-  return CLOX_STRING_MOVE(a, chars, total_length);
+  return CLOX_STRING_MOVE(alloc, chars, total_length);
 }
 
 clox_function_t *clox_new_function(clox_allocator_t *alloc, const char *name, size_t length,
                                    size_t arity, const char *file_name, const char *source) {
+  assert(alloc != NULL);
   assert(name != NULL);
+  assert(file_name != NULL);
+  assert(source != NULL);
 
   clox_function_t *function = START_ALLOCATION(alloc, clox_function_t, OBJ_FUNCTION);
 
@@ -144,6 +155,7 @@ clox_function_t *clox_new_function(clox_allocator_t *alloc, const char *name, si
 
 clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, size_t arity,
                                clox_native_fn_t *fn) {
+  assert(alloc != NULL);
   assert(name != NULL);
   assert(fn != NULL);
 
@@ -157,6 +169,7 @@ clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, size_t
 }
 
 clox_upvalue_t *clox_new_upvalue(clox_allocator_t *alloc, clox_value_t *location) {
+  assert(alloc != NULL);
   assert(location != NULL);
 
   clox_upvalue_t *upvalue = START_ALLOCATION(alloc, clox_upvalue_t, OBJ_UPVALUE);
@@ -169,6 +182,7 @@ clox_upvalue_t *clox_new_upvalue(clox_allocator_t *alloc, clox_value_t *location
 }
 
 clox_closure_t *clox_new_closure(clox_allocator_t *alloc, const clox_function_t *function) {
+  assert(alloc != NULL);
   assert(function != NULL);
 
   clox_push_durable(alloc, (clox_object_t *)function);
@@ -228,6 +242,7 @@ bool clox_object_equals(clox_value_t a, clox_value_t b) {
 }
 
 void clox_object_fprintf(FILE *stream, clox_value_t val) {
+  assert(stream != NULL);
   assert(CLOX_IS_OBJECT(val));
 
   switch (CLOX_AS_OBJECT(val)->type) {
@@ -268,6 +283,7 @@ void clox_object_printf(clox_value_t val) {
 }
 
 void clox_object_repr_fprintf(FILE *stream, clox_value_t val) {
+  assert(stream != NULL);
   assert(CLOX_IS_OBJECT(val));
 
   switch (CLOX_AS_OBJECT(val)->type) {

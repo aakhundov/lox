@@ -222,74 +222,81 @@ static clox_token_t identifier(clox_scanner_t *s) {
   return make_token(s, identifier_type(s));
 }
 
-void clox_scanner_init(clox_scanner_t *s, const char *source) {
-  s->start = source;
-  s->current = s->start;
-  s->start_pos = (clox_pos_t){
+void clox_scanner_init(clox_scanner_t *scanner, const char *source) {
+  assert(scanner != NULL);
+  assert(source != NULL);
+
+  scanner->start = source;
+  scanner->current = scanner->start;
+  scanner->start_pos = (clox_pos_t){
       .line = 1,
       .col = 1,
   };
-  s->current_pos = s->start_pos;
+  scanner->current_pos = scanner->start_pos;
 }
 
-void clox_scanner_free(clox_scanner_t *s) {
-  s->start = NULL;
-  s->current = NULL;
+void clox_scanner_free(clox_scanner_t *scanner) {
+  assert(scanner != NULL);
+
+  scanner->start = NULL;
+  scanner->current = NULL;
 }
 
-clox_token_t clox_scan(clox_scanner_t *s) {
-  skip_whitespace(s);
+clox_token_t clox_scan(clox_scanner_t *scanner) {
+  assert(scanner != NULL);
 
-  s->start = s->current;
-  s->start_pos = s->current_pos;
+  skip_whitespace(scanner);
 
-  if (is_at_end(s)) {
-    return make_token(s, TOKEN_EOF);
+  scanner->start = scanner->current;
+  scanner->start_pos = scanner->current_pos;
+
+  if (is_at_end(scanner)) {
+    return make_token(scanner, TOKEN_EOF);
   }
 
-  char c = advance(s);
+  char c = advance(scanner);
 
   if (is_alpha(c)) {
-    return identifier(s);
+    return identifier(scanner);
   }
   if (is_digit(c)) {
-    return number(s);
+    return number(scanner);
   }
 
   switch (c) {
   case '(':
-    return make_token(s, TOKEN_LEFT_PAREN);
+    return make_token(scanner, TOKEN_LEFT_PAREN);
   case ')':
-    return make_token(s, TOKEN_RIGHT_PAREN);
+    return make_token(scanner, TOKEN_RIGHT_PAREN);
   case '{':
-    return make_token(s, TOKEN_LEFT_BRACE);
+    return make_token(scanner, TOKEN_LEFT_BRACE);
   case '}':
-    return make_token(s, TOKEN_RIGHT_BRACE);
+    return make_token(scanner, TOKEN_RIGHT_BRACE);
   case ';':
-    return make_token(s, TOKEN_SEMICOLON);
+    return make_token(scanner, TOKEN_SEMICOLON);
   case ',':
-    return make_token(s, TOKEN_COMMA);
+    return make_token(scanner, TOKEN_COMMA);
   case '.':
-    return make_token(s, TOKEN_DOT);
+    return make_token(scanner, TOKEN_DOT);
   case '-':
-    return make_token(s, TOKEN_MINUS);
+    return make_token(scanner, TOKEN_MINUS);
   case '+':
-    return make_token(s, TOKEN_PLUS);
+    return make_token(scanner, TOKEN_PLUS);
   case '/':
-    return make_token(s, TOKEN_SLASH);
+    return make_token(scanner, TOKEN_SLASH);
   case '*':
-    return make_token(s, TOKEN_STAR);
+    return make_token(scanner, TOKEN_STAR);
   case '!':
-    return make_token(s, match(s, '=') ? TOKEN_BANG_EQUAL : TOKEN_BANG);
+    return make_token(scanner, match(scanner, '=') ? TOKEN_BANG_EQUAL : TOKEN_BANG);
   case '=':
-    return make_token(s, match(s, '=') ? TOKEN_EQUAL_EQUAL : TOKEN_EQUAL);
+    return make_token(scanner, match(scanner, '=') ? TOKEN_EQUAL_EQUAL : TOKEN_EQUAL);
   case '<':
-    return make_token(s, match(s, '=') ? TOKEN_LESS_EQUAL : TOKEN_LESS);
+    return make_token(scanner, match(scanner, '=') ? TOKEN_LESS_EQUAL : TOKEN_LESS);
   case '>':
-    return make_token(s, match(s, '=') ? TOKEN_GREATER_EQUAL : TOKEN_GREATER);
+    return make_token(scanner, match(scanner, '=') ? TOKEN_GREATER_EQUAL : TOKEN_GREATER);
   case '"':
-    return string(s);
+    return string(scanner);
   default:
-    return make_error_token(s, "unexpected character");
+    return make_error_token(scanner, "unexpected character");
   }
 }

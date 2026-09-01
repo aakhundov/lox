@@ -154,7 +154,7 @@ static inline size_t emit_jump(clox_compiler_t *c, clox_op_code_t opcode,
   return CHUNK(c).length - 2;
 }
 
-_Static_assert(sizeof(size_t) >= 2, "sizeof(size_t) < 2");
+_Static_assert(sizeof(size_t) >= 2, "jump offset must fit in size_t");
 
 #define TWO_BYTE_MAX (((size_t)UCHAR_MAX << CHAR_BIT) | UCHAR_MAX)
 
@@ -169,6 +169,7 @@ static inline void patch_jump(clox_compiler_t *c, size_t jump_pos, const clox_to
   }
 
   // the two-byte jump offset encoded in big-endian
+  // cast is safe: static assert above
   CHUNK(c).code[jump_pos] = (clox_byte_t)(offset >> CHAR_BIT);
   CHUNK(c).code[jump_pos + 1] = (clox_byte_t)offset;
 }
@@ -281,7 +282,7 @@ static inline clox_function_t *end_frame(clox_compiler_t *c) {
   return function;
 }
 
-typedef enum {
+typedef enum clox_precedence_t {
   PREC_NONE,
   PREC_ASSIGNMENT, // =
   PREC_OR,         // or
@@ -298,7 +299,7 @@ typedef enum {
 
 typedef void clox_parse_fn_t(clox_compiler_t *c, bool can_assign);
 
-typedef struct {
+typedef struct clox_parse_rule_t {
   clox_parse_fn_t *const prefix_fn;
   clox_parse_fn_t *const infix_fn;
   clox_precedence_t infix_prec;
@@ -728,7 +729,7 @@ _Static_assert(CLOX_MAX_LOCALS <= INT_MAX, "MAX_LOCALS must fit within int");
 static inline void declare_variable(clox_compiler_t *c, const clox_token_t *name) {
   assert(FRAME(c)->scope_depth > 0);
 
-  // cast is safe: MAX_LOCALS <= INT_MAX
+  // cast is safe: static assert above
   for (int i = (int)FRAME(c)->local_count - 1; i >= 0; i--) {
     clox_compile_local_t *local = FRAME(c)->locals + i;
     if (local->initialized && local->depth < FRAME(c)->scope_depth) {
@@ -1006,7 +1007,7 @@ static void variable(clox_compiler_t *c, bool can_assign) {
   }
 
   if (local_get_op != OP_CODE_COUNT) {
-    // cast is safe: range checked above
+    // cast is safe: static assert above
     clox_byte_t byte_idx = (clox_byte_t)local_idx;
     emit_byte_op(c, assign ? local_set_op : local_get_op, byte_idx, &name);
   } else {
@@ -1088,6 +1089,9 @@ static inline void mark_callback(clox_allocator_t *alloc, void *ctx) {
 }
 
 void clox_compiler_init(clox_compiler_t *compiler, clox_allocator_t *alloc) {
+  assert(compiler != NULL);
+  assert(alloc != NULL);
+
   compiler->allocator = alloc;
   compiler->frame = NULL;
 
@@ -1098,6 +1102,8 @@ void clox_compiler_init(clox_compiler_t *compiler, clox_allocator_t *alloc) {
 }
 
 void clox_compiler_free(clox_compiler_t *compiler) {
+  assert(compiler != NULL);
+
   bool unregistered =
       clox_unregister_mark_callback(compiler->allocator, compiler->mark_callback_handle);
   assert(unregistered);
@@ -1110,17 +1116,27 @@ void clox_compiler_free(clox_compiler_t *compiler) {
 
 void clox_compiler_set_error_handler(clox_compiler_t *compiler, clox_error_handler_t *error_handler,
                                      void *error_ctx) {
+  assert(compiler != NULL);
+  assert(error_handler != NULL);
+
   compiler->error_handler = error_handler;
   compiler->error_ctx = error_ctx;
 }
 
 void clox_compiler_reset_error_handler(clox_compiler_t *compiler) {
+  assert(compiler != NULL);
+
   compiler->error_handler = NULL;
   compiler->error_ctx = NULL;
 }
 
 bool clox_compile(clox_compiler_t *compiler, const char *file_name, char *source,
                   clox_function_t **function) {
+  assert(compiler != NULL);
+  assert(file_name != NULL);
+  assert(source != NULL);
+  assert(function != NULL);
+
   // init parser
   clox_scanner_init(&compiler->scanner, source);
   compiler->file_name = file_name;

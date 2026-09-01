@@ -9,7 +9,7 @@
 #include "error.h"
 #include "value.h"
 
-typedef enum {
+typedef enum clox_object_type_t {
   OBJ_STRING,
   OBJ_FUNCTION,
   OBJ_NATIVE,
@@ -42,7 +42,7 @@ typedef struct clox_function_t {
   size_t upvalue_count;
 } clox_function_t;
 
-typedef union {
+typedef union clox_native_result_t {
   clox_value_t value;
   char error_msg[MAX_ERROR_LENGTH + 1];
 } clox_native_result_t;

@@ -6,14 +6,14 @@
 
 #include "value.h"
 
-typedef struct {
+typedef struct clox_table_entry_t {
   const clox_string_t *key;
   clox_value_t value;
 } clox_table_entry_t;
 
 typedef struct clox_allocator_t clox_allocator_t;
 
-typedef struct {
+typedef struct clox_table_t {
   size_t length;
   size_t capacity;
   clox_table_entry_t *entries;

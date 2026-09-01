@@ -181,6 +181,8 @@ static inline void sweep(clox_allocator_t *a) {
 }
 
 void clox_collect_garbage(clox_allocator_t *a) {
+  assert(a != NULL);
+
 #if CLOX_DEBUG_GC
   printf("---- GC begin\n");
   size_t before = a->allocated_size;
@@ -361,6 +363,9 @@ bool clox_unregister_mark_callback(clox_allocator_t *alloc, void *handle) {
 }
 
 void clox_push_durable(clox_allocator_t *alloc, clox_object_t *obj) {
+  assert(alloc != NULL);
+  assert(obj != NULL);
+
   if (alloc->durable_length == alloc->durable_capacity) {
     alloc->durable_capacity = CLOX_ARRAY_GROW_SIZE(alloc->durable_capacity);
     alloc->durable_stack = (clox_object_t **)realloc_or_error(
@@ -371,6 +376,8 @@ void clox_push_durable(clox_allocator_t *alloc, clox_object_t *obj) {
 }
 
 void clox_pop_durable(clox_allocator_t *alloc) {
+  assert(alloc != NULL);
+
   assert(alloc->durable_length > 0);
   alloc->durable_length--;
 }

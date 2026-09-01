@@ -14,13 +14,13 @@
 
 typedef void clox_print_fn_t(const clox_value_t *vals, size_t n, void *ctx);
 
-typedef struct {
+typedef struct clox_call_frame_t {
   const clox_closure_t *closure;
   const clox_byte_t *ip;
   clox_value_t *slots;
 } clox_call_frame_t;
 
-typedef struct {
+typedef struct clox_vm_t {
   clox_table_t globals;
   clox_value_t *stack_top;
   clox_value_t stack[CLOX_STACK_SIZE];

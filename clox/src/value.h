@@ -10,7 +10,7 @@
 typedef unsigned char clox_byte_t;
 typedef uint32_t clox_hash_t;
 
-typedef enum {
+typedef enum clox_value_type_t {
   VAL_BOOL,
   VAL_NIL,
   VAL_NUMBER,
@@ -21,7 +21,7 @@ typedef enum {
 typedef struct clox_object_t clox_object_t;
 typedef struct clox_string_t clox_string_t;
 
-typedef struct {
+typedef struct clox_value_t {
   clox_value_type_t type;
   union {
     bool boolean;
@@ -51,7 +51,7 @@ typedef struct {
 
 typedef struct clox_allocator_t clox_allocator_t;
 
-typedef struct {
+typedef struct clox_value_array_t {
   size_t length;
   size_t capacity;
   clox_value_t *values;

@@ -14,9 +14,9 @@
 
 #define X(name)
 #define XC(short, long)                                                                            \
-  _Static_assert(OP_##short < CONST_OP_CODE_COUNT, "");                                            \
-  _Static_assert(OP_##long < CONST_OP_CODE_COUNT, "");                                             \
-  _Static_assert(OP_##short + 1 == OP_##long, "");
+  _Static_assert(OP_##short < CONST_OP_CODE_COUNT, "short constant opcode must be valid");         \
+  _Static_assert(OP_##long < CONST_OP_CODE_COUNT, "long constant opcode must be valid");           \
+  _Static_assert(OP_##short + 1 == OP_##long, "short constant opcode + 1 must = long one");
 #include "opcodes.def"
 #undef XC
 #undef X
@@ -86,6 +86,9 @@ static inline clox_value_t pop_constant(clox_chunk_t *c) {
 }
 
 void clox_chunk_init(clox_chunk_t *chunk, clox_allocator_t *alloc) {
+  assert(chunk != NULL);
+  assert(alloc != NULL);
+
   chunk->code = NULL;
   chunk->positions = NULL;
   chunk->capacity = 0;
@@ -97,6 +100,8 @@ void clox_chunk_init(clox_chunk_t *chunk, clox_allocator_t *alloc) {
 }
 
 void clox_chunk_write(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos) {
+  assert(chunk != NULL);
+
   if (chunk->length == chunk->capacity) {
     size_t new_capacity = CLOX_ARRAY_GROW_SIZE(chunk->capacity);
     chunk->code =
@@ -112,6 +117,8 @@ void clox_chunk_write(clox_chunk_t *chunk, clox_byte_t byte, clox_pos_t pos) {
 }
 
 void clox_chunk_free(clox_chunk_t *chunk) {
+  assert(chunk != NULL);
+
   CLOX_ARRAY_FREE(chunk->allocator, clox_byte_t, chunk->code, chunk->capacity);
   CLOX_ARRAY_FREE(chunk->allocator, clox_pos_t, chunk->positions, chunk->capacity);
 
@@ -125,14 +132,15 @@ void clox_chunk_free(clox_chunk_t *chunk) {
   clox_table_free(&chunk->string_constants);
 }
 
-// at least three bytes of long constant index in size_t
-_Static_assert(sizeof(size_t) >= 3, "sizeof(size_t) < 3");
+_Static_assert(sizeof(size_t) >= 3, "constant index must fit in size_t");
 
 #define THREE_BYTE_MAX                                                                             \
   (((size_t)UCHAR_MAX << (2 * CHAR_BIT)) | ((size_t)UCHAR_MAX << CHAR_BIT) | UCHAR_MAX)
 
 bool clox_write_constant(clox_chunk_t *chunk, clox_op_code_t opcode, clox_value_t val,
                          clox_pos_t pos) {
+  assert(chunk != NULL);
+
   // short (even) constant opcode
   assert(opcode < CONST_OP_CODE_COUNT && opcode % 2 == 0);
 
@@ -163,6 +171,9 @@ bool clox_write_constant(clox_chunk_t *chunk, clox_op_code_t opcode, clox_value_
 
 clox_value_t clox_read_constant(const clox_chunk_t *chunk, clox_op_code_t opcode,
                                 const clox_byte_t **ipp) {
+  assert(chunk != NULL);
+  assert(ipp != NULL);
+
   // ptr to constant index's first byte
   const clox_byte_t *ip = *ipp;
   // the index pointer is after the chunk's code
