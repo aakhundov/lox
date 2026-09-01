@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -16,7 +17,9 @@
 
 // The name a run is opened under, the way a file or a REPL prompt gives one
 #define SOURCE_NAME "test.lox"
-#define SOURCE_SIZE 256
+// several times the longest program below, which is the one that fills the
+// globals table far enough to make it grow
+#define SOURCE_SIZE 1024
 
 // Source in, printed values and reported errors out: the two halves of the
 // interpreter working together, as the REPL and a script file drive them.
@@ -54,7 +57,11 @@ UTEST_F_TEARDOWN(lox) {
 }
 
 static bool run(struct lox *fixture, const char *source) {
-  (void)snprintf(fixture->source, SOURCE_SIZE, "%s", source);
+  int written = snprintf(fixture->source, SOURCE_SIZE, "%s", source);
+  // a truncated program would still compile and run, and would test something
+  // other than what it reads as
+  assert(written > 0 && (size_t)written < SOURCE_SIZE);
+  (void)written;
 
   if (!clox_compile(&fixture->compiler, SOURCE_NAME, fixture->source, &fixture->script)) {
     return false;
@@ -180,6 +187,38 @@ UTEST_F(lox, a_variable_can_hold_a_string) {
   clox_value_t result = only_printed(utest_fixture);
   ASSERT_TRUE(CLOX_IS_STRING(result));
   EXPECT_STREQ("onetwo", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, a_fresh_string_assigned_to_a_global_survives_the_store) {
+  // Storing into the globals table can grow it, and growing it allocates, so
+  // the value has to be reachable while the store runs. Definitions and
+  // assignments alternate so that one assignment is the one crossing the
+  // table's threshold; under the stress build, where every allocation
+  // collects, that is where a value taken off the stack too early would be
+  // swept out from under the table it was about to enter.
+  ASSERT_TRUE(run(utest_fixture, "var s = \"seed\";"
+                                 "var g0 = 0; s = \"a0\" + \"z\";"
+                                 "var g1 = 0; s = \"a1\" + \"z\";"
+                                 "var g2 = 0; s = \"a2\" + \"z\";"
+                                 "var g3 = 0; s = \"a3\" + \"z\";"
+                                 "var g4 = 0; s = \"a4\" + \"z\";"
+                                 "var g5 = 0; s = \"a5\" + \"z\";"
+                                 "var g6 = 0; s = \"a6\" + \"z\";"
+                                 "var g7 = 0; s = \"a7\" + \"z\";"
+                                 "var g8 = 0; s = \"a8\" + \"z\";"
+                                 "var g9 = 0; s = \"a9\" + \"z\";"
+                                 "var g10 = 0; s = \"a10\" + \"z\";"
+                                 "var g11 = 0; s = \"a11\" + \"z\";"
+                                 "var g12 = 0; s = \"a12\" + \"z\";"
+                                 "var g13 = 0; s = \"a13\" + \"z\";"
+                                 "var g14 = 0; s = \"a14\" + \"z\";"
+                                 "var g15 = 0; s = \"a15\" + \"z\";"
+                                 "print s;"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("a15z", CLOX_AS_CSTRING(result));
 }
 
 UTEST_F(lox, a_variable_survives_into_the_next_run) {
@@ -312,6 +351,27 @@ UTEST_F(lox, and_gives_back_the_left_operand_that_stopped_it) {
 UTEST_F(lox, and_gives_back_its_right_operand_when_the_left_holds) {
   ASSERT_TRUE(run(utest_fixture, "print 1 and 2;"));
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_and_that_stops_short_of_an_assignment_does_not_run_it) {
+  ASSERT_TRUE(run(utest_fixture, "var b = 0; print false and (b = 1); print b;"));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, an_assignment_a_short_circuit_skips_still_leaves_the_stack_level) {
+  // The statement's value has to go whether the assignment ran or not. One
+  // value left per turn is invisible in what a program prints, so the count
+  // here is what makes it visible: it outruns the stack, and the run reports
+  // the overflow instead of the print below.
+  ASSERT_TRUE(run(utest_fixture, "var b = 0; var i = 0;"
+                                 "while (i < 70000) { false and (b = 1); i = i + 1; }"
+                                 "print i;"));
+
+  ASSERT_EQ((size_t)0, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(70000.0), only_printed(utest_fixture));
 }
 
 UTEST_F(lox, or_gives_back_the_left_operand_that_stopped_it) {
@@ -1052,6 +1112,14 @@ UTEST_F(lox, a_native_is_a_global_like_any_other) {
   // nothing protects a built-in name from being redefined
   ASSERT_TRUE(run(utest_fixture, "var clock = 1; print clock;"));
   EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, assigning_to_a_native_is_a_runtime_error) {
+  // redefining the name is one thing; writing through the one that is bound
+  // to the native is refused, statement or not
+  ASSERT_FALSE(run(utest_fixture, "clock = 1;"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "clock") != NULL);
 }
 
 UTEST_F(lox, a_native_called_with_the_wrong_argument_count_is_a_runtime_error) {

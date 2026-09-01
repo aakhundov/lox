@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "chunk.h"
 #include "error.h"
 #include "object.h"
 #include "scanner.h"
@@ -52,6 +53,9 @@ typedef struct clox_compile_frame_t {
   clox_compile_function_type_t type;
   // linked list of frames
   struct clox_compile_frame_t *enclosing;
+  // trail of emitted code
+  clox_op_code_t last_opcode;
+  size_t last_opcode_address;
 } clox_compile_frame_t;
 
 typedef struct clox_compiler_t {

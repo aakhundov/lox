@@ -126,8 +126,7 @@ static inline bool push_stack(clox_vm_t *vm, clox_value_t val) {
     return false; // stack overflow
   }
 
-  *vm->stack_top = val;
-  vm->stack_top++;
+  *vm->stack_top++ = val;
   return true;
 }
 
@@ -322,14 +321,19 @@ static bool run(clox_vm_t *vm) {
       PUSH(*frame->closure->upvalues[READ_BYTE()]->location);
       break;
     case OP_SET_GLOBAL:
-    case OP_SET_GLOBAL_LONG: {
+    case OP_SET_GLOBAL_LONG:
+    case OP_SET_GLOBAL_POP:
+    case OP_SET_GLOBAL_POP_LONG: {
       clox_value_t existing_value;
       const clox_string_t *name = READ_STRING(opcode);
       bool name_exists = clox_table_get(&vm->globals, name, &existing_value);
       if (name_exists) {
         if (!CLOX_IS_NATIVE(existing_value)) {
-          // no POP(): assignment is expression
           clox_table_set(&vm->globals, name, PEEK(0));
+          if (opcode == OP_SET_GLOBAL_POP || opcode == OP_SET_GLOBAL_POP_LONG) {
+            // GC: pop after clox_table_set ends
+            POP();
+          }
         } else {
           ERROR("can't assign to native '%s'", name->chars);
         }
@@ -339,12 +343,18 @@ static bool run(clox_vm_t *vm) {
       break;
     }
     case OP_SET_LOCAL:
-      // no POP(): assignment is expression
+      // no POP: assignment is expression
       frame->slots[READ_BYTE()] = PEEK(0);
       break;
+    case OP_SET_LOCAL_POP:
+      frame->slots[READ_BYTE()] = POP();
+      break;
     case OP_SET_UPVALUE:
-      // no POP(): assignment is expression
+      // no POP: assignment is expression
       *frame->closure->upvalues[READ_BYTE()]->location = PEEK(0);
+      break;
+    case OP_SET_UPVALUE_POP:
+      *frame->closure->upvalues[READ_BYTE()]->location = POP();
       break;
     case OP_NIL:
       PUSH(CLOX_NIL);
@@ -493,14 +503,24 @@ static bool run(clox_vm_t *vm) {
     case OP_RETURN: {
       clox_value_t result = POP();
       close_upvalues(vm, frame->slots);
+      assert(vm->frame_count >= 1);               // above script level
+      vm->stack_top = frame->slots;               // rewind caller's stack
+      frame = &vm->frames[--vm->frame_count - 1]; // restore caller's frame
+      ip = frame->ip;                             // copy ip from restored frame
+      *vm->stack_top++ = result;                  // push result on caller's stack
+      break;
+    }
+    case OP_RETURN_NIL: {
+      close_upvalues(vm, frame->slots);
       vm->frame_count--;
+      // the script always returns via OP_RETURN_NIL
       if (vm->frame_count == 0) {
-        return true; // return from script
+        return true;
       }
-      vm->stack_top = frame->slots;             // rewind to caller's stack
+      vm->stack_top = frame->slots;             // rewind caller's stack
       frame = &vm->frames[vm->frame_count - 1]; // restore caller's frame
-      ip = frame->ip;
-      PUSH(result); // push result on caller's stack
+      ip = frame->ip;                           // copy ip from restored frame
+      *vm->stack_top++ = CLOX_NIL;              // push NIL on caller's stack
       break;
     }
     case OP_CODE_COUNT:

@@ -141,8 +141,7 @@ static bool interpret(struct vm *fixture, size_t left_on_stack) {
     }
     remaining -= n;
   }
-  emit(fixture, OP_NIL); // the value OP_RETURN takes back
-  emit(fixture, OP_RETURN);
+  emit(fixture, OP_RETURN_NIL); // the implicit return, as the compiler emits it
 
   return clox_interpret(&fixture->vm, fixture->function);
 }
@@ -456,6 +455,21 @@ UTEST_F(vm, setting_a_local_slot_leaves_the_value_on_the_stack) {
   EXPECT_EQ((size_t)2, utest_fixture->printed.count);
 }
 
+UTEST_F(vm, the_discarding_local_set_writes_the_slot_and_takes_the_value_off) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0)); // slot 1
+  emit(utest_fixture, OP_TRUE);                   // slot 2, a marker above it
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit(utest_fixture, OP_SET_LOCAL_POP);
+  emit(utest_fixture, 1);
+
+  // the marker is what the write left on top, so nothing of the assignment's
+  // own is standing between them
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[1]);
+}
+
 UTEST_F(vm, a_counted_pop_discards_that_many_values) {
   emit(utest_fixture, OP_TRUE);
   emit(utest_fixture, OP_NIL);
@@ -558,6 +572,41 @@ UTEST_F(vm, an_assigned_global_reads_back_the_new_value) {
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[0]);
 }
 
+UTEST_F(vm, the_discarding_global_set_writes_the_global_and_takes_the_value_off) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_global(utest_fixture, OP_DEF_GLOBAL, "a");
+  emit(utest_fixture, OP_TRUE); // a marker the set must not reach
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit_global(utest_fixture, OP_SET_GLOBAL_POP, "a");
+  emit_global(utest_fixture, OP_GET_GLOBAL, "a");
+
+  // the read stands directly on the marker: the value the set took is gone
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, the_discarding_global_set_by_a_long_index_reads_its_whole_index) {
+  // push the global's name past the single-byte constant range
+  for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
+    emit_constant(utest_fixture, CLOX_NUMBER((double)i));
+    emit(utest_fixture, OP_POP);
+  }
+
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_global(utest_fixture, OP_DEF_GLOBAL, "far");
+  emit(utest_fixture, OP_TRUE); // a marker the set must not reach
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_global(utest_fixture, OP_SET_GLOBAL_POP, "far");
+  emit_global(utest_fixture, OP_GET_GLOBAL, "far");
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[1]);
+}
+
 UTEST_F(vm, a_global_named_by_a_long_index_still_resolves) {
   // push the global's name past the single-byte constant range
   for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
@@ -585,8 +634,7 @@ UTEST_F(vm, a_global_outlives_the_run_that_defined_it) {
   (void)clox_write_constant(&next->chunk, OP_GET_GLOBAL,
                             clox_test_string_kept(&utest_fixture->alloc, "kept", 4), POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
-  clox_chunk_write(&next->chunk, OP_NIL, POS);
-  clox_chunk_write(&next->chunk, OP_RETURN, POS);
+  clox_chunk_write(&next->chunk, OP_RETURN_NIL, POS);
 
   EXPECT_TRUE(clox_interpret(&utest_fixture->vm, next));
   ASSERT_EQ((size_t)1, utest_fixture->printed.count);
@@ -599,8 +647,7 @@ UTEST_F(vm, a_counted_print_reports_its_values_in_push_order) {
   emit_constant(utest_fixture, CLOX_NUMBER(3.0));
   emit(utest_fixture, OP_PRINT_N);
   emit(utest_fixture, 3);
-  emit(utest_fixture, OP_NIL);
-  emit(utest_fixture, OP_RETURN);
+  emit(utest_fixture, OP_RETURN_NIL);
 
   ASSERT_TRUE(clox_interpret(&utest_fixture->vm, utest_fixture->function));
   ASSERT_EQ((size_t)3, utest_fixture->printed.count);
@@ -775,6 +822,26 @@ UTEST_F(vm, assigning_to_an_undefined_global_is_a_runtime_error) {
   EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "missing") != NULL);
 }
 
+UTEST_F(vm, the_discarding_set_of_a_native_is_a_runtime_error) {
+  // the name is refused before anything is written, so the discard the opcode
+  // carries never happens either
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_global(utest_fixture, OP_SET_GLOBAL_POP, "clock");
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "clock") != NULL);
+}
+
+UTEST_F(vm, the_discarding_set_of_an_undefined_global_is_a_runtime_error) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_global(utest_fixture, OP_SET_GLOBAL_POP, "missing");
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "missing") != NULL);
+}
+
 UTEST_F(vm, a_failed_assignment_leaves_the_global_undefined) {
   emit_constant(utest_fixture, CLOX_NUMBER(1.0));
   emit_global(utest_fixture, OP_SET_GLOBAL, "missing");
@@ -786,8 +853,7 @@ UTEST_F(vm, a_failed_assignment_leaves_the_global_undefined) {
   (void)clox_write_constant(&next->chunk, OP_GET_GLOBAL,
                             clox_test_string_kept(&utest_fixture->alloc, "missing", 7), POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
-  clox_chunk_write(&next->chunk, OP_NIL, POS);
-  clox_chunk_write(&next->chunk, OP_RETURN, POS);
+  clox_chunk_write(&next->chunk, OP_RETURN_NIL, POS);
 
   utest_fixture->errors = (clox_test_errors_t){0};
   EXPECT_FALSE(clox_interpret(&utest_fixture->vm, next));
@@ -834,8 +900,7 @@ UTEST_F(vm, a_runtime_error_carries_the_position_of_its_instruction) {
   clox_chunk_t *chunk = &utest_fixture->function->chunk;
   clox_chunk_write(chunk, OP_TRUE, (clox_pos_t){.line = 2, .col = 1});
   clox_chunk_write(chunk, OP_NEGATE, (clox_pos_t){.line = 7, .col = 3});
-  clox_chunk_write(chunk, OP_NIL, POS);
-  clox_chunk_write(chunk, OP_RETURN, POS);
+  clox_chunk_write(chunk, OP_RETURN_NIL, POS);
 
   EXPECT_FALSE(clox_interpret(&utest_fixture->vm, utest_fixture->function));
   ASSERT_EQ((size_t)1, utest_fixture->errors.count);
@@ -881,8 +946,7 @@ UTEST_F(vm, a_run_that_failed_leaves_the_vm_usable) {
   clox_test_keep(&utest_fixture->alloc, next);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
-  clox_chunk_write(&next->chunk, OP_NIL, POS);
-  clox_chunk_write(&next->chunk, OP_RETURN, POS);
+  clox_chunk_write(&next->chunk, OP_RETURN_NIL, POS);
 
   utest_fixture->printed = (clox_test_printed_t){0};
   EXPECT_TRUE(clox_interpret(&utest_fixture->vm, next));
@@ -988,6 +1052,28 @@ UTEST_F(vm, returning_discards_whatever_the_callee_left_behind) {
   ASSERT_TRUE(interpret(utest_fixture, 1));
   ASSERT_EQ((size_t)1, utest_fixture->printed.count);
   EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_nil_return_hands_back_nil_without_taking_a_value) {
+  clox_function_t *callee = make_callee(utest_fixture, "quiet", 0);
+  emit_constant_to(callee, CLOX_NUMBER(1.0)); // left behind, not returned
+  emit_to(callee, OP_RETURN_NIL);
+
+  emit_callee(utest_fixture, callee);
+  emit_call(utest_fixture, 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NIL, utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_nil_return_closes_a_script_that_pushed_nothing) {
+  // every function the compiler closes ends in this instruction, the script
+  // included, and there it stands over an empty stack
+  emit(utest_fixture, OP_RETURN_NIL);
+
+  EXPECT_TRUE(clox_interpret(&utest_fixture->vm, utest_fixture->function));
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
 }
 
 UTEST_F(vm, the_caller_resumes_at_the_instruction_after_the_call) {
@@ -1264,8 +1350,7 @@ UTEST_F(vm, a_run_that_overflowed_the_frames_leaves_the_vm_usable) {
   clox_test_keep(&utest_fixture->alloc, next);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
-  clox_chunk_write(&next->chunk, OP_NIL, POS);
-  clox_chunk_write(&next->chunk, OP_RETURN, POS);
+  clox_chunk_write(&next->chunk, OP_RETURN_NIL, POS);
 
   utest_fixture->printed = (clox_test_printed_t){0};
   EXPECT_TRUE(clox_interpret(&utest_fixture->vm, next));
@@ -1354,6 +1439,28 @@ UTEST_F(vm, writing_through_an_upvalue_reaches_the_slot_it_closes_over) {
   emit_closure(utest_fixture, callee, captures);
   emit_call(utest_fixture, 0);
   emit(utest_fixture, OP_POP); // what the call returned
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  // the slot the script left behind carries what the callee wrote into it
+  EXPECT_VALUE_EQ(CLOX_NUMBER(99.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, the_discarding_upvalue_set_writes_through_and_takes_the_value_off) {
+  clox_function_t *callee = make_callee(utest_fixture, "writes", 0);
+  callee->upvalue_count = 1;
+  emit_constant_to(callee, CLOX_NUMBER(99.0));
+  emit_to(callee, OP_SET_UPVALUE_POP);
+  emit_to(callee, 0);
+  // nothing of the assignment is left to return, which is why the return that
+  // takes no value is the one that can close this body
+  emit_to(callee, OP_RETURN_NIL);
+
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  const clox_byte_t captures[] = {1, FIRST_SLOT};
+  emit_closure(utest_fixture, callee, captures);
+  emit_call(utest_fixture, 0);
+  emit(utest_fixture, OP_POP); // the nil the call returned
 
   ASSERT_TRUE(interpret(utest_fixture, 1));
   ASSERT_EQ((size_t)1, utest_fixture->printed.count);
@@ -1646,8 +1753,7 @@ UTEST_F(vm, a_run_that_failed_with_upvalues_open_leaves_the_vm_usable) {
   clox_test_keep(&utest_fixture->alloc, next);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
-  clox_chunk_write(&next->chunk, OP_NIL, POS);
-  clox_chunk_write(&next->chunk, OP_RETURN, POS);
+  clox_chunk_write(&next->chunk, OP_RETURN_NIL, POS);
 
   utest_fixture->printed = (clox_test_printed_t){0};
   EXPECT_TRUE(clox_interpret(&utest_fixture->vm, next));
@@ -1780,8 +1886,7 @@ UTEST_F(vm, a_run_that_a_native_failed_leaves_the_vm_usable) {
   clox_test_keep(&utest_fixture->alloc, next);
   clox_chunk_write(&next->chunk, OP_NIL, POS);
   clox_chunk_write(&next->chunk, OP_PRINT, POS);
-  clox_chunk_write(&next->chunk, OP_NIL, POS);
-  clox_chunk_write(&next->chunk, OP_RETURN, POS);
+  clox_chunk_write(&next->chunk, OP_RETURN_NIL, POS);
 
   utest_fixture->printed = (clox_test_printed_t){0};
   EXPECT_TRUE(clox_interpret(&utest_fixture->vm, next));

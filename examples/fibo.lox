@@ -1,11 +1,38 @@
-fun fib(n) {
+fun fibo_global(n) {
   if (n < 2) return n;
-  return fib(n - 1) + fib(n - 2); 
+  return fibo_global(n - 1) + fibo_global(n - 2); 
 }
 
-fib(25); // warmup
+fun fibo_local(n) {
+  fun fibo_local_inner(n) {
+    if (n < 2) return n;
+    return fibo_local_inner(n - 1) + fibo_local_inner(n - 2); 
+  }
+  return fibo_local_inner(n);
+}
 
-var before = clock();
-print fib(35);
-var after = clock();
-print after - before;
+var n_runs = 10;
+var n_bench = 35;
+var n_warmup = 25;
+
+// warmup
+fibo_global(n_warmup);
+fibo_local(n_warmup);
+
+var global_total = 0;
+var local_total = 0;
+
+for (var i = 0; i < n_runs; i = i + 1) {
+  // bench
+  var t1 = clock();
+  fibo_global(n_bench);
+  var t2 = clock();
+  fibo_local(n_bench);
+  var t3 = clock();
+
+  global_total = global_total + (t2 - t1);
+  local_total = local_total + (t3 - t2);
+}
+
+print "global:", global_total / n_runs;
+print "local: ", local_total / n_runs;

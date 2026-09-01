@@ -65,8 +65,10 @@ static bool takes_byte_operand(clox_op_code_t opcode) {
   switch (opcode) {
   case OP_GET_LOCAL:
   case OP_SET_LOCAL:
+  case OP_SET_LOCAL_POP:
   case OP_GET_UPVALUE:
   case OP_SET_UPVALUE:
+  case OP_SET_UPVALUE_POP:
   case OP_POP_N:
   case OP_PRINT_N:
   case OP_CALL:

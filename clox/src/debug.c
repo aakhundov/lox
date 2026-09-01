@@ -101,6 +101,7 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_NEGATE:
     case OP_PRINT:
     case OP_RETURN:
+    case OP_RETURN_NIL:
       offset++; // just opcode
       break;
     case OP_CONSTANT:
@@ -111,6 +112,8 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_GET_GLOBAL_LONG:
     case OP_SET_GLOBAL:
     case OP_SET_GLOBAL_LONG:
+    case OP_SET_GLOBAL_POP:
+    case OP_SET_GLOBAL_POP_LONG:
       offset = const_instruction(stream, chunk, opcode, NULL, offset);
       break;
     case OP_CLOSURE:
@@ -123,8 +126,10 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     }
     case OP_GET_LOCAL:
     case OP_SET_LOCAL:
+    case OP_SET_LOCAL_POP:
     case OP_GET_UPVALUE:
     case OP_SET_UPVALUE:
+    case OP_SET_UPVALUE_POP:
     case OP_POP_N:
     case OP_PRINT_N:
     case OP_CALL:

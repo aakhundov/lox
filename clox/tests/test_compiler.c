@@ -50,6 +50,8 @@ _Static_assert(UPVALUE_SLOTS == UCHAR_MAX + 1, "a capture index no longer fits o
 #define OVER_TWO_BYTE_JUMP ((TWO_BYTE_MAX / FILLER_STATEMENT_BYTES) + 1)
 // one more value than a one-byte print operand can count
 #define OVER_PRINT_ARGS (UCHAR_MAX + 1)
+// one more constant than a single-byte index can address
+#define OVER_BYTE_INDEX (UCHAR_MAX + 1)
 // Mirrors MAX_DECLARATION_DEPTH in compiler.c, which is private to it: the
 // depth at which a declaration is refused. One level short of it must compile.
 #define DECLARATION_DEPTH_LIMIT 200
@@ -151,6 +153,20 @@ static const char *print_of(char (*buffer)[SOURCE_SIZE], size_t count) {
   return *buffer;
 }
 
+// Renders "0;1;...;" over OVER_BYTE_INDEX distinct number literals, then the
+// statement handed in. Numbers are not interned the way names are, so each one
+// takes a constant slot of its own and what follows is named by an index no
+// single byte can carry.
+static const char *past_a_byte_of_constants(char (*buffer)[SOURCE_SIZE], const char *statement) {
+  size_t written = 0;
+  for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
+    written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "%zu;", i);
+  }
+  (void)snprintf(*buffer + written, SOURCE_SIZE - written, "%s", statement);
+
+  return *buffer;
+}
+
 // Renders "fun f(p0,p1,...){}" over count parameters into buffer.
 static const char *function_of_params(char (*buffer)[SOURCE_SIZE], size_t count) {
   size_t written = (size_t)snprintf(*buffer, SOURCE_SIZE, "fun f(");
@@ -235,7 +251,7 @@ static size_t jump_offset(const clox_chunk_t *chunk, size_t pos) {
 UTEST_F(compiler, a_number_becomes_a_constant) {
   ASSERT_TRUE(compile(utest_fixture, "42;"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_RETURN_NIL);
   ASSERT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
   EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->function->chunk.constants.values[0]);
 }
@@ -249,23 +265,23 @@ UTEST_F(compiler, a_fractional_number_keeps_its_value) {
 
 UTEST_F(compiler, true_has_its_own_opcode) {
   ASSERT_TRUE(compile(utest_fixture, "true;"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, false_has_its_own_opcode) {
   ASSERT_TRUE(compile(utest_fixture, "false;"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_FALSE, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_FALSE, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, nil_has_its_own_opcode) {
   ASSERT_TRUE(compile(utest_fixture, "nil;"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_string_becomes_a_constant_holding_its_text) {
   ASSERT_TRUE(compile(utest_fixture, "\"text\";"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_RETURN_NIL);
   ASSERT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
 
   clox_value_t constant = utest_fixture->function->chunk.constants.values[0];
@@ -283,26 +299,25 @@ UTEST_F(compiler, an_empty_string_becomes_an_empty_constant) {
 
 UTEST_F(compiler, negation_follows_its_operand) {
   ASSERT_TRUE(compile(utest_fixture, "-1;"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_NEGATE, OP_POP, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_NEGATE, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, not_follows_its_operand) {
   ASSERT_TRUE(compile(utest_fixture, "!true;"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_NOT, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_NOT, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, unary_operators_stack_up) {
   ASSERT_TRUE(compile(utest_fixture, "--1;"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_NEGATE, OP_NEGATE, OP_POP, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_NEGATE, OP_NEGATE, OP_POP,
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_binary_operator_follows_both_operands) {
   ASSERT_TRUE(compile(utest_fixture, "1 + 2;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_ADD, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
   ASSERT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
   EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->function->chunk.constants.values[0]);
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->function->chunk.constants.values[1]);
@@ -346,60 +361,60 @@ UTEST_F(compiler, multiplication_binds_tighter_than_addition) {
   ASSERT_TRUE(compile(utest_fixture, "1 + 2 * 3;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_CONSTANT, 2,
-              OP_MULTIPLY, OP_ADD, OP_POP, OP_NIL, OP_RETURN);
+              OP_MULTIPLY, OP_ADD, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, grouping_overrides_precedence) {
   ASSERT_TRUE(compile(utest_fixture, "(1 + 2) * 3;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_ADD, OP_CONSTANT,
-              2, OP_MULTIPLY, OP_POP, OP_NIL, OP_RETURN);
+              2, OP_MULTIPLY, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, equal_precedence_associates_to_the_left) {
   ASSERT_TRUE(compile(utest_fixture, "1 - 2 - 3;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_SUBTRACT,
-              OP_CONSTANT, 2, OP_SUBTRACT, OP_POP, OP_NIL, OP_RETURN);
+              OP_CONSTANT, 2, OP_SUBTRACT, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, comparison_binds_looser_than_arithmetic) {
   ASSERT_TRUE(compile(utest_fixture, "1 + 2 < 3;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_ADD, OP_CONSTANT,
-              2, OP_LESS, OP_POP, OP_NIL, OP_RETURN);
+              2, OP_LESS, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, the_same_literal_twice_is_stored_twice) {
   ASSERT_TRUE(compile(utest_fixture, "1 + 1;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_ADD, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
   EXPECT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
 }
 
 UTEST_F(compiler, a_print_statement_emits_print_after_its_expression) {
   ASSERT_TRUE(compile(utest_fixture, "print 1;"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_PRINT, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_PRINT, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, statements_are_emitted_one_after_another) {
   ASSERT_TRUE(compile(utest_fixture, "1; print 2;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_CONSTANT, 1, OP_PRINT,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
   ASSERT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
 }
 
 UTEST_F(compiler, an_empty_source_compiles_to_a_return_of_nil) {
   ASSERT_TRUE(compile(utest_fixture, ""));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_variable_declaration_defines_a_global_from_its_initializer) {
   ASSERT_TRUE(compile(utest_fixture, "var a = 1;"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_DEF_GLOBAL, 1, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_DEF_GLOBAL, 1, OP_RETURN_NIL);
   ASSERT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
   EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->function->chunk.constants.values[0]);
 
@@ -411,7 +426,7 @@ UTEST_F(compiler, a_variable_declaration_defines_a_global_from_its_initializer) 
 UTEST_F(compiler, a_variable_declaration_without_an_initializer_defines_it_as_nil) {
   ASSERT_TRUE(compile(utest_fixture, "var a;"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_DEF_GLOBAL, 0, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_DEF_GLOBAL, 0, OP_RETURN_NIL);
   ASSERT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
   EXPECT_STREQ("a", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[0]));
 }
@@ -419,7 +434,7 @@ UTEST_F(compiler, a_variable_declaration_without_an_initializer_defines_it_as_ni
 UTEST_F(compiler, reading_a_variable_emits_a_global_get) {
   ASSERT_TRUE(compile(utest_fixture, "a;"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_POP, OP_RETURN_NIL);
   ASSERT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
   EXPECT_STREQ("a", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[0]));
 }
@@ -427,8 +442,8 @@ UTEST_F(compiler, reading_a_variable_emits_a_global_get) {
 UTEST_F(compiler, assigning_to_a_variable_emits_a_global_set) {
   ASSERT_TRUE(compile(utest_fixture, "a = 1;"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_SET_GLOBAL, 1, OP_POP, OP_NIL,
-              OP_RETURN);
+  // the set stands alone as a statement, so it takes the discarding form
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_SET_GLOBAL_POP, 1, OP_RETURN_NIL);
   ASSERT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
   EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->function->chunk.constants.values[0]);
   EXPECT_STREQ("a", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[1]));
@@ -437,9 +452,10 @@ UTEST_F(compiler, assigning_to_a_variable_emits_a_global_set) {
 UTEST_F(compiler, assignment_associates_to_the_right) {
   ASSERT_TRUE(compile(utest_fixture, "a = b = 1;"));
 
-  // the innermost assignment runs first, and its value flows outward
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_SET_GLOBAL, 1, OP_SET_GLOBAL, 2,
-              OP_POP, OP_NIL, OP_RETURN);
+  // The innermost assignment runs first, and its value flows outward: only the
+  // outermost one is the statement's own, so only it discards.
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_SET_GLOBAL, 1, OP_SET_GLOBAL_POP,
+              2, OP_RETURN_NIL);
   ASSERT_EQ((size_t)3, utest_fixture->function->chunk.constants.length);
   EXPECT_STREQ("b", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[1]));
   EXPECT_STREQ("a", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[2]));
@@ -448,15 +464,14 @@ UTEST_F(compiler, assignment_associates_to_the_right) {
 UTEST_F(compiler, a_variable_reads_itself_inside_its_own_initializer) {
   ASSERT_TRUE(compile(utest_fixture, "var a = a;"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_DEF_GLOBAL, 0, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_DEF_GLOBAL, 0, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, the_same_string_literal_becomes_one_constant) {
   ASSERT_TRUE(compile(utest_fixture, "\"x\" + \"x\";"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 0, OP_ADD, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
   ASSERT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
   EXPECT_STREQ("x", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[0]));
 }
@@ -464,23 +479,54 @@ UTEST_F(compiler, the_same_string_literal_becomes_one_constant) {
 UTEST_F(compiler, a_name_read_and_assigned_shares_one_constant) {
   ASSERT_TRUE(compile(utest_fixture, "a = a;"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_SET_GLOBAL, 0, OP_POP, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_SET_GLOBAL_POP, 0,
+              OP_RETURN_NIL);
   ASSERT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
+}
+
+UTEST_F(compiler, a_global_set_named_by_a_long_index_discards_in_its_long_form) {
+  char source[SOURCE_SIZE];
+  ASSERT_TRUE(compile(utest_fixture, past_a_byte_of_constants(&source, "a = 1;")));
+
+  // Which of the pair the fold picks is what decides how the index behind it
+  // is read: the short form would take one byte of a three-byte index and run
+  // on into the middle of it.
+  const clox_chunk_t *chunk = &utest_fixture->function->chunk;
+  ASSERT_TRUE(chunk->length >= 5);
+  // the set, its three index bytes, and the script's own return
+  EXPECT_EQ(OP_SET_GLOBAL_POP_LONG, chunk->code[chunk->length - 5]);
+  EXPECT_EQ(OP_RETURN_NIL, chunk->code[chunk->length - 1]);
+}
+
+UTEST_F(compiler, a_call_standing_as_a_statement_keeps_its_pop) {
+  ASSERT_TRUE(compile(utest_fixture, "f();"));
+
+  // a call leaves its result behind only after jumping into the callee's own
+  // code, so there is no instruction here for the discard to fold into
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CALL, 0, OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_set_inside_a_branch_still_discards) {
+  ASSERT_TRUE(compile(utest_fixture, "if (a) b = 1;"));
+
+  // the branch is jumped over whole, value and set together, so the set is
+  // still reached by every path that reaches the value it takes
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_JUMP_FALSE_POP, 0, 4,
+              OP_CONSTANT, 1, OP_SET_GLOBAL_POP, 2, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_variable_takes_part_in_expressions) {
   ASSERT_TRUE(compile(utest_fixture, "print a + 1;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CONSTANT, 1, OP_ADD, OP_PRINT,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_block_keeps_its_variable_out_of_the_globals) {
   ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; }"));
 
   // one local leaves by the plain OP_POP, not a counted one
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_RETURN_NIL);
   // the initializer is the only constant: a local is never named
   EXPECT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
 }
@@ -489,23 +535,23 @@ UTEST_F(compiler, a_local_is_read_by_its_slot) {
   ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; a; }"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_POP, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
   EXPECT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
 }
 
 UTEST_F(compiler, a_local_is_assigned_by_its_slot) {
   ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; a = 2; }"));
 
-  // the value is left behind, as every assignment is an expression
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_SET_LOCAL, 1,
-              OP_POP, OP_POP, OP_NIL, OP_RETURN);
+  // the set discards its own value; the pop left is the block dropping a
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_SET_LOCAL_POP, 1,
+              OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, locals_take_their_slots_in_declaration_order) {
   ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; var b = 2; a; b; }"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_GET_LOCAL, 1,
-              OP_POP, OP_GET_LOCAL, 2, OP_POP, OP_POP_N, 2, OP_NIL, OP_RETURN);
+              OP_POP, OP_GET_LOCAL, 2, OP_POP, OP_POP_N, 2, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_local_shadows_an_enclosing_one_of_the_same_name) {
@@ -513,49 +559,49 @@ UTEST_F(compiler, a_local_shadows_an_enclosing_one_of_the_same_name) {
 
   // the inner slot wins, and each block pops only what it declared
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_GET_LOCAL, 2,
-              OP_POP, OP_POP, OP_POP, OP_NIL, OP_RETURN);
+              OP_POP, OP_POP, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, an_inner_block_reaches_the_enclosing_local) {
   ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; { a; } }"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_POP, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, an_inner_block_assigns_to_the_enclosing_local) {
   ASSERT_TRUE(compile(utest_fixture, "{ var a = 1; { a = 2; } }"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_SET_LOCAL, 1,
-              OP_POP, OP_POP, OP_NIL, OP_RETURN);
+  // the inner block declares nothing, so the only pop left is the outer one
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_SET_LOCAL_POP, 1,
+              OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_block_declaring_nothing_pops_nothing) {
   ASSERT_TRUE(compile(utest_fixture, "{ 1; }"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, leaving_a_block_pops_its_locals_in_one_instruction) {
   ASSERT_TRUE(compile(utest_fixture, "{ var a; var b; var c; }"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_NIL, OP_NIL, OP_POP_N, 3, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_NIL, OP_NIL, OP_POP_N, 3, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, the_counted_pop_starts_at_the_second_local) {
   ASSERT_TRUE(compile(utest_fixture, "{ var a; }"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_POP, OP_RETURN_NIL);
 
   ASSERT_TRUE(compile(utest_fixture, "{ var a; var b; }"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_NIL, OP_POP_N, 2, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_NIL, OP_NIL, OP_POP_N, 2, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_declaration_outside_every_block_is_still_a_global) {
   ASSERT_TRUE(compile(utest_fixture, "var a = 1; { var b = 2; }"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_DEF_GLOBAL, 1, OP_CONSTANT, 2,
-              OP_POP, OP_NIL, OP_RETURN);
+              OP_POP, OP_RETURN_NIL);
   // only the global is named
   ASSERT_EQ((size_t)3, utest_fixture->function->chunk.constants.length);
   EXPECT_STREQ("a", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[1]));
@@ -567,19 +613,18 @@ UTEST_F(compiler, filling_every_local_slot_pops_them_in_one_counted_group) {
 
   // one OP_NIL per local, then the widest pop a single byte can count
   const clox_chunk_t *chunk = &utest_fixture->function->chunk;
-  ASSERT_EQ((size_t)LOCAL_SLOTS + 4, chunk->length);
+  ASSERT_EQ((size_t)LOCAL_SLOTS + 3, chunk->length);
   EXPECT_EQ(OP_NIL, chunk->code[LOCAL_SLOTS - 1]);
   EXPECT_EQ(OP_POP_N, chunk->code[LOCAL_SLOTS]);
   EXPECT_EQ(UCHAR_MAX, chunk->code[LOCAL_SLOTS + 1]);
-  EXPECT_EQ(OP_NIL, chunk->code[LOCAL_SLOTS + 2]);
-  EXPECT_EQ(OP_RETURN, chunk->code[LOCAL_SLOTS + 3]);
+  EXPECT_EQ(OP_RETURN_NIL, chunk->code[LOCAL_SLOTS + 2]);
 }
 
 UTEST_F(compiler, a_print_of_several_values_counts_them_in_its_operand) {
   ASSERT_TRUE(compile(utest_fixture, "print 1, 2;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_PRINT_N, 2,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
   ASSERT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
   EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->function->chunk.constants.values[0]);
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->function->chunk.constants.values[1]);
@@ -589,14 +634,14 @@ UTEST_F(compiler, the_values_of_a_print_are_pushed_left_to_right) {
   ASSERT_TRUE(compile(utest_fixture, "print a, b, c;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_GET_GLOBAL, 1, OP_GET_GLOBAL, 2,
-              OP_PRINT_N, 3, OP_NIL, OP_RETURN);
+              OP_PRINT_N, 3, OP_RETURN_NIL);
   EXPECT_STREQ("a", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[0]));
   EXPECT_STREQ("c", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[2]));
 }
 
 UTEST_F(compiler, a_print_of_one_value_stays_on_the_uncounted_opcode) {
   ASSERT_TRUE(compile(utest_fixture, "print 1;"));
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_PRINT, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_PRINT, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, the_widest_print_the_operand_can_count_is_accepted) {
@@ -606,7 +651,7 @@ UTEST_F(compiler, the_widest_print_the_operand_can_count_is_accepted) {
   const clox_chunk_t *chunk = &utest_fixture->function->chunk;
   // one two-byte constant per value, then the counted print and the return
   size_t print_at = (size_t)UCHAR_MAX * 2;
-  ASSERT_EQ(print_at + 4, chunk->length);
+  ASSERT_EQ(print_at + 3, chunk->length);
   EXPECT_EQ(OP_PRINT_N, chunk->code[print_at]);
   EXPECT_EQ(UCHAR_MAX, chunk->code[print_at + 1]);
 }
@@ -632,14 +677,14 @@ UTEST_F(compiler, an_if_jumps_over_its_branch_when_the_condition_fails) {
   // the conditional jump drops the condition and skips the branch; with no
   // else to skip in turn, the branch closes on nothing
   EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_JUMP_FALSE_POP, 0, 3, OP_CONSTANT, 0,
-              OP_PRINT, OP_NIL, OP_RETURN);
+              OP_PRINT, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, an_else_branch_is_jumped_over_by_the_then_branch) {
   ASSERT_TRUE(compile(utest_fixture, "if (true) print 1; else print 2;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_JUMP_FALSE_POP, 0, 6, OP_CONSTANT, 0,
-              OP_PRINT, OP_JUMP, 0, 3, OP_CONSTANT, 1, OP_PRINT, OP_NIL, OP_RETURN);
+              OP_PRINT, OP_JUMP, 0, 3, OP_CONSTANT, 1, OP_PRINT, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, an_else_belongs_to_the_nearest_if) {
@@ -649,14 +694,14 @@ UTEST_F(compiler, an_else_belongs_to_the_nearest_if) {
   // jump; the outer one has no else to jump over
   EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_JUMP_FALSE_POP, 0, 13, OP_FALSE,
               OP_JUMP_FALSE_POP, 0, 6, OP_CONSTANT, 0, OP_PRINT, OP_JUMP, 0, 3, OP_CONSTANT, 1,
-              OP_PRINT, OP_NIL, OP_RETURN);
+              OP_PRINT, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_while_loop_jumps_back_to_its_condition) {
   ASSERT_TRUE(compile(utest_fixture, "while (true) print 1;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_JUMP_FALSE_POP, 0, 6, OP_CONSTANT, 0,
-              OP_PRINT, OP_LOOP, 0, 10, OP_NIL, OP_RETURN);
+              OP_PRINT, OP_LOOP, 0, 10, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_for_loop_runs_its_increment_between_the_body_and_the_condition) {
@@ -665,26 +710,25 @@ UTEST_F(compiler, a_for_loop_runs_its_increment_between_the_body_and_the_conditi
   // the increment is compiled before the body but jumped over on the way in,
   // so the body's back jump reaches the increment and the increment's the
   // condition; leaving the loop pops the variable it declared
-  EXPECT_CODE(&utest_fixture->function->chunk,                          //
-              OP_CONSTANT, 0,                                           // var i = 0
-              OP_GET_LOCAL, 1, OP_CONSTANT, 1, OP_LESS,                 // i < 3
-              OP_JUMP_FALSE_POP, 0, 20,                                 // exit the loop
-              OP_JUMP, 0, 11,                                           // skip the increment
-              OP_GET_LOCAL, 1, OP_CONSTANT, 2, OP_ADD, OP_SET_LOCAL, 1, // i = i + 1
-              OP_POP,                                                   // drop its value
-              OP_LOOP, 0, 22,                                           // back to i < 3
-              OP_GET_LOCAL, 1, OP_PRINT,                                // print i
-              OP_LOOP, 0, 17,                                           // back to i = i + 1
-              OP_POP,                                                   // drop i
-              OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk,                              //
+              OP_CONSTANT, 0,                                               // var i = 0
+              OP_GET_LOCAL, 1, OP_CONSTANT, 1, OP_LESS,                     // i < 3
+              OP_JUMP_FALSE_POP, 0, 19,                                     // exit the loop
+              OP_JUMP, 0, 10,                                               // skip the increment
+              OP_GET_LOCAL, 1, OP_CONSTANT, 2, OP_ADD, OP_SET_LOCAL_POP, 1, // i = i + 1
+              OP_LOOP, 0, 21,                                               // back to i < 3
+              OP_GET_LOCAL, 1, OP_PRINT,                                    // print i
+              OP_LOOP, 0, 16,                                               // back to i = i + 1
+              OP_POP,                                                       // drop i
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_for_loop_without_clauses_only_jumps_back) {
   ASSERT_TRUE(compile(utest_fixture, "for (;;) 1;"));
 
   // no condition means no way out, and no initializer means nothing to pop
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_LOOP, 0, 6, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_POP, OP_LOOP, 0, 6,
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_for_loop_keeps_its_variable_in_a_scope_of_its_own) {
@@ -692,7 +736,7 @@ UTEST_F(compiler, a_for_loop_keeps_its_variable_in_a_scope_of_its_own) {
 
   // i is a local, never named in the constants, and popped on the way out
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_POP, OP_LOOP, 0,
-              6, OP_POP, OP_NIL, OP_RETURN);
+              6, OP_POP, OP_RETURN_NIL);
   EXPECT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
 }
 
@@ -700,8 +744,8 @@ UTEST_F(compiler, a_for_initializer_may_be_an_expression_instead_of_a_declaratio
   ASSERT_TRUE(compile(utest_fixture, "for (a = 0;;) 1;"));
 
   // an expression initializer runs once and drops its value
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_SET_GLOBAL, 1, OP_POP,
-              OP_CONSTANT, 2, OP_POP, OP_LOOP, 0, 6, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_SET_GLOBAL_POP, 1, OP_CONSTANT, 2,
+              OP_POP, OP_LOOP, 0, 6, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_loop_carrying_no_break_reserves_nothing_for_one) {
@@ -710,7 +754,7 @@ UTEST_F(compiler, a_loop_carrying_no_break_reserves_nothing_for_one) {
   // the way out of a loop is emitted by the first break that needs it, so a
   // body without one costs the same as before there were breaks at all
   EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_JUMP_FALSE_POP, 0, 6, OP_CONSTANT, 0,
-              OP_POP, OP_LOOP, 0, 10, OP_NIL, OP_RETURN);
+              OP_POP, OP_LOOP, 0, 10, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_break_jumps_past_the_end_of_its_loop) {
@@ -719,7 +763,7 @@ UTEST_F(compiler, a_break_jumps_past_the_end_of_its_loop) {
   // the break's jump lands after the loop's backward one, which is where the
   // failing condition lands too
   EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_JUMP_FALSE_POP, 0, 6, OP_JUMP, 0, 3,
-              OP_LOOP, 0, 10, OP_NIL, OP_RETURN);
+              OP_LOOP, 0, 10, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_second_break_reaches_the_jump_the_first_one_left) {
@@ -733,7 +777,7 @@ UTEST_F(compiler, a_second_break_reaches_the_jump_the_first_one_left) {
               OP_JUMP, 0, 6,                   // first break, out of the loop
               OP_LOOP, 0, 6,                   // second break, back to the first
               OP_LOOP, 0, 13,                  // back to the condition
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_break_pops_the_locals_of_every_block_it_leaves) {
@@ -749,7 +793,7 @@ UTEST_F(compiler, a_break_pops_the_locals_of_every_block_it_leaves) {
               OP_JUMP, 0, 5,                   // out of the loop
               OP_POP, OP_POP,                  // the blocks ending in order
               OP_LOOP, 0, 16,                  // back to the condition
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_break_leaves_the_for_loop_variable_to_the_loop_itself) {
@@ -758,7 +802,7 @@ UTEST_F(compiler, a_break_leaves_the_for_loop_variable_to_the_loop_itself) {
   // the variable belongs to the loop's own scope, not to the body, so the
   // break jumps to the pop that drops it rather than emitting one
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_JUMP, 0, 3, OP_LOOP, 0, 6, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_break_in_a_nested_loop_leaves_only_that_loop) {
@@ -774,7 +818,7 @@ UTEST_F(compiler, a_break_in_a_nested_loop_leaves_only_that_loop) {
               OP_JUMP, 0, 3,                   // break, out of the inner loop
               OP_LOOP, 0, 10,                  // back to the inner condition
               OP_LOOP, 0, 17,                  // back to the outer condition
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_continue_jumps_back_to_the_condition_of_a_while) {
@@ -782,7 +826,7 @@ UTEST_F(compiler, a_continue_jumps_back_to_the_condition_of_a_while) {
 
   // the condition is already behind the body, so continue needs no patching
   EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_JUMP_FALSE_POP, 0, 6, OP_LOOP, 0, 7,
-              OP_LOOP, 0, 10, OP_NIL, OP_RETURN);
+              OP_LOOP, 0, 10, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_continue_jumps_back_to_the_increment_of_a_for) {
@@ -790,16 +834,15 @@ UTEST_F(compiler, a_continue_jumps_back_to_the_increment_of_a_for) {
 
   // the increment has to run before the next turn, so continue goes there
   // and not to the condition, exactly where the body's own back jump goes
-  EXPECT_CODE(&utest_fixture->function->chunk, //
-              OP_CONSTANT, 0,                  // var i = 0
-              OP_JUMP, 0, 8,                   // skip the increment
-              OP_CONSTANT, 1, OP_SET_LOCAL, 1, // i = 1
-              OP_POP,                          // drop its value
-              OP_LOOP, 0, 11,                  // back to the condition
-              OP_LOOP, 0, 11,                  // continue, to the increment
-              OP_LOOP, 0, 14,                  // body's own back jump
-              OP_POP,                          // drop i
-              OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk,     //
+              OP_CONSTANT, 0,                      // var i = 0
+              OP_JUMP, 0, 7,                       // skip the increment
+              OP_CONSTANT, 1, OP_SET_LOCAL_POP, 1, // i = 1
+              OP_LOOP, 0, 10,                      // back to the condition
+              OP_LOOP, 0, 10,                      // continue, to the increment
+              OP_LOOP, 0, 13,                      // body's own back jump
+              OP_POP,                              // drop i
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_continue_pops_the_locals_of_every_block_it_leaves) {
@@ -808,7 +851,7 @@ UTEST_F(compiler, a_continue_pops_the_locals_of_every_block_it_leaves) {
   // the continue drops the local before jumping back, and the pop the block
   // emits at its closing brace stays for the turn that reaches it
   EXPECT_CODE(&utest_fixture->function->chunk, OP_TRUE, OP_JUMP_FALSE_POP, 0, 9, OP_NIL, OP_POP,
-              OP_LOOP, 0, 9, OP_POP, OP_LOOP, 0, 13, OP_NIL, OP_RETURN);
+              OP_LOOP, 0, 9, OP_POP, OP_LOOP, 0, 13, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, and_jumps_past_its_right_operand_when_the_left_is_falsy) {
@@ -817,14 +860,14 @@ UTEST_F(compiler, and_jumps_past_its_right_operand_when_the_left_is_falsy) {
   // the jump keeps the left operand, which becomes the value of the whole
   // expression; the pop only runs when the right operand replaces it
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_JUMP_FALSE, 0, 3, OP_POP,
-              OP_CONSTANT, 1, OP_POP, OP_NIL, OP_RETURN);
+              OP_CONSTANT, 1, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, or_jumps_past_its_right_operand_when_the_left_is_truthy) {
   ASSERT_TRUE(compile(utest_fixture, "1 or 2;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_JUMP_TRUE, 0, 3, OP_POP,
-              OP_CONSTANT, 1, OP_POP, OP_NIL, OP_RETURN);
+              OP_CONSTANT, 1, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, and_binds_tighter_than_or) {
@@ -832,15 +875,40 @@ UTEST_F(compiler, and_binds_tighter_than_or) {
 
   // the and is complete before the or begins, so its jump lands on the or
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_JUMP_FALSE, 0, 3, OP_POP,
-              OP_CONSTANT, 1, OP_JUMP_TRUE, 0, 3, OP_POP, OP_CONSTANT, 2, OP_POP, OP_NIL,
-              OP_RETURN);
+              OP_CONSTANT, 1, OP_JUMP_TRUE, 0, 3, OP_POP, OP_CONSTANT, 2, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, and_binds_looser_than_comparison) {
   ASSERT_TRUE(compile(utest_fixture, "1 < 2 and 3;"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_LESS,
-              OP_JUMP_FALSE, 0, 3, OP_POP, OP_CONSTANT, 2, OP_POP, OP_NIL, OP_RETURN);
+              OP_JUMP_FALSE, 0, 3, OP_POP, OP_CONSTANT, 2, OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_set_an_and_can_jump_over_keeps_its_pop) {
+  ASSERT_TRUE(compile(utest_fixture, "a and (b = 1);"));
+
+  // The and's jump lands after the set, so a falsy left operand skips it and
+  // leaves its own value behind instead. Folding the discard into an
+  // instruction that path never reaches would leak that value.
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_JUMP_FALSE, 0, 5, OP_POP,
+              OP_CONSTANT, 1, OP_SET_GLOBAL, 2, OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_set_an_or_can_jump_over_keeps_its_pop) {
+  ASSERT_TRUE(compile(utest_fixture, "a or (b = 1);"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_JUMP_TRUE, 0, 5, OP_POP,
+              OP_CONSTANT, 1, OP_SET_GLOBAL, 2, OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_set_taking_a_short_circuit_value_still_discards) {
+  ASSERT_TRUE(compile(utest_fixture, "a = b and c;"));
+
+  // here the jump lands before the set rather than after it, so both paths
+  // arrive at the set and the fold holds
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_JUMP_FALSE, 0, 3, OP_POP,
+              OP_GET_GLOBAL, 1, OP_SET_GLOBAL_POP, 2, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_forward_jump_further_than_a_byte_keeps_its_high_byte) {
@@ -852,9 +920,8 @@ UTEST_F(compiler, a_forward_jump_further_than_a_byte_keeps_its_high_byte) {
   ASSERT_EQ(OP_JUMP_FALSE_POP, chunk->code[1]);
   EXPECT_TRUE(chunk->code[2] > 0); // the offset outgrew a single byte
   // it skips the body and the jump closing it, landing on the final return
-  EXPECT_EQ(chunk->length - 2, 2 + 2 + jump_offset(chunk, 2));
-  EXPECT_EQ(OP_NIL, chunk->code[chunk->length - 2]);
-  EXPECT_EQ(OP_RETURN, chunk->code[chunk->length - 1]);
+  EXPECT_EQ(chunk->length - 1, 2 + 2 + jump_offset(chunk, 2));
+  EXPECT_EQ(OP_RETURN_NIL, chunk->code[chunk->length - 1]);
 }
 
 UTEST_F(compiler, a_backward_jump_further_than_a_byte_keeps_its_high_byte) {
@@ -863,7 +930,7 @@ UTEST_F(compiler, a_backward_jump_further_than_a_byte_keeps_its_high_byte) {
 
   const clox_chunk_t *chunk = &utest_fixture->function->chunk;
   // the loop instruction closes the body: three bytes, then the return
-  size_t loop = chunk->length - 5;
+  size_t loop = chunk->length - 4;
   ASSERT_EQ(OP_LOOP, chunk->code[loop]);
   EXPECT_TRUE(chunk->code[loop + 1] > 0); // the offset outgrew a single byte
   // it returns to the condition, which opens the chunk
@@ -1190,7 +1257,7 @@ UTEST_F(compiler, a_function_declaration_defines_a_global_holding_the_function) 
   ASSERT_TRUE(compile(utest_fixture, "fun f() {}"));
 
   // a closure over the compiled function is made, then bound to its name
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_DEF_GLOBAL, 1, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_DEF_GLOBAL, 1, OP_RETURN_NIL);
   ASSERT_EQ((size_t)2, utest_fixture->function->chunk.constants.length);
   ASSERT_TRUE(function_constant(&utest_fixture->function->chunk, 0) != NULL);
   EXPECT_STREQ("f", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[1]));
@@ -1218,18 +1285,18 @@ UTEST_F(compiler, an_empty_function_body_returns_nil) {
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_function_body_compiles_into_the_functions_own_chunk) {
   ASSERT_TRUE(compile(utest_fixture, "fun f() { print 1; }"));
 
   // the body is not in the script's code
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_DEF_GLOBAL, 1, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_DEF_GLOBAL, 1, OP_RETURN_NIL);
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_PRINT, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_PRINT, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_return_with_a_value_returns_what_it_evaluates) {
@@ -1238,7 +1305,7 @@ UTEST_F(compiler, a_return_with_a_value_returns_what_it_evaluates) {
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
   // the trailing return is emitted whether or not the body can reach it
-  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_RETURN, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_RETURN, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_bare_return_returns_nil) {
@@ -1246,7 +1313,7 @@ UTEST_F(compiler, a_bare_return_returns_nil) {
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_NIL, OP_RETURN, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_RETURN_NIL, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_return_out_of_a_scope_does_not_pop_its_locals) {
@@ -1256,8 +1323,7 @@ UTEST_F(compiler, a_return_out_of_a_scope_does_not_pop_its_locals) {
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_RETURN, OP_POP, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 1, OP_RETURN, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, parameters_take_the_slots_after_the_reserved_one) {
@@ -1266,8 +1332,8 @@ UTEST_F(compiler, parameters_take_the_slots_after_the_reserved_one) {
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_GET_LOCAL, 1, OP_PRINT, OP_GET_LOCAL, 2, OP_PRINT, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_GET_LOCAL, 1, OP_PRINT, OP_GET_LOCAL, 2, OP_PRINT,
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_body_local_follows_the_parameters) {
@@ -1275,7 +1341,7 @@ UTEST_F(compiler, a_body_local_follows_the_parameters) {
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 2, OP_PRINT, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_GET_LOCAL, 2, OP_PRINT, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_parameter_can_be_assigned_like_any_local) {
@@ -1283,7 +1349,7 @@ UTEST_F(compiler, a_parameter_can_be_assigned_like_any_local) {
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_SET_LOCAL, 1, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_CONSTANT, 0, OP_SET_LOCAL_POP, 1, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_frame_reaches_a_local_around_it_through_an_upvalue) {
@@ -1293,7 +1359,7 @@ UTEST_F(compiler, a_frame_reaches_a_local_around_it_through_an_upvalue) {
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 1);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_GET_UPVALUE, 0, OP_PRINT, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_GET_UPVALUE, 0, OP_PRINT, OP_RETURN_NIL);
   EXPECT_EQ((size_t)1, compiled->upvalue_count);
 }
 
@@ -1304,7 +1370,7 @@ UTEST_F(compiler, a_name_no_enclosing_frame_declares_is_still_a_global) {
 
   clox_function_t *compiled = function_constant(&utest_fixture->function->chunk, 1);
   ASSERT_TRUE(compiled != NULL);
-  EXPECT_CODE(&compiled->chunk, OP_GET_GLOBAL, 0, OP_PRINT, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&compiled->chunk, OP_GET_GLOBAL, 0, OP_PRINT, OP_RETURN_NIL);
   EXPECT_EQ((size_t)0, compiled->upvalue_count);
 }
 
@@ -1324,7 +1390,7 @@ UTEST_F(compiler, a_capture_says_it_is_a_local_and_names_the_slot_it_is_taken_fr
   // the two bytes after the constant index: taken from a local of this frame,
   // standing in slot 1
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CLOSURE, 1, 1, 1, OP_POP,
-              OP_CLOSE_UPVALUE, OP_NIL, OP_RETURN);
+              OP_CLOSE_UPVALUE, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_capture_from_further_out_is_taken_from_the_enclosing_closure) {
@@ -1334,14 +1400,14 @@ UTEST_F(compiler, a_capture_from_further_out_is_taken_from_the_enclosing_closure
 
   clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(outer != NULL);
-  EXPECT_CODE(&outer->chunk, OP_CONSTANT, 0, OP_CLOSURE, 1, 1, 1, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&outer->chunk, OP_CONSTANT, 0, OP_CLOSURE, 1, 1, 1, OP_RETURN_NIL);
 
   clox_function_t *middle = function_constant(&outer->chunk, 1);
   ASSERT_TRUE(middle != NULL);
   EXPECT_EQ((size_t)1, middle->upvalue_count);
   // not a local of the middle frame, and taken at capture index 0 rather than
   // at a slot
-  EXPECT_CODE(&middle->chunk, OP_CLOSURE, 0, 0, 0, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&middle->chunk, OP_CLOSURE, 0, 0, 0, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, one_name_used_twice_is_captured_once) {
@@ -1355,8 +1421,8 @@ UTEST_F(compiler, one_name_used_twice_is_captured_once) {
   // both reads go through the one capture, so the closure carries a single
   // upvalue and both instructions name index 0
   EXPECT_EQ((size_t)1, inner->upvalue_count);
-  EXPECT_CODE(&inner->chunk, OP_GET_UPVALUE, 0, OP_PRINT, OP_GET_UPVALUE, 0, OP_PRINT, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&inner->chunk, OP_GET_UPVALUE, 0, OP_PRINT, OP_GET_UPVALUE, 0, OP_PRINT,
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, assigning_to_a_captured_name_writes_through_the_upvalue) {
@@ -1366,7 +1432,7 @@ UTEST_F(compiler, assigning_to_a_captured_name_writes_through_the_upvalue) {
   ASSERT_TRUE(outer != NULL);
   clox_function_t *inner = function_constant(&outer->chunk, 1);
   ASSERT_TRUE(inner != NULL);
-  EXPECT_CODE(&inner->chunk, OP_CONSTANT, 0, OP_SET_UPVALUE, 0, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&inner->chunk, OP_CONSTANT, 0, OP_SET_UPVALUE_POP, 0, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_parameter_is_captured_like_any_other_local) {
@@ -1375,7 +1441,7 @@ UTEST_F(compiler, a_parameter_is_captured_like_any_other_local) {
   clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
   ASSERT_TRUE(outer != NULL);
   // the parameter stands in slot 1, and is captured from there
-  EXPECT_CODE(&outer->chunk, OP_CLOSURE, 0, 1, 1, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&outer->chunk, OP_CLOSURE, 0, 1, 1, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_local_function_reaches_itself_through_an_upvalue) {
@@ -1389,8 +1455,8 @@ UTEST_F(compiler, a_local_function_reaches_itself_through_an_upvalue) {
   ASSERT_TRUE(inner != NULL);
 
   EXPECT_EQ((size_t)1, inner->upvalue_count);
-  EXPECT_CODE(&inner->chunk, OP_GET_UPVALUE, 0, OP_GET_LOCAL, 1, OP_CALL, 1, OP_RETURN, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&inner->chunk, OP_GET_UPVALUE, 0, OP_GET_LOCAL, 1, OP_CALL, 1, OP_RETURN,
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_captured_local_is_closed_and_not_popped_when_its_scope_ends) {
@@ -1399,7 +1465,7 @@ UTEST_F(compiler, a_captured_local_is_closed_and_not_popped_when_its_scope_ends)
   // the closure outlives the slot, so the value has to be moved off the stack
   // rather than dropped: the function beside it is popped as usual
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CLOSURE, 1, 1, 1, OP_POP,
-              OP_CLOSE_UPVALUE, OP_NIL, OP_RETURN);
+              OP_CLOSE_UPVALUE, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, the_locals_above_a_captured_one_are_still_popped_in_a_group) {
@@ -1407,7 +1473,7 @@ UTEST_F(compiler, the_locals_above_a_captured_one_are_still_popped_in_a_group) {
 
   // b and f come off together, and only the capture below them is closed
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_CLOSURE, 2, 1, 1,
-              OP_POP_N, 2, OP_CLOSE_UPVALUE, OP_NIL, OP_RETURN);
+              OP_POP_N, 2, OP_CLOSE_UPVALUE, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, break_closes_a_captured_local_on_its_way_out_of_the_loop) {
@@ -1455,14 +1521,14 @@ UTEST_F(compiler, a_function_declared_in_a_block_is_a_local) {
 
   // no OP_DEF_GLOBAL: the closure stays in the slot it was made into, and the
   // scope pops it on the way out
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_POP, OP_NIL, OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_local_function_can_be_called_through_its_slot) {
   ASSERT_TRUE(compile(utest_fixture, "{ fun f() {} f(); }"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CLOSURE, 0, OP_GET_LOCAL, 1, OP_CALL, 0, OP_POP,
-              OP_POP, OP_NIL, OP_RETURN);
+              OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_nested_function_is_a_constant_of_the_one_around_it) {
@@ -1481,14 +1547,13 @@ UTEST_F(compiler, a_call_emits_the_number_of_arguments_it_carries) {
   ASSERT_TRUE(compile(utest_fixture, "f(1, 2);"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CONSTANT, 1, OP_CONSTANT, 2,
-              OP_CALL, 2, OP_POP, OP_NIL, OP_RETURN);
+              OP_CALL, 2, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_call_without_arguments_counts_none) {
   ASSERT_TRUE(compile(utest_fixture, "f();"));
 
-  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CALL, 0, OP_POP, OP_NIL,
-              OP_RETURN);
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CALL, 0, OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, arguments_are_evaluated_left_to_right) {
@@ -1503,21 +1568,21 @@ UTEST_F(compiler, calls_chain_left_to_right) {
   ASSERT_TRUE(compile(utest_fixture, "f()();"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CALL, 0, OP_CALL, 0, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_call_binds_tighter_than_a_unary_operator) {
   ASSERT_TRUE(compile(utest_fixture, "-f();"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CALL, 0, OP_NEGATE, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_call_binds_tighter_than_a_binary_operator) {
   ASSERT_TRUE(compile(utest_fixture, "1 + f();"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_GET_GLOBAL, 1, OP_CALL, 0, OP_ADD,
-              OP_POP, OP_NIL, OP_RETURN);
+              OP_POP, OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, a_parenthesised_expression_is_still_a_grouping) {
@@ -1526,7 +1591,7 @@ UTEST_F(compiler, a_parenthesised_expression_is_still_a_grouping) {
   ASSERT_TRUE(compile(utest_fixture, "(1 + 2);"));
 
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_ADD, OP_POP,
-              OP_NIL, OP_RETURN);
+              OP_RETURN_NIL);
 }
 
 UTEST_F(compiler, the_widest_parameter_list_is_accepted) {
@@ -1557,9 +1622,9 @@ UTEST_F(compiler, the_widest_argument_list_is_accepted) {
 
   const clox_chunk_t *chunk = &utest_fixture->function->chunk;
   // the tail is OP_CALL, its count, then the pop and the script's own return
-  ASSERT_TRUE(chunk->length >= 5);
-  EXPECT_EQ((clox_byte_t)OP_CALL, chunk->code[chunk->length - 5]);
-  EXPECT_EQ((clox_byte_t)CLOX_MAX_ARITY, chunk->code[chunk->length - 4]);
+  ASSERT_TRUE(chunk->length >= 4);
+  EXPECT_EQ((clox_byte_t)OP_CALL, chunk->code[chunk->length - 4]);
+  EXPECT_EQ((clox_byte_t)CLOX_MAX_ARITY, chunk->code[chunk->length - 3]);
 }
 
 UTEST_F(compiler, one_argument_too_many_is_reported) {

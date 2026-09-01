@@ -129,24 +129,40 @@ static inline void emit_byte(const clox_compiler_t *c, clox_byte_t byte,
   clox_chunk_write(&CHUNK(c), byte, token->pos);
 }
 
-static inline void emit_byte_op(const clox_compiler_t *c, clox_op_code_t opcode, clox_byte_t byte,
-                                const clox_token_t *token) {
+static inline void emit_opcode(const clox_compiler_t *c, clox_op_code_t opcode,
+                               const clox_token_t *token) {
+  FRAME(c)->last_opcode = opcode;
+  FRAME(c)->last_opcode_address = CHUNK(c).length;
+
   // cast is safe by construction
-  clox_chunk_write(&CHUNK(c), (clox_byte_t)opcode, token->pos);
-  clox_chunk_write(&CHUNK(c), byte, token->pos);
+  emit_byte(c, (clox_byte_t)opcode, token);
+}
+
+static inline void update_opcode(const clox_compiler_t *c, size_t address,
+                                 clox_op_code_t new_op_code) {
+  assert(address < CHUNK(c).length);
+
+  // cast is safe by construction
+  CHUNK(c).code[address] = (clox_byte_t)new_op_code;
 }
 
 static inline void emit_constant(clox_compiler_t *c, clox_op_code_t opcode, clox_value_t val,
                                  const clox_token_t *token) {
+  size_t opcode_address = CHUNK(c).length;
+
   if (!clox_write_constant(&CHUNK(c), opcode, val, token->pos)) {
     error(c, token, "constant limit exceeded");
+    return;
   }
+
+  // grab the opcode after it's been written, as may be short or long
+  FRAME(c)->last_opcode = CHUNK(c).code[opcode_address];
+  FRAME(c)->last_opcode_address = opcode_address;
 }
 
 static inline size_t emit_jump(clox_compiler_t *c, clox_op_code_t opcode,
                                const clox_token_t *token) {
-  // cast is safe by construction
-  emit_byte(c, (clox_byte_t)opcode, token);
+  emit_opcode(c, opcode, token);
   emit_byte(c, UCHAR_MAX, token); // placeholder
   emit_byte(c, UCHAR_MAX, token); // placeholder
 
@@ -172,10 +188,14 @@ static inline void patch_jump(clox_compiler_t *c, size_t jump_pos, const clox_to
   // cast is safe: static assert above
   CHUNK(c).code[jump_pos] = (clox_byte_t)(offset >> CHAR_BIT);
   CHUNK(c).code[jump_pos + 1] = (clox_byte_t)offset;
+
+  // scramble the last_opcode to make it non-relateable,
+  // hence break the invariant that it is always executed
+  FRAME(c)->last_opcode = OP_CODE_COUNT;
 }
 
 static inline void emit_loop(clox_compiler_t *c, size_t loop_start, const clox_token_t *token) {
-  emit_byte(c, OP_LOOP, token);
+  emit_opcode(c, OP_LOOP, token);
 
   assert(loop_start <= CHUNK(c).length);
   // the length of backward jump after reading the whole
@@ -194,12 +214,13 @@ static inline void emit_loop(clox_compiler_t *c, size_t loop_start, const clox_t
 static inline void emit_pop_n(clox_compiler_t *c, size_t n_to_pop, const clox_token_t *token) {
   if (n_to_pop == 1) {
     // use OP_POP for single pop as more efficient
-    emit_byte(c, OP_POP, token);
+    emit_opcode(c, OP_POP, token);
   } else {
     while (n_to_pop > 0) {
       // cast is safe by construction
       clox_byte_t n_part = (n_to_pop > UCHAR_MAX) ? UCHAR_MAX : (clox_byte_t)n_to_pop;
-      emit_byte_op(c, OP_POP_N, n_part, token);
+      emit_opcode(c, OP_POP_N, token);
+      emit_byte(c, n_part, token);
       n_to_pop -= n_part;
     }
   }
@@ -229,11 +250,6 @@ static inline bool at_max_declaration_depth(clox_compiler_t *c) {
   return false;
 }
 
-static inline void emit_return(const clox_compiler_t *c, const clox_token_t *token) {
-  emit_byte(c, OP_NIL, token); // return nil
-  emit_byte(c, OP_RETURN, token);
-}
-
 static inline void start_frame(clox_compiler_t *c, clox_compile_frame_t *frame,
                                clox_compile_function_type_t type, const char *fn_name,
                                size_t fn_name_length) {
@@ -249,6 +265,9 @@ static inline void start_frame(clox_compiler_t *c, clox_compile_frame_t *frame,
       clox_new_function(c->allocator, fn_name, fn_name_length, 0, c->file_name, c->source);
   frame->type = type;
 
+  frame->last_opcode = OP_CODE_COUNT;
+  frame->last_opcode_address = SIZE_MAX;
+
   // first local in a frame is reserved for the function object itself
   clox_compile_local_t *func_local = &frame->locals[frame->local_count++];
   func_local->depth = 0;       // at global scope
@@ -262,7 +281,7 @@ static inline void start_frame(clox_compiler_t *c, clox_compile_frame_t *frame,
 }
 
 static inline clox_function_t *end_frame(clox_compiler_t *c) {
-  emit_return(c, &c->previous); // at most recent token
+  emit_opcode(c, OP_RETURN_NIL, &c->previous); // at most recent token
   clox_function_t *function = FUNCTION(c);
 
 #if CLOX_DEBUG_COMPILATION
@@ -366,9 +385,9 @@ static void print_statement(clox_compiler_t *c) {
   }
 
   if (n_to_print == 1) {
-    emit_byte(c, OP_PRINT, &keyword);
+    emit_opcode(c, OP_PRINT, &keyword);
   } else {
-    emit_byte(c, OP_PRINT_N, &keyword);
+    emit_opcode(c, OP_PRINT_N, &keyword);
     // cast is safe: the range check error above
     emit_byte(c, (clox_byte_t)n_to_print, &keyword);
   }
@@ -388,9 +407,9 @@ static inline size_t pop_locals_above(clox_compiler_t *c, size_t depth, const cl
       break;
     }
     if (local->is_captured) {
-      // emit POP_N for all before
+      // emit OP_POP_N for all before
       emit_pop_n(c, n_to_pop, token);
-      emit_byte(c, OP_CLOSE_UPVALUE, token);
+      emit_opcode(c, OP_CLOSE_UPVALUE, token);
       n_to_pop = 0;
     } else {
       n_to_pop++;
@@ -398,7 +417,7 @@ static inline size_t pop_locals_above(clox_compiler_t *c, size_t depth, const cl
     total++;
   }
 
-  // emit POP_N for the rest
+  // emit OP_POP_N for the rest
   emit_pop_n(c, n_to_pop, token);
   return total;
 }
@@ -447,6 +466,27 @@ static void if_statement(clox_compiler_t *c) {
   }
 }
 
+static void emit_or_fold_pop(clox_compiler_t *c, clox_token_t *token) {
+  switch (FRAME(c)->last_opcode) {
+  case OP_SET_GLOBAL:
+    update_opcode(c, FRAME(c)->last_opcode_address, OP_SET_GLOBAL_POP);
+    break;
+  case OP_SET_GLOBAL_LONG:
+    update_opcode(c, FRAME(c)->last_opcode_address, OP_SET_GLOBAL_POP_LONG);
+    break;
+  case OP_SET_LOCAL:
+    update_opcode(c, FRAME(c)->last_opcode_address, OP_SET_LOCAL_POP);
+    break;
+  case OP_SET_UPVALUE:
+    update_opcode(c, FRAME(c)->last_opcode_address, OP_SET_UPVALUE_POP);
+    break;
+  default:
+    // pop the unused value of expression
+    emit_opcode(c, OP_POP, token);
+    break;
+  }
+}
+
 static void for_statement(clox_compiler_t *c) {
   clox_token_t keyword = c->previous;
 
@@ -481,7 +521,7 @@ static void for_statement(clox_compiler_t *c) {
     // return here after body
     size_t increment_start = CHUNK(c).length;
     expression(c); // increment expression
-    emit_byte(c, OP_POP, &keyword);
+    emit_or_fold_pop(c, &keyword);
     consume(c, TOKEN_RIGHT_PAREN, "expect ')' after for clauses");
     // return to the loop start
     emit_loop(c, loop_start, &keyword);
@@ -592,18 +632,18 @@ static void return_statement(clox_compiler_t *c) {
   }
 
   if (match(c, TOKEN_SEMICOLON)) {
-    emit_return(c, &keyword);
+    emit_opcode(c, OP_RETURN_NIL, &keyword);
   } else {
     expression(c);
     consume(c, TOKEN_SEMICOLON, "expect ';' after return value");
-    emit_byte(c, OP_RETURN, &keyword);
+    emit_opcode(c, OP_RETURN, &keyword);
   }
 }
 
 static void expression_statement(clox_compiler_t *c) {
   expression(c);
   consume(c, TOKEN_SEMICOLON, "expect ';' after expression");
-  emit_byte(c, OP_POP, &c->previous); // at semicolon token
+  emit_or_fold_pop(c, &c->previous); // at semicolon
 }
 
 static void statement(clox_compiler_t *c) {
@@ -823,7 +863,7 @@ static void var_declaration(clox_compiler_t *c) {
     expression(c);
   } else {
     // initialize to NIL
-    emit_byte(c, OP_NIL, &name);
+    emit_opcode(c, OP_NIL, &name);
   }
 
   consume(c, TOKEN_SEMICOLON, "expect ';' after variable declaration");
@@ -876,34 +916,34 @@ static void binary(clox_compiler_t *c, bool can_assign) {
 
   switch (op.type) {
   case TOKEN_PLUS:
-    emit_byte(c, OP_ADD, &op);
+    emit_opcode(c, OP_ADD, &op);
     break;
   case TOKEN_MINUS:
-    emit_byte(c, OP_SUBTRACT, &op);
+    emit_opcode(c, OP_SUBTRACT, &op);
     break;
   case TOKEN_STAR:
-    emit_byte(c, OP_MULTIPLY, &op);
+    emit_opcode(c, OP_MULTIPLY, &op);
     break;
   case TOKEN_SLASH:
-    emit_byte(c, OP_DIVIDE, &op);
+    emit_opcode(c, OP_DIVIDE, &op);
     break;
   case TOKEN_EQUAL_EQUAL:
-    emit_byte(c, OP_EQUAL, &op);
+    emit_opcode(c, OP_EQUAL, &op);
     break;
   case TOKEN_BANG_EQUAL:
-    emit_byte(c, OP_NOT_EQUAL, &op);
+    emit_opcode(c, OP_NOT_EQUAL, &op);
     break;
   case TOKEN_GREATER:
-    emit_byte(c, OP_GREATER, &op);
+    emit_opcode(c, OP_GREATER, &op);
     break;
   case TOKEN_GREATER_EQUAL:
-    emit_byte(c, OP_GREATER_EQUAL, &op);
+    emit_opcode(c, OP_GREATER_EQUAL, &op);
     break;
   case TOKEN_LESS:
-    emit_byte(c, OP_LESS, &op);
+    emit_opcode(c, OP_LESS, &op);
     break;
   case TOKEN_LESS_EQUAL:
-    emit_byte(c, OP_LESS_EQUAL, &op);
+    emit_opcode(c, OP_LESS_EQUAL, &op);
     break;
   default:
     assert(0 && "unreachable");
@@ -919,10 +959,10 @@ static void unary(clox_compiler_t *c, bool can_assign) {
 
   switch (op.type) {
   case TOKEN_BANG:
-    emit_byte(c, OP_NOT, &op);
+    emit_opcode(c, OP_NOT, &op);
     break;
   case TOKEN_MINUS:
-    emit_byte(c, OP_NEGATE, &op);
+    emit_opcode(c, OP_NEGATE, &op);
     break;
   default:
     assert(0 && "unreachable");
@@ -966,13 +1006,13 @@ static void literal(clox_compiler_t *c, bool can_assign) {
 
   switch (token.type) {
   case TOKEN_NIL:
-    emit_byte(c, OP_NIL, &token);
+    emit_opcode(c, OP_NIL, &token);
     break;
   case TOKEN_TRUE:
-    emit_byte(c, OP_TRUE, &token);
+    emit_opcode(c, OP_TRUE, &token);
     break;
   case TOKEN_FALSE:
-    emit_byte(c, OP_FALSE, &token);
+    emit_opcode(c, OP_FALSE, &token);
     break;
   default:
     assert(0 && "unreachable");
@@ -1009,7 +1049,8 @@ static void variable(clox_compiler_t *c, bool can_assign) {
   if (local_get_op != OP_CODE_COUNT) {
     // cast is safe: static assert above
     clox_byte_t byte_idx = (clox_byte_t)local_idx;
-    emit_byte_op(c, assign ? local_set_op : local_get_op, byte_idx, &name);
+    emit_opcode(c, assign ? local_set_op : local_get_op, &name);
+    emit_byte(c, byte_idx, &name);
   } else {
     // global variable
     clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
@@ -1023,8 +1064,8 @@ static void and_(clox_compiler_t *c, bool can_assign) {
 
   // if lhs is falsy, leave it on the stack and jump
   size_t end_jump = emit_jump(c, OP_JUMP_FALSE, &keyword);
-  emit_byte(c, OP_POP, &keyword); // discard lhs
-  parse(c, PREC_AND);             // parse rhs
+  emit_opcode(c, OP_POP, &keyword); // discard lhs
+  parse(c, PREC_AND);               // parse rhs
   patch_jump(c, end_jump, &keyword);
 }
 
@@ -1034,8 +1075,8 @@ static void or_(clox_compiler_t *c, bool can_assign) {
 
   // if lhs is truthy, leave it on the stack and jump
   size_t end_jump = emit_jump(c, OP_JUMP_TRUE, &keyword);
-  emit_byte(c, OP_POP, &keyword); // discard lhs
-  parse(c, PREC_OR);              // parse rhs
+  emit_opcode(c, OP_POP, &keyword); // discard lhs
+  parse(c, PREC_OR);                // parse rhs
   patch_jump(c, end_jump, &keyword);
 }
 
@@ -1060,8 +1101,9 @@ static void call(clox_compiler_t *c, bool can_assign) {
   (void)can_assign;
   clox_token_t left_paren = c->previous;
   size_t args_count = argument_list(c);
-  // cast: range check is done in argument_list
-  emit_byte_op(c, OP_CALL, (clox_byte_t)args_count, &left_paren);
+  emit_opcode(c, OP_CALL, &left_paren);
+  // cast is safe: range check is done in argument_list
+  emit_byte(c, (clox_byte_t)args_count, &left_paren);
 }
 
 static const clox_parse_rule_t parse_rules[] = {
