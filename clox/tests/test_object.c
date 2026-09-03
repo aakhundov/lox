@@ -23,17 +23,21 @@ struct object {
 
 // A body for the native tests. It returns its argument count, so a test can
 // tell an invocation that reached this function from one that did not.
-static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                            clox_vm_t *vm) {
   (void)args;
+  (void)vm;
 
   result->value = CLOX_NUMBER((double)arg_count);
   return true;
 }
 
 // A second body, distinguishable from the first by its result.
-static bool nil_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+static bool nil_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                       clox_vm_t *vm) {
   (void)arg_count;
   (void)args;
+  (void)vm;
 
   result->value = CLOX_NIL;
   return true;
@@ -363,7 +367,8 @@ UTEST_F(object, a_native_carries_the_name_the_arity_and_the_body_it_is_given) {
   ASSERT_TRUE(native->function == counting_native);
 
   clox_native_result_t result;
-  ASSERT_TRUE(native->function(2, NULL, &result));
+  // no VM: the call is made here rather than by one, and the body ignores it
+  ASSERT_TRUE(native->function(2, NULL, &result, NULL));
   EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), result.value);
 }
 

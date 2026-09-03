@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
 #include "object.h"
@@ -11,6 +12,8 @@
 
 #define CLOX_MAX_FRAMES 64
 #define CLOX_STACK_SIZE ((size_t)CLOX_MAX_FRAMES * 1024)
+
+#define CLOX_RNG_INITIAL_STATE UINT64_C(1)
 
 typedef void clox_print_fn_t(const clox_value_t *vals, size_t n, void *ctx);
 
@@ -33,6 +36,7 @@ typedef struct clox_vm_t {
   void *error_ctx;
   clox_print_fn_t *print_fn;
   void *print_ctx;
+  uint64_t rng_state;
   void *mark_callback_handle;
 } clox_vm_t;
 

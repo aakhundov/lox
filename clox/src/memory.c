@@ -170,12 +170,28 @@ static inline void sweep(clox_allocator_t *a) {
       }
 
 #if CLOX_DEBUG_GC
+      size_t before = a->allocated_size;
       printf("---- GC sweep ");
       clox_object_repr_printf(CLOX_OBJECT(unmarked));
+#if CLOX_DEBUG_ALLOCATION
       printf(" @ %p\n", (void *)(unmarked));
+#else
+      printf(" @ %p [", (void *)(unmarked));
+#endif
 #endif
 
       free_object(a, unmarked);
+
+#if CLOX_DEBUG_GC
+      size_t after = a->allocated_size;
+      assert(after <= before);
+#if CLOX_DEBUG_ALLOCATION
+      printf("---- GC freed ");
+      printf("%zu\n", before - after);
+#else
+      printf("%zu]\n", before - after);
+#endif
+#endif
     }
   }
 }
@@ -206,7 +222,7 @@ void clox_collect_garbage(clox_allocator_t *a) {
   size_t after = a->allocated_size;
   assert(after <= before);
   printf("---- GC end\n");
-  printf("---- GC collected %zu (%zu -> %zu)\n", before - after, before, after);
+  printf("---- GC collected %zu [%zu -> %zu]\n", before - after, before, after);
   printf("---- GC next at %zu\n", a->next_gc_size);
 #endif
 }

@@ -206,23 +206,44 @@ static void emit_closure(struct vm *fixture, const clox_function_t *callee,
 
 // Native bodies for the tests. Each reports something about the call it got,
 // so a test can tell what the VM handed over from what it did not.
-static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                            clox_vm_t *vm) {
   (void)args;
+  (void)vm;
 
   result->value = CLOX_NUMBER((double)arg_count);
   return true;
 }
 
-static bool first_arg_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+static bool first_arg_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                             clox_vm_t *vm) {
+  (void)vm;
+
   result->value = (arg_count == 0) ? CLOX_NIL : args[0];
+  return true;
+}
+
+// A body that reports the VM it was handed, so a test can tell that the call
+// carried the VM making it rather than some other one.
+static clox_vm_t *called_with_vm;
+
+static bool vm_reporting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                                clox_vm_t *vm) {
+  (void)arg_count;
+  (void)args;
+
+  called_with_vm = vm;
+  result->value = CLOX_NIL;
   return true;
 }
 
 // A body that always fails, so a test can follow the message a native writes
 // all the way out to the error handler.
-static bool failing_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+static bool failing_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                           clox_vm_t *vm) {
   (void)arg_count;
   (void)args;
+  (void)vm;
 
   (void)snprintf(result->error_msg, sizeof(result->error_msg), "native said no");
   return false;
@@ -1885,6 +1906,17 @@ UTEST_F(vm, a_native_receives_its_arguments_in_push_order) {
   ASSERT_TRUE(interpret(utest_fixture, 1));
   ASSERT_EQ((size_t)1, utest_fixture->printed.count);
   EXPECT_VALUE_EQ(CLOX_NUMBER(10.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_native_receives_the_vm_that_called_it) {
+  clox_vm_define_native(&utest_fixture->vm, "reporting", 0, vm_reporting_native);
+  called_with_vm = NULL;
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "reporting");
+  emit_call(utest_fixture, 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_TRUE(called_with_vm == &utest_fixture->vm);
 }
 
 UTEST_F(vm, a_native_called_with_too_few_arguments_is_a_runtime_error) {

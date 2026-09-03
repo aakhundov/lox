@@ -185,7 +185,7 @@ static inline bool call_native(clox_vm_t *vm, const clox_native_t *native, size_
   }
 
   clox_native_result_t result;
-  bool success = native->function(arg_count, vm->stack_top - arg_count, &result);
+  bool success = native->function(arg_count, vm->stack_top - arg_count, &result, vm);
   pop_n_stack(vm, arg_count + 1); // discard callee and args
 
   if (!success) {
@@ -605,6 +605,7 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
   clox_vm_reset_error_handler(vm);
   clox_vm_set_default_print_fn(vm);
 
+  vm->rng_state = CLOX_RNG_INITIAL_STATE;
   vm->mark_callback_handle = clox_register_mark_callback(vm->allocator, mark_callback, vm);
 
 #if CLOX_ENABLE_LIBRARY

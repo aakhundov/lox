@@ -1237,13 +1237,59 @@ UTEST_F(lox, the_string_natives_read_a_string_literal) {
   EXPECT_VALUE_EQ(CLOX_NUMBER(70.0), only_printed(utest_fixture));
 }
 
-UTEST_F(lox, the_type_predicates_answer_about_a_value) {
-  ASSERT_TRUE(run(utest_fixture, "print is_number(1) and is_string(\"s\") and is_nil(nil);"));
+UTEST_F(lox, type_names_the_kind_of_a_value_from_source) {
+  ASSERT_TRUE(run(utest_fixture, "print type(1) == \"number\" and type(\"s\") == \"string\" and "
+                                 "type(nil) == \"nil\" and type(true) == \"bool\";"));
   EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
 }
 
-UTEST_F(lox, a_seeded_random_int_stays_inside_its_bound) {
-  ASSERT_TRUE(run(utest_fixture, "seed(1); var n = random_int(4); print n >= 0 and n < 4;"));
+UTEST_F(lox, type_tells_a_declared_function_from_a_native_from_source) {
+  ASSERT_TRUE(run(utest_fixture,
+                  "fun f() {} print type(f) == \"function\" and type(clock) == \"native\";"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, str_turns_a_value_into_the_text_print_would_write) {
+  ASSERT_TRUE(run(utest_fixture, "print str(1) + \" \" + str(true) + \" \" + str(nil);"));
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("1 true nil", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, the_string_builders_work_on_a_string_literal) {
+  ASSERT_TRUE(run(utest_fixture, "print upper(\"ab\") + lower(\"CD\") + trim(\"  e  \") + "
+                                 "repeat(\"f\", 2) + substr(\"ghi\", 1, 1) + chr(74);"));
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("ABcdeffhJ", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, replace_rewrites_a_string_from_source) {
+  ASSERT_TRUE(run(utest_fixture, "print replace(\"a-b-c\", \"-\", \"+\");"));
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("a+b+c", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, a_seeded_randint_stays_inside_its_bound) {
+  ASSERT_TRUE(run(utest_fixture, "seed(1); var n = randint(4); print n >= 0 and n < 4;"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, gc_collects_mid_run_and_keeps_what_the_program_still_holds) {
+  // the two halves are built at run time, so the string printed after the
+  // collection is one the collector could have taken had it not been reachable
+  ASSERT_TRUE(run(utest_fixture, "var kept = \"gl\" + \"obal\"; gc(); print kept;"));
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("global", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, gc_hands_back_a_count_of_bytes) {
+  // what the number is depends on the heap the run built; that it is a number
+  // is what a program can rely on
+  ASSERT_TRUE(run(utest_fixture, "var reclaimed = gc(); print type(reclaimed) == \"number\" and "
+                                 "reclaimed >= 0;"));
   EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
 }
 

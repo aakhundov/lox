@@ -37,9 +37,11 @@ static const clox_pos_t POS = {.line = 1, .col = 1};
 
 // A body for the natives these tests allocate. Nothing calls it; a native
 // without a function is rejected before it is ever recorded.
-static bool a_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+static bool a_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                     clox_vm_t *vm) {
   (void)arg_count;
   (void)args;
+  (void)vm;
 
   result->value = CLOX_NIL;
   return true;
@@ -611,18 +613,19 @@ UTEST_F(gc, an_unmarked_table_keeps_nothing) {
 // the collector, over a heap a running program built
 // ---------------------------------------------------------------------------
 
-// Natives have no handle on the VM, so the allocator to collect reaches the
-// native below through a file-static the fixture sets. utest runs one test at a
-// time in one process, so there is never a second allocator in play.
-static clox_allocator_t *forced_alloc;
+// How many times the native below ran. utest runs one test at a time in one
+// process, so a file-static counter is never shared between two runs.
 static size_t forced_collections;
 
-static bool collect_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+// The allocator to collect is the one the calling VM was built with, which the
+// VM hands over with the call.
+static bool collect_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                           clox_vm_t *vm) {
   (void)arg_count;
   (void)args;
 
   forced_collections++;
-  clox_collect_garbage(forced_alloc);
+  clox_collect_garbage(vm->allocator);
 
   result->value = CLOX_NIL;
   return true;
@@ -648,7 +651,6 @@ UTEST_F_SETUP(gc_run) {
   clox_vm_set_print_fn(&utest_fixture->vm, clox_test_print_fn, &utest_fixture->printed);
   clox_vm_set_error_handler(&utest_fixture->vm, clox_test_error_handler, &utest_fixture->errors);
 
-  forced_alloc = &utest_fixture->alloc;
   forced_collections = 0;
   clox_vm_define_native(&utest_fixture->vm, "collect", 0, collect_native);
 }
@@ -659,7 +661,6 @@ UTEST_F_TEARDOWN(gc_run) {
   clox_vm_free(&utest_fixture->vm);
   clox_compiler_free(&utest_fixture->compiler);
   clox_allocator_free(&utest_fixture->alloc);
-  forced_alloc = NULL;
 }
 
 // Compiles and runs source, which is copied because the compiler modifies the

@@ -26,9 +26,11 @@ struct memory {
 
 // A body for the native the object tests allocate. Nothing calls it; it is here
 // because a native without a function is rejected before it is ever recorded.
-static bool a_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result) {
+static bool a_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+                     clox_vm_t *vm) {
   (void)arg_count;
   (void)args;
+  (void)vm;
 
   result->value = CLOX_NIL;
   return true;
