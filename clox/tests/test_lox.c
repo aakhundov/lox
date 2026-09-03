@@ -138,6 +138,35 @@ UTEST_F(lox, equal_strings_compare_equal) {
   EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
 }
 
+UTEST_F(lox, escape_sequences_evaluate_to_the_characters_they_stand_for) {
+  ASSERT_TRUE(run(utest_fixture, "print \"a\\nb\\\"c\\\\d\";"));
+
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_EQ((size_t)7, CLOX_AS_STRING(result)->length);
+  EXPECT_STREQ("a\nb\"c\\d", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, a_string_with_escape_sequences_concatenates_like_any_other) {
+  ASSERT_TRUE(run(utest_fixture, "print \"a\\n\" + \"b\";"));
+
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("a\nb", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, an_escape_sequence_matches_the_character_it_stands_for) {
+  ASSERT_TRUE(run(utest_fixture, "print \"a\\nb\" == \"a\nb\";"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_unsupported_escape_sequence_keeps_the_program_from_running) {
+  EXPECT_FALSE(run(utest_fixture, "print \"a\\tb\";"));
+
+  EXPECT_EQ((size_t)0, utest_fixture->printed.count);
+  EXPECT_TRUE(utest_fixture->errors.count > 0);
+}
+
 UTEST_F(lox, statements_run_in_the_order_they_are_written) {
   ASSERT_TRUE(run(utest_fixture, "print 1; print 2;"));
 

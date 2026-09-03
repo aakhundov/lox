@@ -142,6 +142,72 @@ UTEST(scanner, a_string_literal_is_one_token) {
   EXPECT_TOKEN_TYPE(TOKEN_STRING, scan_first("\"with spaces and 123\"").type);
 }
 
+UTEST(scanner, a_string_carrying_escape_sequences_is_one_token) {
+  // the lexeme is the source text, backslashes and all: the scanner only
+  // checks that an escape sequence is complete, and the compiler is what
+  // turns one into the character it stands for
+  clox_token_t token = scan_first("\"a\\nb\\\\c\" rest");
+
+  ASSERT_TOKEN_TYPE(TOKEN_STRING, token.type);
+  EXPECT_TRUE(lexeme_is(token, "\"a\\nb\\\\c\""));
+}
+
+UTEST(scanner, an_escaped_quote_does_not_end_a_string) {
+  clox_token_t token = scan_first("\"a\\\"b\"");
+
+  ASSERT_TOKEN_TYPE(TOKEN_STRING, token.type);
+  EXPECT_TRUE(lexeme_is(token, "\"a\\\"b\""));
+}
+
+UTEST(scanner, a_backslash_with_nothing_after_it_is_an_error_token) {
+  clox_token_t token = scan_first("\"a\\");
+
+  ASSERT_TOKEN_TYPE(TOKEN_ERROR, token.type);
+  EXPECT_TRUE(token.length > 0);
+}
+
+UTEST(scanner, an_escape_sequence_broken_across_two_lines_is_an_error_token) {
+  clox_token_t token = scan_first("\"a\\\nb\"");
+
+  ASSERT_TOKEN_TYPE(TOKEN_ERROR, token.type);
+  EXPECT_TRUE(token.length > 0);
+  EXPECT_EQ((size_t)1, token.pos.line);
+  EXPECT_EQ((size_t)1, token.pos.col);
+}
+
+UTEST(scanner, a_newline_a_broken_escape_sequence_stopped_at_still_counts) {
+  // the scanner gives up before consuming the newline, so the line it ends is
+  // counted like any other and everything after it keeps its true position
+  clox_scanner_t scanner;
+  clox_scanner_init(&scanner, "\"a\\\nb\" \";\nx");
+
+  ASSERT_TOKEN_TYPE(TOKEN_ERROR, clox_scan(&scanner).type);
+  ASSERT_TOKEN_TYPE(TOKEN_IDENTIFIER, clox_scan(&scanner).type);
+  ASSERT_TOKEN_TYPE(TOKEN_STRING, clox_scan(&scanner).type);
+  ASSERT_TOKEN_TYPE(TOKEN_SEMICOLON, clox_scan(&scanner).type);
+
+  clox_token_t last = clox_scan(&scanner);
+  ASSERT_TOKEN_TYPE(TOKEN_IDENTIFIER, last.type);
+  EXPECT_EQ((size_t)3, last.pos.line);
+  EXPECT_EQ((size_t)1, last.pos.col);
+
+  clox_scanner_free(&scanner);
+}
+
+UTEST(scanner, a_newline_inside_a_string_starts_a_line_like_any_other) {
+  clox_scanner_t scanner;
+  clox_scanner_init(&scanner, "\"a\nb\" x");
+
+  ASSERT_TOKEN_TYPE(TOKEN_STRING, clox_scan(&scanner).type);
+
+  clox_token_t after = clox_scan(&scanner);
+  ASSERT_TOKEN_TYPE(TOKEN_IDENTIFIER, after.type);
+  EXPECT_EQ((size_t)2, after.pos.line);
+  EXPECT_EQ((size_t)4, after.pos.col);
+
+  clox_scanner_free(&scanner);
+}
+
 UTEST(scanner, whitespace_and_comments_are_skipped) {
   EXPECT_TOKEN_TYPE(TOKEN_PLUS, scan_first("   \t\r\n  +").type);
   EXPECT_TOKEN_TYPE(TOKEN_PLUS, scan_first("// a comment\n+").type);

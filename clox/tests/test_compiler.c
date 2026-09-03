@@ -297,6 +297,74 @@ UTEST_F(compiler, an_empty_string_becomes_an_empty_constant) {
   EXPECT_EQ((size_t)0, CLOX_AS_STRING(constant)->length);
 }
 
+UTEST_F(compiler, an_escape_sequence_becomes_the_character_it_stands_for) {
+  ASSERT_TRUE(compile(utest_fixture, "\"a\\nb\";"));
+
+  clox_value_t constant = utest_fixture->function->chunk.constants.values[0];
+  ASSERT_TRUE(CLOX_IS_STRING(constant));
+  EXPECT_EQ((size_t)3, CLOX_AS_STRING(constant)->length);
+  EXPECT_STREQ("a\nb", CLOX_AS_CSTRING(constant));
+}
+
+UTEST_F(compiler, an_escaped_quote_and_an_escaped_backslash_are_one_character_each) {
+  ASSERT_TRUE(compile(utest_fixture, "\"a\\\"b\\\\c\";"));
+
+  clox_value_t constant = utest_fixture->function->chunk.constants.values[0];
+  ASSERT_TRUE(CLOX_IS_STRING(constant));
+  EXPECT_EQ((size_t)5, CLOX_AS_STRING(constant)->length);
+  EXPECT_STREQ("a\"b\\c", CLOX_AS_CSTRING(constant));
+}
+
+UTEST_F(compiler, a_string_of_nothing_but_escape_sequences_keeps_every_character) {
+  ASSERT_TRUE(compile(utest_fixture, "\"\\n\\\\\\\"\";"));
+
+  clox_value_t constant = utest_fixture->function->chunk.constants.values[0];
+  ASSERT_TRUE(CLOX_IS_STRING(constant));
+  EXPECT_EQ((size_t)3, CLOX_AS_STRING(constant)->length);
+  EXPECT_STREQ("\n\\\"", CLOX_AS_CSTRING(constant));
+}
+
+UTEST_F(compiler, an_escape_sequence_and_the_character_it_stands_for_are_one_constant) {
+  // the rewritten text is interned like any other, so the two spellings of the
+  // same string meet in the string table instead of becoming two constants
+  ASSERT_TRUE(compile(utest_fixture, "\"a\\nb\"; \"a\nb\";"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
+  EXPECT_STREQ("a\nb", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[0]));
+}
+
+UTEST_F(compiler, an_unsupported_escape_sequence_is_reported_at_its_string) {
+  EXPECT_FALSE(compile(utest_fixture, "print \"a\\tb\";"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "escape sequence") != NULL);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)7, utest_fixture->errors.stacks[0][0].pos.col);
+}
+
+UTEST_F(compiler, an_escape_sequence_broken_across_two_lines_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "\"a\\\nb\";"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "escape sequence") != NULL);
+}
+
+UTEST_F(compiler, a_backslash_with_nothing_after_it_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "\"a\\"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "escape sequence") != NULL);
+}
+
+UTEST_F(compiler, a_broken_escape_sequence_does_not_shift_the_lines_after_it) {
+  EXPECT_FALSE(compile(utest_fixture, "\"a\\\nb\" \";\nvar 3;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 1);
+  EXPECT_EQ((size_t)1, utest_fixture->errors.stacks[0][0].pos.line);
+  EXPECT_EQ((size_t)3, utest_fixture->errors.stacks[1][0].pos.line);
+  EXPECT_EQ((size_t)5, utest_fixture->errors.stacks[1][0].pos.col);
+}
+
 UTEST_F(compiler, negation_follows_its_operand) {
   ASSERT_TRUE(compile(utest_fixture, "-1;"));
   EXPECT_CODE(&utest_fixture->function->chunk, OP_CONSTANT, 0, OP_NEGATE, OP_POP, OP_RETURN_NIL);

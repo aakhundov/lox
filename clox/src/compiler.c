@@ -1003,7 +1003,41 @@ static void string(clox_compiler_t *c, bool can_assign) {
   const char *chars = token.start + 1; // skip leading "
   size_t length = token.length - 2;    // skip both "s
 
+  size_t num_escape_seqs = 0;
+  for (size_t i = 0; i < length; i++) {
+    if (chars[i] == '\\') {
+      char escape_char = chars[++i]; // bounds checked in scanner
+      if (!strchr("\"\\n", escape_char)) {
+        error(c, &token, "unsupported escape sequence");
+        return;
+      }
+      num_escape_seqs++;
+    }
+  }
+
+  if (num_escape_seqs > 0) {
+    size_t new_length = length - num_escape_seqs;
+    char *new_chars = CLOX_ARRAY_ALLOCATE(c->allocator, char, new_length);
+
+    size_t j = 0;
+    for (size_t i = 0; i < length; i++) {
+      if (chars[i] == '\\') {
+        new_chars[j++] = (chars[++i] == 'n') ? '\n' : chars[i];
+      } else {
+        new_chars[j++] = chars[i];
+      }
+    }
+    assert(j == new_length);
+
+    chars = new_chars;
+    length = new_length;
+  }
+
   emit_constant(c, OP_CONSTANT, CLOX_STRING_COPY(c->allocator, chars, length), &token);
+
+  if (num_escape_seqs > 0) {
+    CLOX_ARRAY_FREE(c->allocator, char, (void *)chars, length);
+  }
 }
 
 static void literal(clox_compiler_t *c, bool can_assign) {

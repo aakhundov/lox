@@ -122,6 +122,11 @@ static clox_token_t string(clox_scanner_t *s) {
     if (p == '\n') {
       s->current_pos.line++;
       s->current_pos.col = 0;
+    } else if (p == '\\') {
+      advance(s); // eat the '\\'
+      if (peek(s) == '\n' || is_at_end(s)) {
+        return make_error_token(s, "incomplete escape sequence");
+      }
     }
     advance(s);
     p = peek(s);
