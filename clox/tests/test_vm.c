@@ -92,6 +92,48 @@ static void emit_global(struct vm *fixture, clox_op_code_t opcode, const char *n
                             clox_test_string_kept(&fixture->alloc, name, strlen(name)), POS);
 }
 
+// Writes an instruction naming a property. The opcode is the short form of one
+// of the property opcodes; the name is interned, so a name written here and the
+// same name written into a field table are one key.
+static void emit_property(struct vm *fixture, clox_op_code_t opcode, const char *name) {
+  (void)clox_write_constant(&fixture->function->chunk, opcode,
+                            clox_test_string_kept(&fixture->alloc, name, strlen(name)), POS);
+}
+
+// The same, into a callee's chunk rather than the fixture's own.
+static void emit_property_to(struct vm *fixture, clox_function_t *callee, clox_op_code_t opcode,
+                             const char *name) {
+  (void)clox_write_constant(&callee->chunk, opcode,
+                            clox_test_string_kept(&fixture->alloc, name, strlen(name)), POS);
+}
+
+// Writes an invoke naming a property, followed by the count of arguments the
+// caller wrote above the receiver. The receiver and the arguments are already
+// on the stack by the time it runs, as they are for a call.
+static void emit_invoke(struct vm *fixture, const char *name, size_t arg_count) {
+  (void)clox_write_constant(&fixture->function->chunk, OP_INVOKE,
+                            clox_test_string_kept(&fixture->alloc, name, strlen(name)), POS);
+  // cast is safe: the tests here count their own arguments
+  emit(fixture, (clox_byte_t)arg_count);
+}
+
+// A class of the given name, and an instance of one. Both are built before
+// anything in the interpreter holds them, so both are the test's to root.
+static clox_class_t *make_class(struct vm *fixture, const char *name) {
+  clox_class_t *class_ =
+      clox_new_class(&fixture->alloc, clox_test_intern_kept(&fixture->alloc, name));
+  clox_test_keep(&fixture->alloc, class_);
+
+  return class_;
+}
+
+static clox_instance_t *make_instance(struct vm *fixture, const clox_class_t *class_) {
+  clox_instance_t *instance = clox_new_instance(&fixture->alloc, class_);
+  clox_test_keep(&fixture->alloc, instance);
+
+  return instance;
+}
+
 // Writes a jump instruction over the given offset, big-endian. The tests that
 // name their offset here are what pins the encoding the three helpers below
 // share with the compiler.
@@ -2045,4 +2087,687 @@ UTEST_F(vm, a_fresh_vm_defines_every_library_native_as_a_global) {
     EXPECT_TRUE(CLOX_AS_NATIVE(value)->function == clox_library_fns[i].fn);
     EXPECT_EQ(clox_library_fns[i].arity, CLOX_AS_NATIVE(value)->arity);
   }
+}
+
+UTEST_F(vm, a_class_instruction_pushes_a_class_of_the_name_it_carries) {
+  emit_property(utest_fixture, OP_CLASS, "Named");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  ASSERT_TRUE(CLOX_IS_CLASS(utest_fixture->printed.values[0]));
+  EXPECT_STREQ("Named", CLOX_AS_CLASS(utest_fixture->printed.values[0])->name->chars);
+}
+
+UTEST_F(vm, a_class_instruction_makes_a_new_class_every_time_it_runs) {
+  emit_property(utest_fixture, OP_CLASS, "Named");
+  emit_property(utest_fixture, OP_CLASS, "Named");
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_NE(CLOX_AS_OBJECT(utest_fixture->printed.values[0]),
+            CLOX_AS_OBJECT(utest_fixture->printed.values[1]));
+}
+
+UTEST_F(vm, a_method_instruction_records_the_method_on_the_class_below_it) {
+  clox_function_t *method = make_callee(utest_fixture, "m", 0);
+
+  emit_property(utest_fixture, OP_CLASS, "Named");
+  emit_bare_callee(utest_fixture, method);
+  emit_property(utest_fixture, OP_METHOD, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  ASSERT_TRUE(CLOX_IS_CLASS(utest_fixture->printed.values[0]));
+
+  clox_value_t found;
+  ASSERT_TRUE(clox_table_get(&CLOX_AS_CLASS(utest_fixture->printed.values[0])->methods,
+                             clox_test_intern(&utest_fixture->alloc, "m"), &found));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(method), found);
+}
+
+UTEST_F(vm, a_method_instruction_takes_the_method_off_the_stack) {
+  clox_function_t *method = make_callee(utest_fixture, "m", 0);
+
+  // a marker below the class is what tells a method taken off the stack from
+  // one left on it: print reads the top, and the marker must still be under
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_property(utest_fixture, OP_CLASS, "Named");
+  emit_bare_callee(utest_fixture, method);
+  emit_property(utest_fixture, OP_METHOD, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_TRUE(CLOX_IS_CLASS(utest_fixture->printed.values[1]));
+}
+
+UTEST_F(vm, a_method_named_init_is_recorded_as_the_initializer_as_well) {
+  clox_function_t *init = make_callee(utest_fixture, "init", 0);
+
+  emit_property(utest_fixture, OP_CLASS, "Named");
+  emit_bare_callee(utest_fixture, init);
+  emit_property(utest_fixture, OP_METHOD, "init");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  clox_class_t *class_ = CLOX_AS_CLASS(utest_fixture->printed.values[0]);
+
+  // a call of the class reaches the initializer through the slot it is kept
+  // in, which costs no lookup
+  EXPECT_VALUE_EQ(CLOX_OBJECT(init), class_->init);
+
+  // and it is a method like any other besides, so a property get of that name
+  // finds it where it finds the rest
+  clox_value_t found;
+  ASSERT_TRUE(
+      clox_table_get(&class_->methods, clox_test_intern(&utest_fixture->alloc, "init"), &found));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(init), found);
+}
+
+UTEST_F(vm, a_class_declaring_no_initializer_keeps_that_slot_empty) {
+  emit_property(utest_fixture, OP_CLASS, "Named");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  clox_class_t *class_ = CLOX_AS_CLASS(utest_fixture->printed.values[0]);
+
+  // nil in that slot is how a call of the class knows to take no arguments
+  EXPECT_TRUE(CLOX_IS_NIL(class_->init));
+}
+
+UTEST_F(vm, a_method_instruction_holds_the_method_while_the_class_records_it) {
+  // A closure the run made is reachable from nowhere but the stack, and
+  // recording it grows a table that was empty -- an allocation, and under the
+  // stress build a collection. Reading the method back afterwards is what says
+  // it was still there to record.
+  clox_function_t *method = make_callee(utest_fixture, "m", 0);
+
+  emit_property(utest_fixture, OP_CLASS, "Named");
+  emit_closure(utest_fixture, method, NULL);
+  emit_property(utest_fixture, OP_METHOD, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_TRUE(CLOX_IS_CLASS(utest_fixture->printed.values[0]));
+
+  clox_value_t found;
+  ASSERT_TRUE(clox_table_get(&CLOX_AS_CLASS(utest_fixture->printed.values[0])->methods,
+                             clox_test_intern(&utest_fixture->alloc, "m"), &found));
+  ASSERT_TRUE(CLOX_IS_CLOSURE(found));
+  EXPECT_STREQ("m", CLOX_AS_CLOSURE(found)->function->name);
+}
+
+UTEST_F(vm, an_initializer_instruction_reaches_the_closure_through_both_places_it_is_kept) {
+  // Boundary cover rather than a regression: the slot is written before the
+  // table is, so the class already reaches the closure by the time recording
+  // it can collect. What this says is that the two places agree.
+  clox_function_t *init = make_callee(utest_fixture, "init", 0);
+
+  emit_property(utest_fixture, OP_CLASS, "Named");
+  emit_closure(utest_fixture, init, NULL);
+  emit_property(utest_fixture, OP_METHOD, "init");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  clox_class_t *class_ = CLOX_AS_CLASS(utest_fixture->printed.values[0]);
+
+  ASSERT_TRUE(CLOX_IS_CLOSURE(class_->init));
+  EXPECT_STREQ("init", CLOX_AS_CLOSURE(class_->init)->function->name);
+}
+
+UTEST_F(vm, a_property_get_reads_a_field_of_the_instance) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "x"),
+                       CLOX_NUMBER(42.0));
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_property(utest_fixture, OP_GET_PROP, "x");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_property_get_takes_the_instance_off_the_stack) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "x"),
+                       CLOX_NUMBER(42.0));
+
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_property(utest_fixture, OP_GET_PROP, "x");
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, a_property_get_reads_a_method_as_a_binding_over_the_instance) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *method = make_callee(utest_fixture, "m", 0);
+  (void)clox_table_set(&class_->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(method));
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_property(utest_fixture, OP_GET_PROP, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  clox_value_t bound = utest_fixture->printed.values[0];
+  ASSERT_TRUE(CLOX_IS_BOUND_METHOD(bound));
+  // the instance the method was reached through is what the binding carries
+  EXPECT_VALUE_EQ(CLOX_OBJECT(instance), CLOX_AS_BOUND_METHOD(bound)->receiver);
+  EXPECT_VALUE_EQ(CLOX_OBJECT(method), CLOX_AS_BOUND_METHOD(bound)->method);
+}
+
+UTEST_F(vm, a_field_is_read_before_a_method_of_the_same_name) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  const clox_string_t *name = clox_test_intern_kept(&utest_fixture->alloc, "m");
+  (void)clox_table_set(&class_->methods, name, CLOX_OBJECT(make_callee(utest_fixture, "m", 0)));
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, name, CLOX_NUMBER(42.0));
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_property(utest_fixture, OP_GET_PROP, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  // a field written over a method of that name is what the instance answers
+  // with: no binding is made at all
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_property_get_of_a_name_the_instance_does_not_have_is_a_runtime_error) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_property(utest_fixture, OP_GET_PROP, "missing");
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "missing") != NULL);
+}
+
+UTEST_F(vm, a_property_get_of_something_that_is_not_an_instance_is_a_runtime_error) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_property(utest_fixture, OP_GET_PROP, "x");
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "instances") != NULL);
+}
+
+UTEST_F(vm, a_property_get_of_a_class_is_a_runtime_error) {
+  // a class holds its methods for its instances to reach; it is not itself a
+  // thing properties are read off
+  emit_property(utest_fixture, OP_CLASS, "Named");
+  emit_property(utest_fixture, OP_GET_PROP, "x");
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  EXPECT_EQ((size_t)1, utest_fixture->errors.count);
+}
+
+UTEST_F(vm, a_property_set_records_the_field_and_leaves_the_value) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_property(utest_fixture, OP_SET_PROP, "x");
+
+  // an assignment is an expression: what it stored is what it evaluates to
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+
+  clox_value_t found;
+  ASSERT_TRUE(
+      clox_table_get(&instance->fields, clox_test_intern(&utest_fixture->alloc, "x"), &found));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), found);
+}
+
+UTEST_F(vm, a_property_set_takes_the_instance_out_from_under_the_value) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_property(utest_fixture, OP_SET_PROP, "x");
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, a_property_set_writes_over_a_field_already_there) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "x"),
+                       CLOX_NUMBER(1.0));
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_property(utest_fixture, OP_SET_PROP, "x");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+
+  clox_value_t found;
+  ASSERT_TRUE(
+      clox_table_get(&instance->fields, clox_test_intern(&utest_fixture->alloc, "x"), &found));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), found);
+}
+
+UTEST_F(vm, a_property_set_of_something_that_is_not_an_instance_is_a_runtime_error) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_property(utest_fixture, OP_SET_PROP, "x");
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "instances") != NULL);
+}
+
+UTEST_F(vm, a_discarding_property_set_records_the_field_and_leaves_nothing) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_property(utest_fixture, OP_SET_PROP_POP, "x");
+
+  // both the instance and the value go, and the marker underneath is all
+  // that is left
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+
+  clox_value_t found;
+  ASSERT_TRUE(
+      clox_table_get(&instance->fields, clox_test_intern(&utest_fixture->alloc, "x"), &found));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), found);
+}
+
+UTEST_F(vm, a_discarding_property_set_of_something_that_is_not_an_instance_is_a_runtime_error) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_property(utest_fixture, OP_SET_PROP_POP, "x");
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  EXPECT_EQ((size_t)1, utest_fixture->errors.count);
+}
+
+UTEST_F(vm, a_property_set_holds_the_value_while_the_field_is_recorded) {
+  // the first field written grows a table that was empty, and under the stress
+  // build that allocation collects: a value the set has taken off the stack
+  // early would be gone by the time the entry is written
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  clox_function_t *callee = make_callee(utest_fixture, "m", 0);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_closure(utest_fixture, callee, NULL);
+  emit_property(utest_fixture, OP_SET_PROP_POP, "x");
+
+  ASSERT_TRUE(interpret(utest_fixture, 0));
+
+  clox_value_t found;
+  ASSERT_TRUE(
+      clox_table_get(&instance->fields, clox_test_intern(&utest_fixture->alloc, "x"), &found));
+  ASSERT_TRUE(CLOX_IS_CLOSURE(found));
+  EXPECT_STREQ("m", CLOX_AS_CLOSURE(found)->function->name);
+}
+
+UTEST_F(vm, calling_a_class_makes_an_instance_of_it) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+
+  emit_constant(utest_fixture, CLOX_OBJECT(class_));
+  emit_call(utest_fixture, 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  ASSERT_TRUE(CLOX_IS_INSTANCE(utest_fixture->printed.values[0]));
+  EXPECT_TRUE(CLOX_AS_INSTANCE(utest_fixture->printed.values[0])->class_ == class_);
+}
+
+UTEST_F(vm, calling_a_class_declaring_no_initializer_takes_no_arguments) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+
+  emit_constant(utest_fixture, CLOX_OBJECT(class_));
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_call(utest_fixture, 1);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 0") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "got 1") != NULL);
+}
+
+UTEST_F(vm, calling_a_class_runs_its_initializer_on_the_new_instance) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *init = make_callee(utest_fixture, "init", 1);
+  // the receiver stands in the slot the callee was called through, and the
+  // argument in the one after it
+  emit_to(init, OP_GET_LOCAL);
+  emit_to(init, 0);
+  emit_to(init, OP_GET_LOCAL);
+  emit_to(init, 1);
+  emit_property_to(utest_fixture, init, OP_SET_PROP_POP, "x");
+  emit_to(init, OP_GET_LOCAL);
+  emit_to(init, 0);
+  emit_to(init, OP_RETURN);
+  class_->init = CLOX_OBJECT(init);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(class_));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_call(utest_fixture, 1);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_TRUE(CLOX_IS_INSTANCE(utest_fixture->printed.values[0]));
+
+  clox_value_t found;
+  ASSERT_TRUE(clox_table_get(&CLOX_AS_INSTANCE(utest_fixture->printed.values[0])->fields,
+                             clox_test_intern(&utest_fixture->alloc, "x"), &found));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), found);
+}
+
+UTEST_F(vm, an_initializer_of_another_arity_than_the_call_is_a_runtime_error) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *init = make_callee(utest_fixture, "init", 2);
+  emit_to(init, OP_RETURN_NIL);
+  class_->init = CLOX_OBJECT(init);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(class_));
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_call(utest_fixture, 1);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 2") != NULL);
+}
+
+UTEST_F(vm, calling_a_binding_puts_the_receiver_in_the_reserved_slot) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *method = make_callee(utest_fixture, "m", 0);
+  // the method hands back whatever stands in the slot it was called through
+  emit_to(method, OP_GET_LOCAL);
+  emit_to(method, 0);
+  emit_to(method, OP_RETURN);
+  (void)clox_table_set(&class_->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(method));
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_property(utest_fixture, OP_GET_PROP, "m");
+  emit_call(utest_fixture, 0);
+
+  // the binding is written over by the receiver it carries, so what the method
+  // reads out of that slot is the instance and not the binding
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(utest_fixture->printed.values[0], utest_fixture->printed.values[1]);
+  EXPECT_TRUE(CLOX_IS_INSTANCE(utest_fixture->printed.values[1]));
+}
+
+UTEST_F(vm, calling_a_binding_passes_its_arguments_after_the_receiver) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *method = make_callee(utest_fixture, "m", 1);
+  emit_to(method, OP_GET_LOCAL);
+  emit_to(method, 1);
+  emit_to(method, OP_RETURN);
+  (void)clox_table_set(&class_->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(method));
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_property(utest_fixture, OP_GET_PROP, "m");
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_call(utest_fixture, 1);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, calling_an_instance_is_a_runtime_error) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_call(utest_fixture, 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "call") != NULL);
+}
+
+// A class carrying one method, and the method itself. The body hands back
+// whatever stands in the slot it was called through, so a test can say which
+// value the call put there.
+static clox_function_t *method_returning_its_slot(struct vm *fixture, clox_class_t *class_,
+                                                  const char *name, size_t slot) {
+  clox_function_t *method = make_callee(fixture, name, slot);
+  emit_to(method, OP_GET_LOCAL);
+  emit_to(method, (clox_byte_t)slot);
+  emit_to(method, OP_RETURN);
+  (void)clox_table_set(&class_->methods, clox_test_intern_kept(&fixture->alloc, name),
+                       CLOX_OBJECT(method));
+
+  return method;
+}
+
+UTEST_F(vm, an_invoke_runs_a_method_of_the_class_on_the_receiver) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  (void)method_returning_its_slot(utest_fixture, class_, "m", 0);
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  // the receiver is already where a call frame expects its callee, so the
+  // invoke leaves it there rather than binding it to anything
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "m", 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_OBJECT(instance), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, an_invoke_passes_its_arguments_above_the_receiver) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  // slot 1 is the first argument, the slot after the receiver
+  (void)method_returning_its_slot(utest_fixture, class_, "m", 1);
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_invoke(utest_fixture, "m", 1);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, an_invoke_leaves_its_result_where_the_receiver_stood) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *method = make_callee(utest_fixture, "m", 1);
+  emit_constant_to(method, CLOX_NUMBER(42.0));
+  emit_to(method, OP_RETURN);
+  (void)clox_table_set(&class_->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(method));
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  // a marker below the receiver is what says the receiver and the argument
+  // were taken with the frame that ran on them
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit_invoke(utest_fixture, "m", 1);
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, an_invoke_calls_a_field_before_a_method_of_the_same_name) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *method = make_callee(utest_fixture, "m", 0);
+  emit_constant_to(method, CLOX_NUMBER(1.0));
+  emit_to(method, OP_RETURN);
+  (void)clox_table_set(&class_->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(method));
+
+  clox_function_t *field_fn = make_callee(utest_fixture, "field", 0);
+  emit_constant_to(field_fn, CLOX_NUMBER(42.0));
+  emit_to(field_fn, OP_RETURN);
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(field_fn));
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "m", 0);
+
+  // a field holding something callable is called instead: the method of that
+  // name is never reached
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, an_invoke_of_a_field_puts_the_field_in_the_reserved_slot) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *field_fn = make_callee(utest_fixture, "field", 0);
+  emit_to(field_fn, OP_GET_LOCAL);
+  emit_to(field_fn, 0);
+  emit_to(field_fn, OP_RETURN);
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "f"),
+                       CLOX_OBJECT(field_fn));
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "f", 0);
+
+  // the field is written over the receiver, so what the callee reads out of
+  // that slot is itself and not the instance it was reached through
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(field_fn), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, an_invoke_of_a_field_holding_a_binding_runs_it_on_the_receiver_it_carries) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_function_t *method = method_returning_its_slot(utest_fixture, class_, "m", 0);
+  clox_instance_t *bound_to = make_instance(utest_fixture, class_);
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  clox_value_t bound =
+      CLOX_BOUND_METHOD(&utest_fixture->alloc, CLOX_OBJECT(bound_to), CLOX_OBJECT(method));
+  clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(bound));
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "f"), bound);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "f", 0);
+
+  // the binding's own receiver wins over the instance the field was read off
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(bound_to), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, an_invoke_of_a_field_holding_a_class_makes_an_instance_of_it) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_class_t *made = make_class(utest_fixture, "Made");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "f"),
+                       CLOX_OBJECT(made));
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "f", 0);
+
+  // making the instance allocates, and the class it is made from is reachable
+  // only through the slot the field was written into
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_TRUE(CLOX_IS_INSTANCE(utest_fixture->printed.values[0]));
+  EXPECT_TRUE(CLOX_AS_INSTANCE(utest_fixture->printed.values[0])->class_ == made);
+}
+
+UTEST_F(vm, an_invoke_of_a_field_holding_a_native_reaches_the_native) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_value_t native = CLOX_NATIVE(&utest_fixture->alloc, "counting", 1, counting_native);
+  clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(native));
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "f"),
+                       native);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_invoke(utest_fixture, "f", 1);
+
+  // a native takes no frame, so the run has to carry on from where it was:
+  // the count it reports is the arguments above the receiver
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, an_invoke_of_a_name_the_instance_does_not_have_is_a_runtime_error) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "missing", 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "missing") != NULL);
+}
+
+UTEST_F(vm, an_invoke_on_something_that_is_not_an_instance_is_a_runtime_error) {
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_invoke(utest_fixture, "m", 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "instances") != NULL);
+}
+
+UTEST_F(vm, an_invoke_of_a_field_that_is_not_callable_is_a_runtime_error) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "f"),
+                       CLOX_NUMBER(1.0));
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "f", 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "call") != NULL);
+}
+
+UTEST_F(vm, an_invoke_of_another_arity_than_the_method_takes_is_a_runtime_error) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  (void)method_returning_its_slot(utest_fixture, class_, "m", 1);
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "m", 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 1") != NULL);
+}
+
+UTEST_F(vm, an_invoke_carries_on_where_it_left_off_when_the_call_takes_no_frame) {
+  clox_class_t *class_ = make_class(utest_fixture, "Named");
+  clox_value_t native = CLOX_NATIVE(&utest_fixture->alloc, "counting", 0, counting_native);
+  clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(native));
+  clox_instance_t *instance = make_instance(utest_fixture, class_);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "f"),
+                       native);
+
+  // two of them in a row: an instruction pointer picked up from the wrong
+  // frame would read the second invoke as something else
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "f", 0);
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_invoke(utest_fixture, "f", 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[1]);
 }

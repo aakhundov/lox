@@ -85,6 +85,14 @@ static bool takes_upvalue_operands(clox_op_code_t opcode) {
   return opcode == OP_CLOSURE || opcode == OP_CLOSURE_LONG;
 }
 
+// The other kind: an invoke names a property and then counts the arguments it
+// carries, the way a call does, so one byte follows its index. Written out for
+// the same reason as the list above -- a new opcode of this shape that is not
+// named here fails the walks below on the stride it did not advance by.
+static bool takes_arg_count_operand(clox_op_code_t opcode) {
+  return opcode == OP_INVOKE || opcode == OP_INVOKE_LONG;
+}
+
 // A function to close over, declaring the given number of upvalues. What it
 // holds does not matter: only the count is read, to say how many operand pairs
 // follow the OP_CLOSURE that names it.
@@ -102,6 +110,11 @@ static clox_value_t function_capturing(struct debug *fixture, const char *name,
 static void write_upvalue(struct debug *fixture, bool is_local, clox_byte_t index) {
   clox_chunk_write(&fixture->chunk, is_local ? 1 : 0, POS);
   clox_chunk_write(&fixture->chunk, index, POS);
+}
+
+// Writes the one operand byte an invoke takes after its index.
+static void write_arg_count(struct debug *fixture, clox_byte_t arg_count) {
+  clox_chunk_write(&fixture->chunk, arg_count, POS);
 }
 
 static bool takes_jump_operand(clox_op_code_t opcode) {
@@ -169,9 +182,128 @@ UTEST_F(debug, every_constant_opcode_disassembles_under_its_own_name) {
     size_t offset = chunk->length;
     ASSERT_TRUE(clox_write_constant(chunk, (clox_op_code_t)opcode, constant, POS));
 
-    ASSERT_EQ(offset + 2, disassemble_one(utest_fixture, offset));
+    // an invoke counts its arguments after the index, and reads that byte
+    // whether or not it was written: the walk has to leave one behind
+    size_t operand = 0;
+    if (takes_arg_count_operand((clox_op_code_t)opcode)) {
+      write_arg_count(utest_fixture, 0);
+      operand = 1;
+    }
+
+    ASSERT_EQ(offset + 2 + operand, disassemble_one(utest_fixture, offset));
     ASSERT_TRUE(strstr(utest_fixture->text, clox_op_code_names[opcode]) != NULL);
   }
+}
+
+UTEST_F(debug, every_constant_opcode_disassembles_under_its_long_name) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+
+  // The walk above reaches only the short forms, since that is what a chunk
+  // of few constants writes. Past a byte of them every constant instruction
+  // takes its long variant instead, and those are cases of their own: an
+  // opcode named in one form and not the other disassembles as unknown here.
+  for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
+    ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_NUMBER((double)i), POS));
+  }
+
+  for (size_t opcode = 0; opcode < CONST_OP_CODE_COUNT; opcode += 2) {
+    // a constant of its own per opcode, so none of them is written at an
+    // index another one already took
+    clox_value_t constant = takes_upvalue_operands((clox_op_code_t)opcode)
+                                ? function_capturing(utest_fixture, "named", 0)
+                                : CLOX_NUMBER(-(double)opcode - 1.0);
+
+    size_t offset = chunk->length;
+    ASSERT_TRUE(clox_write_constant(chunk, (clox_op_code_t)opcode, constant, POS));
+
+    size_t operand = 0;
+    if (takes_arg_count_operand((clox_op_code_t)opcode)) {
+      write_arg_count(utest_fixture, 0);
+      operand = 1;
+    }
+
+    ASSERT_EQ(offset + 4 + operand, disassemble_one(utest_fixture, offset));
+    ASSERT_TRUE(strstr(utest_fixture->text, clox_op_code_names[opcode + 1]) != NULL);
+  }
+}
+
+UTEST_F(debug, an_invoke_advances_past_the_count_of_arguments_it_carries) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_TRUE(clox_write_constant(chunk, OP_INVOKE,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "method", 6), POS));
+  write_arg_count(utest_fixture, 2);
+
+  EXPECT_EQ((size_t)3, disassemble_one(utest_fixture, 0));
+  EXPECT_TRUE(strstr(utest_fixture->text, "OP_INVOKE") != NULL);
+}
+
+UTEST_F(debug, an_invoke_names_the_property_it_calls_and_the_arguments_it_passes) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_TRUE(clox_write_constant(chunk, OP_INVOKE,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "method", 6), POS));
+  write_arg_count(utest_fixture, 2);
+
+  ASSERT_EQ((size_t)3, disassemble_one(utest_fixture, 0));
+  // the name is a string constant, rendered as one; the count is a byte
+  // operand, rendered the way every other byte operand is
+  EXPECT_TRUE(strstr(utest_fixture->text, "\"method\"") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "0x02") != NULL);
+}
+
+UTEST_F(debug, an_invoke_of_no_arguments_still_carries_its_count) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_TRUE(clox_write_constant(chunk, OP_INVOKE,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "method", 6), POS));
+  write_arg_count(utest_fixture, 0);
+
+  // the byte is written whether or not there is anything to count, so the
+  // stride does not depend on the call
+  EXPECT_EQ((size_t)3, disassemble_one(utest_fixture, 0));
+  EXPECT_TRUE(strstr(utest_fixture->text, "0x00") != NULL);
+}
+
+UTEST_F(debug, a_long_invoke_advances_past_its_wider_index_and_its_count) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
+    ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_NUMBER((double)i), POS));
+  }
+
+  size_t offset = chunk->length;
+  ASSERT_TRUE(clox_write_constant(chunk, OP_INVOKE,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "method", 6), POS));
+  write_arg_count(utest_fixture, 1);
+
+  // the wider index and the count are counted independently
+  EXPECT_EQ(offset + 5, disassemble_one(utest_fixture, offset));
+  EXPECT_TRUE(strstr(utest_fixture->text, "OP_INVOKE_LONG") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "0x01") != NULL);
+}
+
+UTEST_F(debug, walking_a_chunk_of_invoke_instructions_lands_exactly_on_its_end) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+
+  ASSERT_TRUE(clox_write_constant(chunk, OP_INVOKE,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "one", 3), POS));
+  write_arg_count(utest_fixture, 3);
+  ASSERT_TRUE(clox_write_constant(chunk, OP_INVOKE,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "two", 3), POS));
+  write_arg_count(utest_fixture, 0);
+  clox_chunk_write(chunk, OP_POP, POS);
+  clox_chunk_write(chunk, OP_RETURN, POS);
+
+  // an argument count read as an instruction would put the walk out of step,
+  // and land it somewhere other than the end
+  size_t offset = 0;
+  size_t instructions = 0;
+  while (offset < chunk->length) {
+    size_t next = disassemble_one(utest_fixture, offset);
+    ASSERT_TRUE(next > offset); // no instruction may stand still
+    offset = next;
+    instructions++;
+  }
+
+  EXPECT_EQ(chunk->length, offset);
+  EXPECT_EQ((size_t)4, instructions);
 }
 
 UTEST_F(debug, a_closure_capturing_nothing_advances_like_any_constant_instruction) {

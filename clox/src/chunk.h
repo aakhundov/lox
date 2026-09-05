@@ -10,7 +10,7 @@
 
 typedef enum clox_op_code_t {
 #define X(name) OP_##name,
-#define XC(short, long) X(short) X(long)
+#define XC(name) X(name) X(name##_LONG)
 #include "opcodes.def"
 #undef XC
 #undef X
@@ -20,7 +20,7 @@ typedef enum clox_op_code_t {
 enum {
   CONST_OP_CODE_COUNT = 0
 #define X(name)
-#define XC(short, long) +2 // NOLINT(bugprone-macro-parentheses)
+#define XC(name) +2 // NOLINT(bugprone-macro-parentheses)
 #include "opcodes.def"
 #undef XC
 #undef X

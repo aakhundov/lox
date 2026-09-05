@@ -38,6 +38,7 @@ typedef struct clox_vm_t {
   void *print_ctx;
   uint64_t rng_state;
   void *mark_callback_handle;
+  const clox_string_t *init_method_name;
 } clox_vm_t;
 
 void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc);

@@ -205,6 +205,59 @@ clox_closure_t *clox_new_closure(clox_allocator_t *alloc, const clox_function_t 
   FINISH_ALLOCATION(alloc, clox_closure_t, closure);
 }
 
+clox_class_t *clox_new_class(clox_allocator_t *alloc, const clox_string_t *name) {
+  assert(alloc != NULL);
+  assert(name != NULL);
+
+  clox_push_durable(alloc, (clox_object_t *)name);
+
+  clox_class_t *class_ = START_ALLOCATION(alloc, clox_class_t, OBJ_CLASS);
+
+  clox_pop_durable(alloc); // name
+
+  class_->name = name;
+  class_->init = CLOX_NIL;
+  clox_table_init(&class_->methods, alloc);
+
+  FINISH_ALLOCATION(alloc, clox_class_t, class_);
+}
+
+clox_instance_t *clox_new_instance(clox_allocator_t *alloc, const clox_class_t *class_) {
+  assert(alloc != NULL);
+  assert(class_ != NULL);
+
+  clox_push_durable(alloc, (clox_object_t *)class_);
+
+  clox_instance_t *instance = START_ALLOCATION(alloc, clox_instance_t, OBJ_INSTANCE);
+
+  clox_pop_durable(alloc); // class_
+
+  instance->class_ = class_;
+  clox_table_init(&instance->fields, alloc);
+
+  FINISH_ALLOCATION(alloc, clox_instance_t, instance);
+}
+
+clox_bound_method_t *clox_new_bound_method(clox_allocator_t *alloc, clox_value_t receiver,
+                                           clox_value_t method) {
+  assert(alloc != NULL);
+  assert(CLOX_IS_INSTANCE(receiver));
+  assert(CLOX_IS_FUNCTION(method) || CLOX_IS_CLOSURE(method));
+
+  clox_push_durable(alloc, CLOX_AS_OBJECT(receiver));
+  clox_push_durable(alloc, CLOX_AS_OBJECT(method));
+
+  clox_bound_method_t *bm = START_ALLOCATION(alloc, clox_bound_method_t, OBJ_BOUND_METHOD);
+
+  clox_pop_durable(alloc); // method
+  clox_pop_durable(alloc); // receiver
+
+  bm->receiver = receiver;
+  bm->method = method;
+
+  FINISH_ALLOCATION(alloc, clox_bound_method_t, bm);
+}
+
 bool clox_object_is_truthy(clox_value_t val) {
   assert(CLOX_IS_OBJECT(val));
 
@@ -215,6 +268,9 @@ bool clox_object_is_truthy(clox_value_t val) {
   case OBJ_NATIVE:
   case OBJ_UPVALUE:
   case OBJ_CLOSURE:
+  case OBJ_CLASS:
+  case OBJ_INSTANCE:
+  case OBJ_BOUND_METHOD:
     return true;
   }
 }
@@ -233,12 +289,17 @@ bool clox_object_equals(clox_value_t a, clox_value_t b) {
     // this works due to the string interning
     return CLOX_AS_STRING(a) == CLOX_AS_STRING(b);
   case OBJ_CLOSURE:
-    // compare closures' functions
+    // compare closures' underlying functions
     return clox_object_equals(CLOX_OBJECT(CLOX_AS_CLOSURE(a)->function),
                               CLOX_OBJECT(CLOX_AS_CLOSURE(b)->function));
+  case OBJ_BOUND_METHOD:
+    // compare bound methods' underlying methods
+    return clox_value_equals(CLOX_AS_BOUND_METHOD(a)->method, CLOX_AS_BOUND_METHOD(b)->method);
   case OBJ_FUNCTION:
   case OBJ_NATIVE:
   case OBJ_UPVALUE:
+  case OBJ_CLASS:
+  case OBJ_INSTANCE:
     // compare object pointers
     return CLOX_AS_OBJECT(a) == CLOX_AS_OBJECT(b);
   }
@@ -275,8 +336,17 @@ void clox_object_fprintf(FILE *stream, clox_value_t val) {
     (void)fprintf(stream, ">");
     break;
   }
+  case OBJ_CLASS:
+    (void)fprintf(stream, "<cl %s>", CLOX_AS_CLASS(val)->name->chars);
+    break;
+  case OBJ_INSTANCE:
+    (void)fprintf(stream, "<in %s>", CLOX_AS_INSTANCE(val)->class_->name->chars);
+    break;
   case OBJ_CLOSURE:
     clox_object_fprintf(stream, CLOX_OBJECT(CLOX_AS_CLOSURE(val)->function));
+    break;
+  case OBJ_BOUND_METHOD:
+    clox_object_fprintf(stream, CLOX_AS_BOUND_METHOD(val)->method);
     break;
   }
 }
@@ -294,11 +364,22 @@ void clox_object_repr_fprintf(FILE *stream, clox_value_t val) {
     (void)fprintf(stream, "\"%s\"", CLOX_AS_CSTRING(val));
     break;
   case OBJ_CLOSURE:
-    (void)fprintf(stream, "<cl %s>", CLOX_AS_CLOSURE(val)->function->name);
+    (void)fprintf(stream, "<co %s>", CLOX_AS_CLOSURE(val)->function->name);
     break;
+  case OBJ_BOUND_METHOD: {
+    clox_bound_method_t *bm = CLOX_AS_BOUND_METHOD(val);
+    if (CLOX_IS_CLOSURE(bm->method)) {
+      (void)fprintf(stream, "<bm %s>", CLOX_AS_CLOSURE(bm->method)->function->name);
+    } else { // bm->method is function by construction
+      (void)fprintf(stream, "<bm %s>", CLOX_AS_FUNCTION(bm->method)->name);
+    }
+    break;
+  }
   case OBJ_FUNCTION:
   case OBJ_NATIVE:
   case OBJ_UPVALUE:
+  case OBJ_CLASS:
+  case OBJ_INSTANCE:
     clox_object_fprintf(stream, val);
     break;
   }

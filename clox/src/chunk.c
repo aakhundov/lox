@@ -13,17 +13,15 @@
 #include "value.h"
 
 #define X(name)
-#define XC(short, long)                                                                            \
-  _Static_assert(OP_##short < CONST_OP_CODE_COUNT, "short constant opcode must be valid");         \
-  _Static_assert(OP_##long < CONST_OP_CODE_COUNT, "long constant opcode must be valid");           \
-  _Static_assert(OP_##short + 1 == OP_##long, "short constant opcode + 1 must = long one");
+#define XC(name)                                                                                   \
+  _Static_assert(OP_##name < CONST_OP_CODE_COUNT - 1, "short constant opcodes must come first");
 #include "opcodes.def"
 #undef XC
 #undef X
 
 const char *const clox_op_code_names[] = {
 #define X(name) [OP_##name] = "OP_" #name,
-#define XC(short, long) X(short) X(long)
+#define XC(short) X(short) X(short##_LONG)
 #include "opcodes.def"
 #undef XC
 #undef X

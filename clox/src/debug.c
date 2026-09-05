@@ -59,6 +59,13 @@ static size_t append_upvalues(FILE *stream, const clox_chunk_t *chunk, size_t co
   return offset; // incremented above
 }
 
+static size_t append_arg_count(FILE *stream, const clox_chunk_t *chunk, size_t offset) {
+  clox_byte_t arg_count = chunk->code[offset++];
+  (void)fprintf(stream, " 0x%02x", arg_count);
+
+  return offset; // incremented above
+}
+
 size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *chunk,
                                             size_t offset) {
   assert(stream != NULL);
@@ -110,10 +117,20 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_DEF_GLOBAL_LONG:
     case OP_GET_GLOBAL:
     case OP_GET_GLOBAL_LONG:
+    case OP_GET_PROP:
+    case OP_GET_PROP_LONG:
     case OP_SET_GLOBAL:
     case OP_SET_GLOBAL_LONG:
     case OP_SET_GLOBAL_POP:
     case OP_SET_GLOBAL_POP_LONG:
+    case OP_SET_PROP:
+    case OP_SET_PROP_LONG:
+    case OP_SET_PROP_POP:
+    case OP_SET_PROP_POP_LONG:
+    case OP_CLASS:
+    case OP_CLASS_LONG:
+    case OP_METHOD:
+    case OP_METHOD_LONG:
       offset = const_instruction(stream, chunk, opcode, NULL, offset);
       break;
     case OP_CLOSURE:
@@ -122,6 +139,12 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
       offset = const_instruction(stream, chunk, opcode, &val, offset);
       size_t count = CLOX_AS_FUNCTION(val)->upvalue_count;
       offset = append_upvalues(stream, chunk, count, offset);
+      break;
+    }
+    case OP_INVOKE:
+    case OP_INVOKE_LONG: {
+      offset = const_instruction(stream, chunk, opcode, NULL, offset);
+      offset = append_arg_count(stream, chunk, offset);
       break;
     }
     case OP_GET_LOCAL:

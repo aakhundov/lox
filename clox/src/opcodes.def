@@ -4,16 +4,22 @@ to introduce new opcodes, add them to the list below
 
 rules:
 
-  - define constant opcodes with XC: short, then long
-  - define all XC(...) pairs before the first X(...) call
+  - define constant opcodes with XC: short only (long will be generated)
+  - define all XC(...) opcodes before the first X(...) opcode
 */
 
-XC(CONSTANT, CONSTANT_LONG)
-XC(DEF_GLOBAL, DEF_GLOBAL_LONG)
-XC(GET_GLOBAL, GET_GLOBAL_LONG)
-XC(SET_GLOBAL, SET_GLOBAL_LONG)
-XC(SET_GLOBAL_POP, SET_GLOBAL_POP_LONG)
-XC(CLOSURE, CLOSURE_LONG)
+XC(CONSTANT)
+XC(DEF_GLOBAL)
+XC(GET_GLOBAL)
+XC(SET_GLOBAL)
+XC(SET_GLOBAL_POP)
+XC(GET_PROP)
+XC(SET_PROP)
+XC(SET_PROP_POP)
+XC(CLOSURE)
+XC(CLASS)
+XC(METHOD)
+XC(INVOKE)
 
 X(GET_LOCAL)
 X(SET_LOCAL)

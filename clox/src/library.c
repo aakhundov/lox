@@ -492,9 +492,15 @@ static const char *value_type_name(clox_value_t val) {
       return "string";
     case OBJ_FUNCTION:
     case OBJ_CLOSURE:
+    case OBJ_BOUND_METHOD:
       return "function";
     case OBJ_NATIVE:
       return "native";
+    case OBJ_CLASS:
+      return "class";
+    case OBJ_INSTANCE:
+      // type of instance is the class name
+      return CLOX_AS_INSTANCE(val)->class_->name->chars;
     case OBJ_UPVALUE:
       break; // never a value a program holds
     }
@@ -534,6 +540,12 @@ static int format_object(char *buffer, size_t size, clox_value_t val) {
     return snprintf(buffer, size, "<nt %s>", CLOX_AS_NATIVE(val)->name);
   case OBJ_CLOSURE:
     return format_object(buffer, size, CLOX_OBJECT(CLOX_AS_CLOSURE(val)->function));
+  case OBJ_CLASS:
+    return snprintf(buffer, size, "<cl %s>", CLOX_AS_CLASS(val)->name->chars);
+  case OBJ_INSTANCE:
+    return snprintf(buffer, size, "<in %s>", CLOX_AS_INSTANCE(val)->class_->name->chars);
+  case OBJ_BOUND_METHOD:
+    return format_object(buffer, size, CLOX_AS_BOUND_METHOD(val)->method);
   case OBJ_UPVALUE:
     break; // never a value a program holds
   }

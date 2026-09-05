@@ -37,6 +37,8 @@ typedef struct clox_compile_loop_state_t {
 typedef enum clox_compile_function_type_t {
   FUNCTION_SCRIPT,
   FUNCTION_FUNCTION,
+  FUNCTION_METHOD,
+  FUNCTION_INITIALIZER,
 } clox_compile_function_type_t;
 
 typedef struct clox_compile_frame_t {
@@ -58,6 +60,10 @@ typedef struct clox_compile_frame_t {
   size_t last_opcode_address;
 } clox_compile_frame_t;
 
+typedef struct clox_compile_class_t {
+  struct clox_compile_class_t *enclosing;
+} clox_compile_class_t;
+
 typedef struct clox_compiler_t {
   // source
   const char *file_name;
@@ -72,6 +78,8 @@ typedef struct clox_compiler_t {
   size_t declaration_depth;
   // current frame
   clox_compile_frame_t *frame;
+  // current class
+  clox_compile_class_t *class_;
   // compile-time allocator
   clox_allocator_t *allocator;
   // error handling
