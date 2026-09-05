@@ -226,6 +226,17 @@ static inline void emit_pop_n(clox_compiler_t *c, size_t n_to_pop, const clox_to
   }
 }
 
+static inline void emit_return(clox_compiler_t *c, const clox_token_t *token) {
+  if (FRAME(c)->type == FUNCTION_INITIALIZER) {
+    // initializer always returns the instance
+    emit_opcode(c, OP_GET_LOCAL, token);
+    emit_byte(c, 0, token); // local #0: instance
+    emit_opcode(c, OP_RETURN, token);
+  } else {
+    emit_opcode(c, OP_RETURN_NIL, token);
+  }
+}
+
 static inline void scan_to_eof(clox_compiler_t *c) {
   while (c->current.type != TOKEN_EOF) {
     advance(c);
@@ -270,9 +281,14 @@ static inline void start_frame(clox_compiler_t *c, clox_compile_frame_t *frame,
 
   // first local in a frame is reserved for the function object itself
   clox_compile_local_t *func_local = &frame->locals[frame->local_count++];
-  func_local->depth = 0;       // at global scope
-  func_local->name.start = ""; // not resolvable
-  func_local->name.length = 0;
+  func_local->depth = 0;
+  if (type == FUNCTION_METHOD || type == FUNCTION_INITIALIZER) {
+    func_local->name.start = "this"; // receiver instance
+    func_local->name.length = 4;
+  } else {
+    func_local->name.start = ""; // not resolvable
+    func_local->name.length = 0;
+  }
   func_local->initialized = true;
   func_local->is_captured = false;
 
@@ -281,7 +297,7 @@ static inline void start_frame(clox_compiler_t *c, clox_compile_frame_t *frame,
 }
 
 static inline clox_function_t *end_frame(clox_compiler_t *c) {
-  emit_opcode(c, OP_RETURN_NIL, &c->previous); // at most recent token
+  emit_return(c, &c->previous); // at most recent token
   clox_function_t *function = FUNCTION(c);
 
 #if CLOX_DEBUG_COMPILATION
@@ -474,6 +490,12 @@ static void emit_or_fold_pop(clox_compiler_t *c, clox_token_t *token) {
   case OP_SET_GLOBAL_LONG:
     update_opcode(c, FRAME(c)->last_opcode_address, OP_SET_GLOBAL_POP_LONG);
     break;
+  case OP_SET_PROP:
+    update_opcode(c, FRAME(c)->last_opcode_address, OP_SET_PROP_POP);
+    break;
+  case OP_SET_PROP_LONG:
+    update_opcode(c, FRAME(c)->last_opcode_address, OP_SET_PROP_POP_LONG);
+    break;
   case OP_SET_LOCAL:
     update_opcode(c, FRAME(c)->last_opcode_address, OP_SET_LOCAL_POP);
     break;
@@ -632,8 +654,12 @@ static void return_statement(clox_compiler_t *c) {
   }
 
   if (match(c, TOKEN_SEMICOLON)) {
-    emit_opcode(c, OP_RETURN_NIL, &keyword);
+    emit_return(c, &keyword);
   } else {
+    if (FRAME(c)->type == FUNCTION_INITIALIZER) {
+      error(c, &keyword, "can't return value from initializer");
+    }
+
     expression(c);
     consume(c, TOKEN_SEMICOLON, "expect ';' after return value");
     emit_opcode(c, OP_RETURN, &keyword);
@@ -835,6 +861,91 @@ static inline void function(clox_compiler_t *c, clox_compile_function_type_t typ
   }
 }
 
+_Static_assert(CLOX_MAX_LOCALS - 1 <= UCHAR_MAX, "local index should fit in unsigned char");
+
+static inline void named_variable(clox_compiler_t *c, const clox_token_t *name, bool can_assign) {
+  bool assign = can_assign && match(c, TOKEN_EQUAL);
+  if (assign) {
+    // evaluate lhs
+    expression(c);
+  }
+
+  clox_op_code_t local_get_op = OP_CODE_COUNT;
+  clox_op_code_t local_set_op = OP_CODE_COUNT;
+  size_t local_idx = resolve_local(c, FRAME(c), name);
+  if (local_idx < CLOX_MAX_LOCALS) {
+    // local variable
+    local_get_op = OP_GET_LOCAL;
+    local_set_op = OP_SET_LOCAL;
+  } else {
+    local_idx = resolve_upvalue(c, FRAME(c), name);
+    if (local_idx < CLOX_MAX_UPVALUES) {
+      // non-global variable via upvalue
+      local_get_op = OP_GET_UPVALUE;
+      local_set_op = OP_SET_UPVALUE;
+    }
+  }
+
+  if (local_get_op != OP_CODE_COUNT) {
+    // cast is safe: static assert above
+    clox_byte_t byte_idx = (clox_byte_t)local_idx;
+    emit_opcode(c, assign ? local_set_op : local_get_op, name);
+    emit_byte(c, byte_idx, name);
+  } else {
+    // global variable
+    clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name->start, name->length);
+    emit_constant(c, assign ? OP_SET_GLOBAL : OP_GET_GLOBAL, name_str, name);
+  }
+}
+
+static inline void method(clox_compiler_t *c) {
+  consume(c, TOKEN_IDENTIFIER, "expect method name");
+  clox_token_t name = c->previous;
+
+  clox_compile_function_type_t type = FUNCTION_METHOD;
+  if (name.length == strlen(CLOX_INIT_METHOD_NAME) &&
+      memcmp(name.start, CLOX_INIT_METHOD_NAME, name.length) == 0) {
+    type = FUNCTION_INITIALIZER;
+  }
+  function(c, type, &name);
+
+  clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+  emit_constant(c, OP_METHOD, name_str, &name);
+}
+
+static void class_declaration(clox_compiler_t *c) {
+  clox_token_t keyword = c->previous;
+  consume(c, TOKEN_IDENTIFIER, "expect class name");
+
+  clox_token_t name = c->previous;
+  clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+
+  emit_constant(c, OP_CLASS, name_str, &name);
+
+  if (FRAME(c)->scope_depth > 0) { // local scope
+    // locally declared class name
+    // must be visible from methods
+    declare_variable(c, &name);
+    mark_initialized(c);
+  } else { // global scope
+    emit_constant(c, OP_DEF_GLOBAL, name_str, &keyword);
+  }
+
+  clox_compile_class_t current_class;
+  current_class.enclosing = c->class_;
+  c->class_ = &current_class;
+
+  named_variable(c, &name, false);
+  consume(c, TOKEN_LEFT_BRACE, "expect '{' before class body");
+  while (!check(c, TOKEN_RIGHT_BRACE) && !check(c, TOKEN_EOF)) {
+    method(c);
+  }
+  consume(c, TOKEN_RIGHT_BRACE, "expect '}' after class body");
+  emit_opcode(c, OP_POP, &name); // name
+
+  c->class_ = c->class_->enclosing;
+}
+
 static void fun_declaration(clox_compiler_t *c) {
   clox_token_t keyword = c->previous;
   consume(c, TOKEN_IDENTIFIER, "expect function name");
@@ -888,7 +999,9 @@ static void declaration(clox_compiler_t *c) {
     goto ret;
   }
 
-  if (match(c, TOKEN_FUN)) {
+  if (match(c, TOKEN_CLASS)) {
+    class_declaration(c);
+  } else if (match(c, TOKEN_FUN)) {
     fun_declaration(c);
   } else if (match(c, TOKEN_VAR)) {
     var_declaration(c);
@@ -1059,43 +1172,9 @@ static void literal(clox_compiler_t *c, bool can_assign) {
   }
 }
 
-_Static_assert(CLOX_MAX_LOCALS - 1 <= UCHAR_MAX, "local index should fit in unsigned char");
-
 static void variable(clox_compiler_t *c, bool can_assign) {
   clox_token_t name = c->previous;
-
-  bool assign = can_assign && match(c, TOKEN_EQUAL);
-  if (assign) {
-    // evaluate lhs
-    expression(c);
-  }
-
-  clox_op_code_t local_get_op = OP_CODE_COUNT;
-  clox_op_code_t local_set_op = OP_CODE_COUNT;
-  size_t local_idx = resolve_local(c, FRAME(c), &name);
-  if (local_idx < CLOX_MAX_LOCALS) {
-    // local variable
-    local_get_op = OP_GET_LOCAL;
-    local_set_op = OP_SET_LOCAL;
-  } else {
-    local_idx = resolve_upvalue(c, FRAME(c), &name);
-    if (local_idx < CLOX_MAX_UPVALUES) {
-      // non-global variable via upvalue
-      local_get_op = OP_GET_UPVALUE;
-      local_set_op = OP_SET_UPVALUE;
-    }
-  }
-
-  if (local_get_op != OP_CODE_COUNT) {
-    // cast is safe: static assert above
-    clox_byte_t byte_idx = (clox_byte_t)local_idx;
-    emit_opcode(c, assign ? local_set_op : local_get_op, &name);
-    emit_byte(c, byte_idx, &name);
-  } else {
-    // global variable
-    clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
-    emit_constant(c, assign ? OP_SET_GLOBAL : OP_GET_GLOBAL, name_str, &name);
-  }
+  named_variable(c, &name, can_assign);
 }
 
 static void and_(clox_compiler_t *c, bool can_assign) {
@@ -1144,6 +1223,35 @@ static void call(clox_compiler_t *c, bool can_assign) {
   emit_opcode(c, OP_CALL, &left_paren);
   // cast is safe: range check is done in argument_list
   emit_byte(c, (clox_byte_t)args_count, &left_paren);
+}
+
+static void dot(clox_compiler_t *c, bool can_assign) {
+  consume(c, TOKEN_IDENTIFIER, "expect property name after '.'");
+
+  clox_token_t name = c->previous;
+  clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+
+  clox_push_durable(c->allocator, CLOX_AS_OBJECT(name_str));
+
+  if (can_assign && match(c, TOKEN_EQUAL)) {
+    expression(c);
+    emit_constant(c, OP_SET_PROP, name_str, &name);
+  } else {
+    emit_constant(c, OP_GET_PROP, name_str, &name);
+  }
+
+  clox_pop_durable(c->allocator); // name_str
+}
+
+static void this_(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
+  clox_token_t keyword = c->previous;
+
+  if (c->class_ == NULL) {
+    error(c, &keyword, "this allowed only inside class methods");
+  }
+
+  variable(c, false);
 }
 
 static const clox_parse_rule_t parse_rules[] = {
@@ -1228,8 +1336,9 @@ bool clox_compile(clox_compiler_t *compiler, const char *file_name, char *source
   compiler->parser_depth = 0;
   compiler->declaration_depth = 0;
 
-  // init frame
+  // init state
   compiler->frame = NULL;
+  compiler->class_ = NULL;
 
   clox_compile_frame_t script;
   start_frame(compiler, &script, FUNCTION_SCRIPT, CLOX_SCRIPT_NAME, strlen(CLOX_SCRIPT_NAME));
@@ -1245,6 +1354,7 @@ bool clox_compile(clox_compiler_t *compiler, const char *file_name, char *source
   assert(compiler->parser_depth == 0);
   assert(compiler->declaration_depth == 0);
   assert(compiler->frame == NULL);
+  assert(compiler->class_ == NULL);
 
   if (compiler->had_error) {
     return false;

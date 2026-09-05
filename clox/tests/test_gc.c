@@ -609,6 +609,116 @@ UTEST_F(gc, an_unmarked_table_keeps_nothing) {
   clox_table_free(&table);
 }
 
+UTEST_F(gc, a_collection_follows_a_class_to_its_name_and_its_methods) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+
+  const clox_string_t *name = clox_test_intern(alloc, "Named");
+  clox_class_t *class_ = clox_new_class(alloc, name);
+  clox_function_t *method = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  const clox_string_t *key = clox_test_intern(alloc, "m");
+  ASSERT_TRUE(clox_table_set(&class_->methods, key, CLOX_OBJECT(method)));
+
+  // only the class is held: everything it declares has to be reached through it
+  clox_push_durable(alloc, (clox_object_t *)class_);
+
+  clox_collect_garbage(alloc);
+
+  EXPECT_TRUE(is_recorded(alloc, name));
+  EXPECT_TRUE(is_recorded(alloc, method));
+  EXPECT_TRUE(is_recorded(alloc, key));
+  EXPECT_STREQ("Named", class_->name->chars);
+
+  // a name is a key of the intern table too, and a key of a swept string is
+  // dropped: reading the method back is what says the key was kept instead
+  clox_value_t read = CLOX_NIL;
+  ASSERT_TRUE(clox_table_get(&class_->methods, clox_test_intern(alloc, "m"), &read));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(method), read);
+
+  clox_pop_durable(alloc);
+}
+
+UTEST_F(gc, a_collection_follows_a_class_to_its_initializer) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern(alloc, "Named"));
+  clox_function_t *init = clox_new_function(alloc, "init", 4, 0, FILE_NAME, SOURCE);
+  // the initializer is held apart from the methods, so it is a reference of
+  // its own and not one the table walk covers
+  class_->init = CLOX_OBJECT(init);
+
+  clox_push_durable(alloc, (clox_object_t *)class_);
+
+  clox_collect_garbage(alloc);
+
+  EXPECT_TRUE(is_recorded(alloc, init));
+  EXPECT_STREQ("init", CLOX_AS_FUNCTION(class_->init)->name);
+
+  clox_pop_durable(alloc);
+}
+
+UTEST_F(gc, a_collection_follows_an_instance_to_its_class_and_its_fields) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern(alloc, "Named"));
+  clox_instance_t *instance = clox_new_instance(alloc, class_);
+  const clox_string_t *key = clox_test_intern(alloc, "x");
+  const clox_string_t *value = clox_string_copy(alloc, "value", 5);
+  ASSERT_TRUE(clox_table_set(&instance->fields, key, CLOX_OBJECT(value)));
+
+  // the class is reachable only through the instance made from it, which is
+  // where a program leaves it once the declaration has gone out of scope
+  clox_push_durable(alloc, (clox_object_t *)instance);
+
+  clox_collect_garbage(alloc);
+
+  EXPECT_TRUE(is_recorded(alloc, class_));
+  EXPECT_TRUE(is_recorded(alloc, key));
+  EXPECT_TRUE(is_recorded(alloc, value));
+  EXPECT_STREQ("Named", instance->class_->name->chars);
+  EXPECT_STREQ("value", value->chars);
+
+  clox_pop_durable(alloc);
+}
+
+UTEST_F(gc, a_collection_follows_a_binding_to_its_receiver_and_its_method) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern(alloc, "Named"));
+  clox_instance_t *instance = clox_new_instance(alloc, class_);
+  clox_function_t *method = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_bound_method_t *bound =
+      clox_new_bound_method(alloc, CLOX_OBJECT(instance), CLOX_OBJECT(method));
+
+  // a binding outliving the lookup that made it is the only thing holding
+  // both halves: a program may keep one in a variable and call it much later
+  clox_push_durable(alloc, (clox_object_t *)bound);
+
+  clox_collect_garbage(alloc);
+
+  EXPECT_TRUE(is_recorded(alloc, instance));
+  EXPECT_TRUE(is_recorded(alloc, method));
+  EXPECT_TRUE(is_recorded(alloc, class_));
+  EXPECT_STREQ("m", CLOX_AS_FUNCTION(bound->method)->name);
+
+  clox_pop_durable(alloc);
+}
+
+UTEST_F(gc, a_collection_reclaims_a_class_an_instance_and_a_binding_nothing_refers_to) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern(alloc, "Named"));
+  clox_instance_t *instance = clox_new_instance(alloc, class_);
+  clox_function_t *method = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  (void)clox_table_set(&class_->methods, clox_test_intern(alloc, "m"), CLOX_OBJECT(method));
+  (void)clox_new_bound_method(alloc, CLOX_OBJECT(instance), CLOX_OBJECT(method));
+
+  clox_collect_garbage(alloc);
+
+  // the tables the class and the instance own go with them; LSan is what says
+  // so, and the object list is what says the objects themselves went
+  EXPECT_EQ((size_t)0, count_objects(alloc));
+}
+
 // ---------------------------------------------------------------------------
 // the collector, over a heap a running program built
 // ---------------------------------------------------------------------------
@@ -796,6 +906,57 @@ UTEST_F(gc_run, a_collection_mid_run_reclaims_what_the_program_dropped) {
   size_t after = count_objects(alloc);
   (void)clox_string_copy(alloc, "kept", 4);
   EXPECT_EQ(after, count_objects(alloc));
+}
+
+UTEST_F(gc_run, a_collection_mid_run_keeps_the_fields_of_a_live_instance) {
+  // the text is built at run time, so it is not a constant of any chunk: the
+  // field table is the only thing holding it when the collection runs
+  ASSERT_TRUE(run_source(utest_fixture, "class A {}"
+                                        "var a = A();"
+                                        "a.f = \"fie\" + \"ld\";"
+                                        "collect();"
+                                        "print a.f;"));
+
+  ASSERT_EQ((size_t)1, forced_collections);
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_STREQ("field", CLOX_AS_CSTRING(utest_fixture->printed.values[0]));
+}
+
+UTEST_F(gc_run, a_collection_mid_run_keeps_the_methods_a_class_declares) {
+  ASSERT_TRUE(run_source(utest_fixture, "class A { m() { return \"me\" + \"thod\"; } }"
+                                        "var a = A();"
+                                        "collect();"
+                                        "print a.m();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_STREQ("method", CLOX_AS_CSTRING(utest_fixture->printed.values[0]));
+}
+
+UTEST_F(gc_run, a_collection_mid_run_keeps_the_class_an_instance_came_from) {
+  // once the declaration has gone out of scope the instance is the only way
+  // back to the class, and the methods are reached through it
+  ASSERT_TRUE(run_source(utest_fixture, "fun make() {"
+                                        "  class A { m() { return \"in\" + \"ner\"; } }"
+                                        "  return A();"
+                                        "}"
+                                        "var a = make();"
+                                        "collect();"
+                                        "print a.m();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_STREQ("inner", CLOX_AS_CSTRING(utest_fixture->printed.values[0]));
+}
+
+UTEST_F(gc_run, a_collection_mid_run_keeps_a_binding_held_in_a_variable) {
+  // a binding taken out of the lookup that made it holds the only reference
+  // to its receiver, and calling it later has to find that receiver intact
+  ASSERT_TRUE(run_source(utest_fixture, "class A { init(v) { this.v = v; } m() { return this.v; } }"
+                                        "var b = A(\"bou\" + \"nd\").m;"
+                                        "collect();"
+                                        "print b();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_STREQ("bound", CLOX_AS_CSTRING(utest_fixture->printed.values[0]));
 }
 
 // Compiling is the other side of the run: a collection there has to keep the

@@ -50,6 +50,23 @@ static inline void free_object(clox_allocator_t *a, clox_object_t *obj) {
     CLOX_OBJECT_FREE(a, clox_closure_t, closure);
     break;
   }
+  case OBJ_CLASS: {
+    clox_class_t *class_ = (clox_class_t *)obj;
+    clox_table_free(&class_->methods);
+    CLOX_OBJECT_FREE(a, clox_class_t, class_);
+    break;
+  }
+  case OBJ_INSTANCE: {
+    clox_instance_t *instance = (clox_instance_t *)obj;
+    clox_table_free(&instance->fields);
+    CLOX_OBJECT_FREE(a, clox_instance_t, instance);
+    break;
+  }
+  case OBJ_BOUND_METHOD: {
+    clox_bound_method_t *bm = (clox_bound_method_t *)obj;
+    CLOX_OBJECT_FREE(a, clox_bound_method_t, bm);
+    break;
+  }
   }
 }
 
@@ -135,6 +152,25 @@ static inline void blacken_object(clox_allocator_t *a, clox_object_t *obj) {
     for (size_t i = 0; i < closure->upvalue_count; i++) {
       mark_object(a, (clox_object_t *)closure->upvalues[i]);
     }
+    break;
+  }
+  case OBJ_CLASS: {
+    clox_class_t *class_ = (clox_class_t *)obj;
+    mark_object(a, (clox_object_t *)class_->name);
+    mark_value(a, class_->init);
+    clox_table_mark_entries(&class_->methods);
+    break;
+  }
+  case OBJ_INSTANCE: {
+    clox_instance_t *instance = (clox_instance_t *)obj;
+    mark_object(a, (clox_object_t *)instance->class_);
+    clox_table_mark_entries(&instance->fields);
+    break;
+  }
+  case OBJ_BOUND_METHOD: {
+    clox_bound_method_t *bm = (clox_bound_method_t *)obj;
+    mark_value(a, bm->receiver);
+    mark_value(a, bm->method);
     break;
   }
   case OBJ_STRING:
@@ -336,7 +372,6 @@ void clox_mark_value(clox_allocator_t *alloc, clox_value_t val) {
 
 void clox_mark_object(clox_allocator_t *alloc, clox_object_t *obj) {
   assert(alloc != NULL);
-  assert(obj != NULL);
 
   mark_object(alloc, obj);
 }

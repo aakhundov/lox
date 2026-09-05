@@ -110,10 +110,20 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_DEF_GLOBAL_LONG:
     case OP_GET_GLOBAL:
     case OP_GET_GLOBAL_LONG:
+    case OP_GET_PROP:
+    case OP_GET_PROP_LONG:
     case OP_SET_GLOBAL:
     case OP_SET_GLOBAL_LONG:
     case OP_SET_GLOBAL_POP:
     case OP_SET_GLOBAL_POP_LONG:
+    case OP_SET_PROP:
+    case OP_SET_PROP_LONG:
+    case OP_SET_PROP_POP:
+    case OP_SET_PROP_POP_LONG:
+    case OP_CLASS:
+    case OP_CLASS_LONG:
+    case OP_METHOD:
+    case OP_METHOD_LONG:
       offset = const_instruction(stream, chunk, opcode, NULL, offset);
       break;
     case OP_CLOSURE:

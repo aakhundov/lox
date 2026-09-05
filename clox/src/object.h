@@ -7,6 +7,7 @@
 
 #include "chunk.h"
 #include "error.h"
+#include "table.h"
 #include "value.h"
 
 typedef enum clox_object_type_t {
@@ -15,6 +16,9 @@ typedef enum clox_object_type_t {
   OBJ_NATIVE,
   OBJ_UPVALUE,
   OBJ_CLOSURE,
+  OBJ_CLASS,
+  OBJ_INSTANCE,
+  OBJ_BOUND_METHOD,
 } clox_object_type_t;
 
 typedef struct clox_object_t {
@@ -72,6 +76,27 @@ typedef struct clox_closure_t {
   size_t upvalue_count;
 } clox_closure_t;
 
+#define CLOX_INIT_METHOD_NAME "init"
+
+typedef struct clox_class_t {
+  clox_object_t object;
+  const clox_string_t *name;
+  clox_value_t init;
+  clox_table_t methods;
+} clox_class_t;
+
+typedef struct clox_instance_t {
+  clox_object_t object;
+  const clox_class_t *class_;
+  clox_table_t fields;
+} clox_instance_t;
+
+typedef struct clox_bound_method_t {
+  clox_object_t object;
+  clox_value_t receiver;
+  clox_value_t method;
+} clox_bound_method_t;
+
 #define CLOX_OBJECT_TYPE(val) (CLOX_AS_OBJECT(val)->type)
 
 #define CLOX_STRING_COPY(alloc, chars, length) CLOX_OBJECT(clox_string_copy(alloc, chars, length))
@@ -81,12 +106,19 @@ typedef struct clox_closure_t {
 #define CLOX_NATIVE(alloc, name, arity, fn) CLOX_OBJECT(clox_new_native(alloc, name, arity, fn))
 #define CLOX_UPVALUE(alloc, location) CLOX_OBJECT(clox_new_upvalue(alloc, location))
 #define CLOX_CLOSURE(alloc, function) CLOX_OBJECT(clox_new_closure(alloc, function))
+#define CLOX_CLASS(alloc, name) CLOX_OBJECT(clox_new_class(alloc, name))
+#define CLOX_INSTANCE(alloc, class_) CLOX_OBJECT(clox_new_instance(alloc, class_))
+#define CLOX_BOUND_METHOD(alloc, receiver, method)                                                 \
+  CLOX_OBJECT(clox_new_bound_method(alloc, receiver, method))
 
 #define CLOX_IS_STRING(val) is_object_type((val), OBJ_STRING)
 #define CLOX_IS_FUNCTION(val) is_object_type((val), OBJ_FUNCTION)
 #define CLOX_IS_NATIVE(val) is_object_type((val), OBJ_NATIVE)
 #define CLOX_IS_UPVALUE(val) is_object_type((val), OBJ_UPVALUE)
 #define CLOX_IS_CLOSURE(val) is_object_type((val), OBJ_CLOSURE)
+#define CLOX_IS_CLASS(val) is_object_type((val), OBJ_CLASS)
+#define CLOX_IS_INSTANCE(val) is_object_type((val), OBJ_INSTANCE)
+#define CLOX_IS_BOUND_METHOD(val) is_object_type((val), OBJ_BOUND_METHOD)
 
 #define CLOX_AS_STRING(val) ((const clox_string_t *)CLOX_AS_OBJECT(val))
 #define CLOX_AS_CSTRING(val) (((const clox_string_t *)CLOX_AS_OBJECT(val))->chars)
@@ -94,6 +126,9 @@ typedef struct clox_closure_t {
 #define CLOX_AS_NATIVE(val) ((clox_native_t *)CLOX_AS_OBJECT(val))
 #define CLOX_AS_UPVALUE(val) ((clox_upvalue_t *)CLOX_AS_OBJECT(val))
 #define CLOX_AS_CLOSURE(val) ((clox_closure_t *)CLOX_AS_OBJECT(val))
+#define CLOX_AS_CLASS(val) ((clox_class_t *)CLOX_AS_OBJECT(val))
+#define CLOX_AS_INSTANCE(val) ((clox_instance_t *)CLOX_AS_OBJECT(val))
+#define CLOX_AS_BOUND_METHOD(val) ((clox_bound_method_t *)CLOX_AS_OBJECT(val))
 
 bool clox_object_is_truthy(clox_value_t val);
 bool clox_object_equals(clox_value_t a, clox_value_t b);
@@ -121,6 +156,10 @@ clox_native_t *clox_new_native(clox_allocator_t *alloc, const char *name, size_t
 
 clox_upvalue_t *clox_new_upvalue(clox_allocator_t *alloc, clox_value_t *location);
 clox_closure_t *clox_new_closure(clox_allocator_t *alloc, const clox_function_t *function);
+clox_class_t *clox_new_class(clox_allocator_t *alloc, const clox_string_t *name);
+clox_instance_t *clox_new_instance(clox_allocator_t *alloc, const clox_class_t *class_);
+clox_bound_method_t *clox_new_bound_method(clox_allocator_t *alloc, clox_value_t receiver,
+                                           clox_value_t method);
 
 static inline bool is_object_type(clox_value_t val, clox_object_type_t type) {
   return CLOX_IS_OBJECT(val) && CLOX_OBJECT_TYPE(val) == type;

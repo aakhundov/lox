@@ -7,6 +7,7 @@
 #include "common.h"
 #include "memory.h"
 #include "object.h"
+#include "table.h"
 #include "value.h"
 
 #include "support/harness.h"
@@ -529,7 +530,7 @@ UTEST_F(object, a_closure_renders_as_its_function_and_reprs_as_a_closure) {
   // exist: what it gets is the function underneath. the repr form is the
   // debugging one, and names the closure that is actually there
   EXPECT_STREQ("<fn named>", clox_test_value_string(&buffer, value));
-  EXPECT_STREQ("<cl named>", clox_test_value_repr_string(&buffer, value));
+  EXPECT_STREQ("<co named>", clox_test_value_repr_string(&buffer, value));
 }
 
 UTEST_F(object, a_closure_over_the_script_renders_as_the_script_does) {
@@ -603,6 +604,313 @@ UTEST_F(object, a_closure_is_truthy) {
   EXPECT_TRUE(clox_value_is_truthy(value));
 }
 
+UTEST_F(object, a_class_carries_the_name_it_is_given) {
+  const clox_string_t *name = clox_test_intern_kept(&utest_fixture->alloc, "Named");
+  clox_class_t *class_ = clox_new_class(&utest_fixture->alloc, name);
+  clox_test_keep(&utest_fixture->alloc, class_);
+
+  // the name is shared, not copied: it is an interned string like any other
+  EXPECT_TRUE(class_->name == name);
+}
+
+UTEST_F(object, a_new_class_declares_no_methods_and_no_initializer) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+
+  clox_value_t found;
+  EXPECT_FALSE(clox_table_get(&class_->methods, clox_test_intern_kept(alloc, "m"), &found));
+  // the initializer stands apart from the methods, and nil is how a class
+  // says it declared none: a call of it then takes no arguments
+  EXPECT_TRUE(CLOX_IS_NIL(class_->init));
+}
+
+UTEST_F(object, classes_are_not_interned_the_way_strings_are) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  const clox_string_t *name = clox_test_intern_kept(alloc, "Named");
+
+  clox_class_t *first = clox_new_class(alloc, name);
+  clox_test_keep(alloc, first);
+  clox_class_t *second = clox_new_class(alloc, name);
+  clox_test_keep(alloc, second);
+
+  // two declarations of one name are two classes, however alike they read
+  EXPECT_NE(first, second);
+}
+
+UTEST_F(object, a_class_is_equal_only_to_itself) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  const clox_string_t *name = clox_test_intern_kept(alloc, "Named");
+
+  clox_value_t first = CLOX_CLASS(alloc, name);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(first));
+  clox_value_t second = CLOX_CLASS(alloc, name);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(second));
+
+  EXPECT_TRUE(clox_value_equals(first, first));
+  EXPECT_FALSE(clox_value_equals(first, second));
+}
+
+UTEST_F(object, a_class_renders_and_reprs_as_its_name) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_value_t value = CLOX_CLASS(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(value));
+
+  // a class is a thing a program holds and prints, so both forms name it;
+  // there is no source spelling to repr it back into
+  EXPECT_STREQ("<cl Named>", clox_test_value_string(&buffer, value));
+  EXPECT_STREQ("<cl Named>", clox_test_value_repr_string(&buffer, value));
+}
+
+UTEST_F(object, a_class_is_truthy) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_value_t value = CLOX_CLASS(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(value));
+
+  EXPECT_TRUE(clox_value_is_truthy(value));
+}
+
+UTEST_F(object, an_instance_carries_the_class_it_is_made_from) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+
+  clox_instance_t *instance = clox_new_instance(alloc, class_);
+  clox_test_keep(alloc, instance);
+
+  // the class is shared, not copied: every instance of it reaches the one
+  // object the methods were declared on
+  EXPECT_TRUE(instance->class_ == class_);
+}
+
+UTEST_F(object, a_new_instance_holds_no_fields) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_instance_t *instance = clox_new_instance(alloc, class_);
+  clox_test_keep(alloc, instance);
+
+  clox_value_t found;
+  EXPECT_FALSE(clox_table_get(&instance->fields, clox_test_intern_kept(alloc, "x"), &found));
+}
+
+UTEST_F(object, an_instance_is_equal_only_to_itself) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+
+  // two instances of one class are two objects: an instance stands for
+  // itself, not for what it was made from
+  clox_value_t first = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(first));
+  clox_value_t second = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(second));
+
+  EXPECT_TRUE(clox_value_equals(first, first));
+  EXPECT_FALSE(clox_value_equals(first, second));
+}
+
+UTEST_F(object, an_instance_renders_as_the_name_of_its_class) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t value = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(value));
+
+  // an instance has no name of its own, and the class it came from is the
+  // only thing there is to call it
+  EXPECT_STREQ("<in Named>", clox_test_value_string(&buffer, value));
+  EXPECT_STREQ("<in Named>", clox_test_value_repr_string(&buffer, value));
+}
+
+UTEST_F(object, an_instance_is_truthy) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t value = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(value));
+
+  EXPECT_TRUE(clox_value_is_truthy(value));
+}
+
+UTEST_F(object, a_binding_carries_the_receiver_and_the_method_it_is_given) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(receiver));
+  clox_function_t *fn = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, fn);
+  clox_value_t method = CLOX_OBJECT(fn);
+
+  clox_value_t bound = CLOX_BOUND_METHOD(alloc, receiver, method);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(bound));
+
+  // a binding is the pair and nothing else: neither half is copied, and
+  // looking a method up again makes another binding over the same two
+  EXPECT_VALUE_EQ(receiver, CLOX_AS_BOUND_METHOD(bound)->receiver);
+  EXPECT_VALUE_EQ(method, CLOX_AS_BOUND_METHOD(bound)->method);
+}
+
+UTEST_F(object, a_binding_renders_as_its_method_and_reprs_as_a_binding) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(receiver));
+  clox_function_t *fn = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, fn);
+  clox_value_t closure = CLOX_CLOSURE(alloc, fn);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(closure));
+
+  clox_value_t bound = CLOX_BOUND_METHOD(alloc, receiver, closure);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(bound));
+
+  // a program is not told that bindings exist any more than it is told about
+  // closures: what it gets is the method. the repr form is the debugging one
+  EXPECT_STREQ("<fn m>", clox_test_value_string(&buffer, bound));
+  EXPECT_STREQ("<bm m>", clox_test_value_repr_string(&buffer, bound));
+}
+
+UTEST_F(object, a_binding_over_a_function_capturing_nothing_reprs_the_same_way) {
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(receiver));
+  clox_function_t *fn = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, fn);
+
+  // a method is wrapped only when it captures something, so a binding has to
+  // read the same whichever of the two it was handed
+  clox_value_t bound = CLOX_BOUND_METHOD(alloc, receiver, CLOX_OBJECT(fn));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(bound));
+
+  EXPECT_STREQ("<fn m>", clox_test_value_string(&buffer, bound));
+  EXPECT_STREQ("<bm m>", clox_test_value_repr_string(&buffer, bound));
+}
+
+UTEST_F(object, a_binding_is_equal_to_any_binding_of_the_same_method) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t first_receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(first_receiver));
+  clox_value_t second_receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(second_receiver));
+  clox_function_t *fn = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, fn);
+
+  // equality is asked of the method under the binding, as it is of the
+  // function under a closure: two lookups of one method stand for the one
+  // declaration a program wrote, whichever instance they were reached through
+  clox_value_t first = CLOX_BOUND_METHOD(alloc, first_receiver, CLOX_OBJECT(fn));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(first));
+  clox_value_t second = CLOX_BOUND_METHOD(alloc, second_receiver, CLOX_OBJECT(fn));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(second));
+
+  ASSERT_NE(CLOX_AS_OBJECT(first), CLOX_AS_OBJECT(second));
+  EXPECT_TRUE(clox_value_equals(first, second));
+}
+
+UTEST_F(object, a_binding_is_not_equal_to_a_binding_of_another_method) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(receiver));
+  clox_function_t *one = clox_new_function(alloc, "one", 3, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, one);
+  clox_function_t *two = clox_new_function(alloc, "two", 3, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, two);
+
+  // one receiver, two methods: what is compared is not the instance both
+  // bindings were taken from
+  clox_value_t first = CLOX_BOUND_METHOD(alloc, receiver, CLOX_OBJECT(one));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(first));
+  clox_value_t second = CLOX_BOUND_METHOD(alloc, receiver, CLOX_OBJECT(two));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(second));
+
+  EXPECT_FALSE(clox_value_equals(first, second));
+}
+
+UTEST_F(object, a_binding_is_not_equal_to_the_method_it_binds) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(receiver));
+  clox_function_t *fn = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, fn);
+
+  clox_value_t bound = CLOX_BOUND_METHOD(alloc, receiver, CLOX_OBJECT(fn));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(bound));
+
+  EXPECT_FALSE(clox_value_equals(bound, CLOX_OBJECT(fn)));
+}
+
+UTEST_F(object, a_binding_is_truthy) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(receiver));
+  clox_function_t *fn = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, fn);
+
+  clox_value_t bound = CLOX_BOUND_METHOD(alloc, receiver, CLOX_OBJECT(fn));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(bound));
+
+  EXPECT_TRUE(clox_value_is_truthy(bound));
+}
+
+// The two below are oracles only under the stress build, where the allocation
+// a constructor takes collects: an object handed to a constructor stops being
+// the caller's to root the moment it is handed over, and what it is made of
+// has to survive the object being made. Each leaves exactly one of the two
+// halves unrooted, so a missing push is not covered for by the other.
+
+UTEST_F(object, a_binding_holds_its_receiver_while_it_allocates) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_function_t *fn = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, fn);
+
+  // the receiver is the last thing allocated before the call, and nothing
+  // roots it: the binding's own allocation is the collection it must survive
+  clox_value_t receiver = CLOX_INSTANCE(alloc, class_);
+  clox_value_t bound = CLOX_BOUND_METHOD(alloc, receiver, CLOX_OBJECT(fn));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(bound));
+
+  ASSERT_TRUE(CLOX_IS_INSTANCE(CLOX_AS_BOUND_METHOD(bound)->receiver));
+  EXPECT_STREQ("Named",
+               CLOX_AS_INSTANCE(CLOX_AS_BOUND_METHOD(bound)->receiver)->class_->name->chars);
+}
+
+UTEST_F(object, a_binding_holds_its_method_while_it_allocates) {
+  clox_allocator_t *alloc = &utest_fixture->alloc;
+  clox_class_t *class_ = clox_new_class(alloc, clox_test_intern_kept(alloc, "Named"));
+  clox_test_keep(alloc, class_);
+  clox_value_t receiver = CLOX_INSTANCE(alloc, class_);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(receiver));
+  clox_function_t *fn = clox_new_function(alloc, "m", 1, 0, FILE_NAME, SOURCE);
+  clox_test_keep(alloc, fn);
+
+  // the same, with the halves the other way round: the closure wrapping the
+  // method is what stands unrooted when the binding is made
+  clox_value_t method = CLOX_CLOSURE(alloc, fn);
+  clox_value_t bound = CLOX_BOUND_METHOD(alloc, receiver, method);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(bound));
+
+  ASSERT_TRUE(CLOX_IS_CLOSURE(CLOX_AS_BOUND_METHOD(bound)->method));
+  EXPECT_STREQ("m", CLOX_AS_CLOSURE(CLOX_AS_BOUND_METHOD(bound)->method)->function->name);
+}
+
 UTEST_F(object, no_two_object_types_are_ever_equal_to_each_other) {
   clox_allocator_t *alloc = &utest_fixture->alloc;
   clox_value_t slot = CLOX_NIL;
@@ -617,9 +925,16 @@ UTEST_F(object, no_two_object_types_are_ever_equal_to_each_other) {
   clox_test_keep(alloc, CLOX_AS_OBJECT(upvalue));
   clox_value_t closure = CLOX_CLOSURE(alloc, fn);
   clox_test_keep(alloc, CLOX_AS_OBJECT(closure));
+  clox_value_t class_ = CLOX_CLASS(alloc, CLOX_AS_STRING(string));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(class_));
+  clox_value_t instance = CLOX_INSTANCE(alloc, CLOX_AS_CLASS(class_));
+  clox_test_keep(alloc, CLOX_AS_OBJECT(instance));
+  clox_value_t bound = CLOX_BOUND_METHOD(alloc, instance, function);
+  clox_test_keep(alloc, CLOX_AS_OBJECT(bound));
 
   // every pair of them shares a name, so only the type tells them apart
-  const clox_value_t values[] = {string, function, native, upvalue, closure};
+  const clox_value_t values[] = {string,  function, native,   upvalue,
+                                 closure, class_,   instance, bound};
   const size_t count = sizeof(values) / sizeof(*values);
   for (size_t i = 0; i < count; i++) {
     for (size_t j = 0; j < count; j++) {
@@ -687,6 +1002,36 @@ UTEST(object_lifetime, freeing_the_allocator_releases_closures_and_upvalues) {
   }
   // a closure capturing nothing allocates no array, and is freed all the same
   (void)clox_new_closure(&alloc, clox_new_function(&alloc, "bare", 4, 0, FILE_NAME, SOURCE));
+
+  clox_allocator_free(&alloc);
+}
+
+UTEST(object_lifetime, freeing_the_allocator_releases_classes_instances_and_bindings) {
+  // LSan again: a class owns the table its methods stand in and an instance
+  // owns the table its fields stand in, and each of those is a second
+  // allocation the object has to take with it. Both tables are filled past
+  // their first growth on purpose. A binding owns nothing beyond itself --
+  // the two halves it holds are objects in their own right.
+  clox_allocator_t alloc;
+  clox_allocator_init(&alloc);
+
+  for (size_t i = 0; i < 32; i++) {
+    clox_class_t *class_ = clox_new_class(&alloc, clox_test_intern_indexed_kept(&alloc, i));
+    clox_test_keep(&alloc, class_);
+    clox_instance_t *instance = clox_new_instance(&alloc, class_);
+    clox_test_keep(&alloc, instance);
+
+    for (size_t j = 0; j < 16; j++) {
+      clox_function_t *method = clox_new_function(&alloc, "m", 1, 0, FILE_NAME, SOURCE);
+      clox_test_keep(&alloc, method);
+      const clox_string_t *key = clox_test_intern_indexed_kept(&alloc, (i * 16) + j);
+      (void)clox_table_set(&class_->methods, key, CLOX_OBJECT(method));
+      (void)clox_table_set(&instance->fields, key, CLOX_NUMBER((double)j));
+      (void)clox_new_bound_method(&alloc, CLOX_OBJECT(instance), CLOX_OBJECT(method));
+    }
+  }
+  // a class nothing was ever declared on allocates no table, and is freed all the same
+  (void)clox_new_class(&alloc, clox_test_intern_kept(&alloc, "Bare"));
 
   clox_allocator_free(&alloc);
 }

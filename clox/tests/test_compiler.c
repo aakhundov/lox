@@ -1853,3 +1853,318 @@ UTEST_F(compiler, a_loop_inside_a_function_carries_its_own_break) {
   EXPECT_TRUE(compile(utest_fixture, "while (true) { fun f() { while (true) { break; } } }"));
   EXPECT_EQ((size_t)0, utest_fixture->errors.count);
 }
+
+UTEST_F(compiler, a_class_declaration_defines_a_global_holding_the_class) {
+  ASSERT_TRUE(compile(utest_fixture, "class A {}"));
+
+  // the class is made, bound to its name, and then pushed again for the body
+  // to bind methods onto; the pop at the end is that second copy going away
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_DEF_GLOBAL, 0, OP_GET_GLOBAL, 0,
+              OP_POP, OP_RETURN_NIL);
+  // the name is one interned string, however many instructions name it
+  ASSERT_EQ((size_t)1, utest_fixture->function->chunk.constants.length);
+  EXPECT_STREQ("A", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[0]));
+}
+
+UTEST_F(compiler, a_class_declared_in_a_block_is_a_local) {
+  ASSERT_TRUE(compile(utest_fixture, "{ class A {} }"));
+
+  // the class OP_CLASS pushed is the slot the local stands in, so the body
+  // reads it back off that slot and the scope pops it on the way out
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_GET_LOCAL, 1, OP_POP, OP_POP,
+              OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_method_is_bound_to_the_class_by_name) {
+  ASSERT_TRUE(compile(utest_fixture, "class A { m() {} }"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_DEF_GLOBAL, 0, OP_GET_GLOBAL, 0,
+              OP_CONSTANT, 1, OP_METHOD, 2, OP_POP, OP_RETURN_NIL);
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(method != NULL);
+  EXPECT_STREQ("m", method->name);
+  EXPECT_STREQ("m", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[2]));
+}
+
+UTEST_F(compiler, methods_are_bound_in_the_order_they_are_declared) {
+  ASSERT_TRUE(compile(utest_fixture, "class A { one() {} two() {} }"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_DEF_GLOBAL, 0, OP_GET_GLOBAL, 0,
+              OP_CONSTANT, 1, OP_METHOD, 2, OP_CONSTANT, 3, OP_METHOD, 4, OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_method_capturing_nothing_is_emitted_as_a_plain_constant) {
+  ASSERT_TRUE(compile(utest_fixture, "class A { m() { return 1; } }"));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(method != NULL);
+  EXPECT_EQ((size_t)0, method->upvalue_count);
+}
+
+UTEST_F(compiler, a_method_capturing_a_local_is_wrapped_before_it_is_bound) {
+  // what decides the form is the method's own captures, exactly as it is for a
+  // function: the binding takes whichever of the two was pushed
+  ASSERT_TRUE(compile(utest_fixture, "fun outer() { var x = 1; class A { m() { return x; } } }"));
+
+  clox_function_t *outer = function_constant(&utest_fixture->function->chunk, 0);
+  ASSERT_TRUE(outer != NULL);
+  EXPECT_CODE(&outer->chunk, OP_CONSTANT, 0, OP_CLASS, 1, OP_GET_LOCAL, 2, OP_CLOSURE, 2, 1, 1,
+              OP_METHOD, 3, OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_class_name_at_a_long_index_takes_the_long_forms) {
+  char source[SOURCE_SIZE];
+  ASSERT_TRUE(compile(utest_fixture, past_a_byte_of_constants(&source, "class A {}")));
+
+  // every instruction naming the class reaches its long variant, and the
+  // body's pop and the return are the two bytes after them
+  const clox_chunk_t *chunk = &utest_fixture->function->chunk;
+  ASSERT_TRUE(chunk->length >= 14);
+  EXPECT_EQ(OP_CLASS_LONG, chunk->code[chunk->length - 14]);
+  EXPECT_EQ(OP_DEF_GLOBAL_LONG, chunk->code[chunk->length - 10]);
+  EXPECT_EQ(OP_GET_GLOBAL_LONG, chunk->code[chunk->length - 6]);
+  EXPECT_EQ(OP_POP, chunk->code[chunk->length - 2]);
+  EXPECT_EQ(OP_RETURN_NIL, chunk->code[chunk->length - 1]);
+}
+
+UTEST_F(compiler, a_method_at_a_long_index_takes_the_long_binding) {
+  char source[SOURCE_SIZE];
+  ASSERT_TRUE(compile(utest_fixture, past_a_byte_of_constants(&source, "class A { m() {} }")));
+
+  const clox_chunk_t *chunk = &utest_fixture->function->chunk;
+  ASSERT_TRUE(chunk->length >= 6);
+  EXPECT_EQ(OP_METHOD_LONG, chunk->code[chunk->length - 6]);
+}
+
+UTEST_F(compiler, this_is_the_reserved_slot_of_a_method_frame) {
+  // a function's first slot holds the function itself and is unreachable by
+  // name; a method's holds the receiver, and this is the name of it
+  ASSERT_TRUE(compile(utest_fixture, "class A { m() { return this; } }"));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(method != NULL);
+  EXPECT_CODE(&method->chunk, OP_GET_LOCAL, 0, OP_RETURN, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, this_inside_a_function_in_a_method_is_reached_through_an_upvalue) {
+  ASSERT_TRUE(compile(utest_fixture, "class A { m() { fun f() { return this; } } }"));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(method != NULL);
+  // the receiver is a local of the method like any other, so a function
+  // declared in the body captures it rather than reaching for a slot of its own
+  EXPECT_CODE(&method->chunk, OP_CLOSURE, 0, 1, 0, OP_RETURN_NIL);
+
+  clox_function_t *inner = function_constant(&method->chunk, 0);
+  ASSERT_TRUE(inner != NULL);
+  EXPECT_EQ((size_t)1, inner->upvalue_count);
+  EXPECT_CODE(&inner->chunk, OP_GET_UPVALUE, 0, OP_RETURN, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_class_declared_inside_a_method_gives_its_own_methods_their_own_receiver) {
+  ASSERT_TRUE(
+      compile(utest_fixture, "class Outer { m() { class Inner { n() { return this; } } } }"));
+
+  clox_function_t *outer_method = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(outer_method != NULL);
+  clox_function_t *inner_method = function_constant(&outer_method->chunk, 1);
+  ASSERT_TRUE(inner_method != NULL);
+  EXPECT_STREQ("n", inner_method->name);
+  // the innermost receiver is the one this names, and it is a slot of that
+  // frame rather than a capture of the method around it
+  EXPECT_EQ((size_t)0, inner_method->upvalue_count);
+  EXPECT_CODE(&inner_method->chunk, OP_GET_LOCAL, 0, OP_RETURN, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_locally_declared_class_is_visible_to_its_own_methods) {
+  // the name is declared before the body is compiled, so a method naming the
+  // class it is declared on captures the local rather than reaching a global
+  ASSERT_TRUE(compile(utest_fixture, "{ class A { m() { return A; } } }"));
+
+  // the method captured the slot the class stands in, so the scope closes
+  // that local on its way out rather than popping it
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_GET_LOCAL, 1, OP_CLOSURE, 1, 1, 1,
+              OP_METHOD, 2, OP_POP, OP_CLOSE_UPVALUE, OP_RETURN_NIL);
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(method != NULL);
+  EXPECT_CODE(&method->chunk, OP_GET_UPVALUE, 0, OP_RETURN, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, an_initializer_returns_the_receiver_it_was_called_on) {
+  ASSERT_TRUE(compile(utest_fixture, "class A { init() {} }"));
+
+  clox_function_t *init = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(init != NULL);
+  // an initializer has no implicit nil return: the reserved slot is what it
+  // hands back, so a call of the class evaluates to the instance
+  EXPECT_CODE(&init->chunk, OP_GET_LOCAL, 0, OP_RETURN);
+}
+
+UTEST_F(compiler, a_bare_return_in_an_initializer_still_returns_the_receiver) {
+  ASSERT_TRUE(compile(utest_fixture, "class A { init() { return; } }"));
+
+  clox_function_t *init = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(init != NULL);
+  EXPECT_CODE(&init->chunk, OP_GET_LOCAL, 0, OP_RETURN, OP_GET_LOCAL, 0, OP_RETURN);
+}
+
+UTEST_F(compiler, only_the_whole_name_init_makes_an_initializer) {
+  ASSERT_TRUE(compile(utest_fixture, "class A { inits() { return; } }"));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 1);
+  ASSERT_TRUE(method != NULL);
+  // a name the initializer's name is a prefix of is an ordinary method
+  EXPECT_CODE(&method->chunk, OP_RETURN_NIL, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_property_get_names_the_property_it_reads) {
+  ASSERT_TRUE(compile(utest_fixture, "a.b;"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_GET_PROP, 1, OP_POP,
+              OP_RETURN_NIL);
+  EXPECT_STREQ("b", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[1]));
+}
+
+UTEST_F(compiler, a_property_get_chains_left_to_right) {
+  ASSERT_TRUE(compile(utest_fixture, "a.b.c;"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_GET_PROP, 1, OP_GET_PROP, 2,
+              OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_property_set_pushes_the_instance_under_the_value) {
+  ASSERT_TRUE(compile(utest_fixture, "print a.b = 1;"));
+
+  // the set finds the instance below what it stores, and evaluates to the
+  // value: printing it is what says the value was left behind
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CONSTANT, 1, OP_SET_PROP, 2,
+              OP_PRINT, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_discarded_property_set_pops_in_the_set_itself) {
+  ASSERT_TRUE(compile(utest_fixture, "a.b = 1;"));
+
+  // a statement wanting nothing back folds the pop into the set, as it does
+  // for a global or a local
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_CONSTANT, 1, OP_SET_PROP_POP, 2,
+              OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, only_the_outermost_set_of_a_chain_is_the_discarded_one) {
+  ASSERT_TRUE(compile(utest_fixture, "a.b = c.d = 1;"));
+
+  // the inner set is an expression whose value the outer one stores, so only
+  // the last of them may pop what it wrote
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_GET_GLOBAL, 1, OP_CONSTANT, 2,
+              OP_SET_PROP, 3, OP_SET_PROP_POP, 4, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_set_of_a_property_of_a_property_reads_the_one_before_it) {
+  ASSERT_TRUE(compile(utest_fixture, "a.b.c = 1;"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_GET_PROP, 1, OP_CONSTANT, 2,
+              OP_SET_PROP_POP, 3, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_discarded_property_set_at_a_long_index_folds_into_the_long_form) {
+  char source[SOURCE_SIZE];
+  ASSERT_TRUE(compile(utest_fixture, past_a_byte_of_constants(&source, "a.b = 1;")));
+
+  const clox_chunk_t *chunk = &utest_fixture->function->chunk;
+  ASSERT_TRUE(chunk->length >= 5);
+  EXPECT_EQ(OP_SET_PROP_POP_LONG, chunk->code[chunk->length - 5]);
+  EXPECT_EQ(OP_RETURN_NIL, chunk->code[chunk->length - 1]);
+}
+
+UTEST_F(compiler, a_method_call_is_a_property_get_and_a_call) {
+  ASSERT_TRUE(compile(utest_fixture, "a.m(1);"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_GET_PROP, 1, OP_CONSTANT, 2,
+              OP_CALL, 1, OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_property_binds_tighter_than_a_unary_operator) {
+  ASSERT_TRUE(compile(utest_fixture, "-a.b;"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_GET_GLOBAL, 0, OP_GET_PROP, 1, OP_NEGATE, OP_POP,
+              OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, this_outside_a_class_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "print this;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "this") != NULL);
+}
+
+UTEST_F(compiler, this_in_a_function_outside_a_class_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "fun f() { return this; }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "this") != NULL);
+}
+
+UTEST_F(compiler, this_after_the_class_it_was_written_in_is_reported) {
+  // the class the name belongs to ends with its body, and what follows is
+  // outside it however close it stands
+  EXPECT_FALSE(compile(utest_fixture, "class A {} print this;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "this") != NULL);
+}
+
+UTEST_F(compiler, returning_a_value_from_an_initializer_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class A { init() { return 1; } }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "initializer") != NULL);
+}
+
+UTEST_F(compiler, returning_a_value_from_a_function_inside_an_initializer_is_accepted) {
+  // the rule is about the frame the return stands in, not the one around it
+  EXPECT_TRUE(compile(utest_fixture, "class A { init() { fun f() { return 1; } } }"));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(compiler, a_class_without_a_name_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class {}"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "class name") != NULL);
+}
+
+UTEST_F(compiler, a_class_without_a_body_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class A;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "class body") != NULL);
+}
+
+UTEST_F(compiler, a_class_body_that_is_never_closed_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class A { m() {}"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "class body") != NULL);
+}
+
+UTEST_F(compiler, a_class_member_that_is_not_a_method_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class A { var x; }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "method name") != NULL);
+}
+
+UTEST_F(compiler, a_property_that_is_not_a_name_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "a.1;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "property name") != NULL);
+}
+
+UTEST_F(compiler, assigning_to_this_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class A { m() { this = 1; } }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+}

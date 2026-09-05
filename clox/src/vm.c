@@ -203,19 +203,38 @@ static inline bool call_value(clox_vm_t *vm, clox_value_t val, size_t arg_count)
 
   if (CLOX_IS_OBJECT(val)) {
     switch (CLOX_AS_OBJECT(val)->type) {
+    case OBJ_CLASS: {
+      clox_class_t *class_ = CLOX_AS_CLASS(val);
+      // create a new instance of the class and place it on the stack
+      *(vm->stack_top - 1 - arg_count) = CLOX_INSTANCE(vm->allocator, class_);
+      if (CLOX_IS_NIL(class_->init)) {
+        if (arg_count > 0) {
+          error(vm, "expected 0 args but got %zu", arg_count);
+          return false;
+        }
+        return true; // no initializer
+      }
+      return call_value(vm, class_->init, arg_count);
+    }
     case OBJ_FUNCTION:
       return call_function(vm, CLOX_AS_FUNCTION(val), arg_count);
     case OBJ_CLOSURE:
       return call_closure(vm, CLOX_AS_CLOSURE(val), arg_count);
     case OBJ_NATIVE:
       return call_native(vm, CLOX_AS_NATIVE(val), arg_count);
+    case OBJ_BOUND_METHOD: {
+      clox_bound_method_t *bm = CLOX_AS_BOUND_METHOD(val);
+      *(vm->stack_top - 1 - arg_count) = bm->receiver;
+      return call_value(vm, bm->method, arg_count);
+    }
     case OBJ_STRING:
     case OBJ_UPVALUE:
+    case OBJ_INSTANCE:
       break; // non-callable object type
     }
   }
 
-  error(vm, "can only call functions");
+  error(vm, "can only call functions and classes");
   return false;
 }
 
@@ -328,6 +347,29 @@ static bool run(clox_vm_t *vm) {
       PUSH(value);
       break;
     }
+    case OP_GET_PROP:
+    case OP_GET_PROP_LONG: {
+      if (!CLOX_IS_INSTANCE(PEEK(0))) {
+        ERROR("only instances have properties");
+      }
+
+      clox_instance_t *instance = CLOX_AS_INSTANCE(PEEK(0));
+      const clox_string_t *name = READ_STRING(opcode);
+
+      clox_value_t value;
+      if (clox_table_get(&instance->fields, name, &value)) {
+        POP(); // instance
+        PUSH(value);
+      } else if (clox_table_get(&instance->class_->methods, name, &value)) {
+        clox_value_t bm = CLOX_BOUND_METHOD(vm->allocator, PEEK(0), value);
+        POP(); // instance
+        PUSH(bm);
+      } else {
+        ERROR("undefined property '%s'", name->chars);
+      }
+
+      break;
+    }
     case OP_GET_LOCAL:
       PUSH(frame->slots[READ_BYTE()]);
       break;
@@ -357,6 +399,33 @@ static bool run(clox_vm_t *vm) {
       }
       break;
     }
+    case OP_SET_PROP:
+    case OP_SET_PROP_LONG: {
+      if (!CLOX_IS_INSTANCE(PEEK(1))) {
+        ERROR("only instances have fields");
+      }
+
+      clox_instance_t *instance = CLOX_AS_INSTANCE(PEEK(1));
+      clox_table_set(&instance->fields, READ_STRING(opcode), PEEK(0));
+
+      clox_value_t value = POP();
+      POP(); // instance
+      PUSH(value);
+      break;
+    }
+    case OP_SET_PROP_POP:
+    case OP_SET_PROP_POP_LONG: {
+      if (!CLOX_IS_INSTANCE(PEEK(1))) {
+        ERROR("only instances have fields");
+      }
+
+      clox_instance_t *instance = CLOX_AS_INSTANCE(PEEK(1));
+      clox_table_set(&instance->fields, READ_STRING(opcode), PEEK(0));
+
+      // discard instance and value
+      vm->stack_top -= 2;
+      break;
+    }
     case OP_SET_LOCAL:
       // no POP: assignment is expression
       frame->slots[READ_BYTE()] = PEEK(0);
@@ -375,6 +444,22 @@ static bool run(clox_vm_t *vm) {
       assert(frame->closure != NULL);
       *frame->closure->upvalues[READ_BYTE()]->location = POP();
       break;
+    case OP_CLASS:
+    case OP_CLASS_LONG:
+      PUSH(CLOX_CLASS(vm->allocator, READ_STRING(opcode)));
+      break;
+    case OP_METHOD:
+    case OP_METHOD_LONG: {
+      clox_class_t *class_ = CLOX_AS_CLASS(PEEK(1));
+      const clox_string_t *name = READ_STRING(opcode);
+      // method is closure or function: both are GC-safe to POP
+      if (name == vm->init_method_name) {
+        class_->init = PEEK(0);
+      }
+      clox_table_set(&class_->methods, name, PEEK(0));
+      POP();
+      break;
+    }
     case OP_NIL:
       PUSH(CLOX_NIL);
       break;
@@ -592,6 +677,9 @@ static inline void mark_callback(clox_allocator_t *alloc, void *ctx) {
   for (clox_upvalue_t *upvalue = vm->open_upvalues; upvalue != NULL; upvalue = upvalue->next) {
     clox_mark_object(alloc, (clox_object_t *)upvalue);
   }
+
+  // string constants
+  clox_mark_object(alloc, (clox_object_t *)vm->init_method_name);
 }
 
 void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
@@ -608,6 +696,10 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
   vm->rng_state = CLOX_RNG_INITIAL_STATE;
   vm->mark_callback_handle = clox_register_mark_callback(vm->allocator, mark_callback, vm);
 
+  vm->init_method_name = NULL; // GC-safe
+  vm->init_method_name = CLOX_AS_STRING(
+      CLOX_STRING_COPY(vm->allocator, CLOX_INIT_METHOD_NAME, strlen(CLOX_INIT_METHOD_NAME)));
+
 #if CLOX_ENABLE_LIBRARY
   // define built-in native functions
   for (size_t i = 0; i < CLOX_LIBRARY_SIZE; i++) {
@@ -619,6 +711,8 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
 
 void clox_vm_free(clox_vm_t *vm) {
   assert(vm != NULL);
+
+  vm->init_method_name = NULL;
 
   bool unregistered = clox_unregister_mark_callback(vm->allocator, vm->mark_callback_handle);
   assert(unregistered);
@@ -690,6 +784,7 @@ bool clox_interpret(clox_vm_t *vm, const clox_function_t *script) {
   call_function(vm, script, 0);
 
   if (!run(vm)) {
+    reset_vm(vm);
     return false;
   }
 

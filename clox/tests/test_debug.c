@@ -174,6 +174,32 @@ UTEST_F(debug, every_constant_opcode_disassembles_under_its_own_name) {
   }
 }
 
+UTEST_F(debug, every_constant_opcode_disassembles_under_its_long_name) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+
+  // The walk above reaches only the short forms, since that is what a chunk
+  // of few constants writes. Past a byte of them every constant instruction
+  // takes its long variant instead, and those are cases of their own: an
+  // opcode named in one form and not the other disassembles as unknown here.
+  for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
+    ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_NUMBER((double)i), POS));
+  }
+
+  for (size_t opcode = 0; opcode < CONST_OP_CODE_COUNT; opcode += 2) {
+    // a constant of its own per opcode, so none of them is written at an
+    // index another one already took
+    clox_value_t constant = takes_upvalue_operands((clox_op_code_t)opcode)
+                                ? function_capturing(utest_fixture, "named", 0)
+                                : CLOX_NUMBER(-(double)opcode - 1.0);
+
+    size_t offset = chunk->length;
+    ASSERT_TRUE(clox_write_constant(chunk, (clox_op_code_t)opcode, constant, POS));
+
+    ASSERT_EQ(offset + 4, disassemble_one(utest_fixture, offset));
+    ASSERT_TRUE(strstr(utest_fixture->text, clox_op_code_names[opcode + 1]) != NULL);
+  }
+}
+
 UTEST_F(debug, a_closure_capturing_nothing_advances_like_any_constant_instruction) {
   clox_chunk_t *chunk = &utest_fixture->chunk;
   ASSERT_TRUE(

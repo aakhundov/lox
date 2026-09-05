@@ -1330,3 +1330,251 @@ UTEST_F(lox, exit_ends_the_run_as_a_runtime_error) {
   ASSERT_TRUE(utest_fixture->errors.count > 0);
   EXPECT_STREQ("exited", utest_fixture->errors.messages[0]);
 }
+
+UTEST_F(lox, a_class_declaration_binds_a_class_to_its_name) {
+  ASSERT_TRUE(run(utest_fixture, "class A {} print A;"));
+
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_CLASS(result));
+  EXPECT_STREQ("A", CLOX_AS_CLASS(result)->name->chars);
+}
+
+UTEST_F(lox, a_class_declared_in_a_block_does_not_outlive_it) {
+  ASSERT_FALSE(run(utest_fixture, "{ class A {} } print A;"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "undefined variable") != NULL);
+}
+
+UTEST_F(lox, a_class_is_a_value_like_any_other) {
+  ASSERT_TRUE(run(utest_fixture, "class A {} fun id(x) { return x; } print id(A) == A;"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, calling_a_class_makes_an_instance_of_it) {
+  ASSERT_TRUE(run(utest_fixture, "class A {} var a = A(); print a; print type(a);"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  ASSERT_TRUE(CLOX_IS_INSTANCE(utest_fixture->printed.values[0]));
+  // the type of an instance is the class it was made from
+  EXPECT_STREQ("A", CLOX_AS_CSTRING(utest_fixture->printed.values[1]));
+}
+
+UTEST_F(lox, two_instances_of_one_class_are_not_equal) {
+  ASSERT_TRUE(
+      run(utest_fixture, "class A {} var a = A(); var b = A(); print a == b; print a == a;"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_field_can_be_written_and_read_back) {
+  ASSERT_TRUE(run(utest_fixture, "class A {} var a = A(); a.x = 42; print a.x;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_field_is_written_over_by_a_later_assignment) {
+  ASSERT_TRUE(run(utest_fixture, "class A {} var a = A(); a.x = 1; a.x = 2; print a.x;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_field_assignment_evaluates_to_what_it_stored) {
+  ASSERT_TRUE(run(utest_fixture, "class A {} var a = A(); print a.x = 42;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, fields_belong_to_the_instance_and_not_to_the_class) {
+  ASSERT_TRUE(run(utest_fixture, "class A {} var a = A(); var b = A(); a.x = 1; b.x = 2;"
+                                 "print a.x; print b.x;"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, reading_a_field_that_was_never_written_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "class A {} print A().x;"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "undefined property") != NULL);
+}
+
+UTEST_F(lox, a_property_of_something_that_is_not_an_instance_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "print 1 .x;"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "instances") != NULL);
+}
+
+UTEST_F(lox, a_method_is_called_through_an_instance) {
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 42; } } print A().m();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_method_takes_arguments_like_any_function) {
+  ASSERT_TRUE(run(utest_fixture, "class A { add(x, y) { return x + y; } } print A().add(1, 2);"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_method_called_with_the_wrong_argument_count_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "class A { m(x) { return x; } } A().m();"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 1") != NULL);
+}
+
+UTEST_F(lox, this_reaches_the_instance_the_method_was_called_on) {
+  ASSERT_TRUE(run(utest_fixture, "class A { me() { return this; } } var a = A();"
+                                 "print a.me() == a;"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_method_reads_and_writes_the_fields_of_its_receiver) {
+  ASSERT_TRUE(run(utest_fixture, "class Counter {"
+                                 "  start() { this.n = 0; }"
+                                 "  bump() { this.n = this.n + 1; }"
+                                 "}"
+                                 "var c = Counter(); c.start(); c.bump(); c.bump();"
+                                 "print c.n;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(2.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_field_is_read_before_a_method_of_the_same_name) {
+  ASSERT_TRUE(
+      run(utest_fixture, "class A { m() { return 1; } } var a = A(); a.m = 42; print a.m;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_method_taken_off_an_instance_keeps_the_receiver_it_came_from) {
+  ASSERT_TRUE(run(utest_fixture, "class A { init(v) { this.v = v; } get() { return this.v; } }"
+                                 "var f = A(42).get;"
+                                 "print f();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, one_method_reached_through_two_instances_is_the_same_method) {
+  // equality is asked of the method, as it is of the function under a
+  // closure: what the binding was taken through is not part of it
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 1; } } var a = A(); var b = A();"
+                                 "print a.m == b.m; print a.m == a.m;"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_method_prints_as_the_function_it_stands_for) {
+  // one print and nothing after it: a printed value is held by the collector
+  // of printed values alone, which is not a root, so a later allocation in
+  // the same run is free to take it
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 1; } } print A().m;"));
+
+  char buffer[CLOX_TEST_MESSAGE_SIZE];
+  EXPECT_STREQ("<fn m>", clox_test_value_string(&buffer, only_printed(utest_fixture)));
+}
+
+UTEST_F(lox, the_type_of_a_method_taken_off_an_instance_is_function) {
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 1; } } print type(A().m);"));
+  EXPECT_STREQ("function", CLOX_AS_CSTRING(only_printed(utest_fixture)));
+}
+
+UTEST_F(lox, an_initializer_runs_on_the_new_instance) {
+  ASSERT_TRUE(run(utest_fixture, "class A { init() { this.x = 42; } } print A().x;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_initializer_makes_the_call_take_its_arguments) {
+  ASSERT_TRUE(
+      run(utest_fixture, "class A { init(x, y) { this.sum = x + y; } } print A(1, 2).sum;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(3.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_call_of_a_class_evaluates_to_the_instance_and_not_to_what_the_initializer_returns) {
+  ASSERT_TRUE(run(utest_fixture, "class A { init() { this.x = 1; } } print type(A());"));
+  EXPECT_STREQ("A", CLOX_AS_CSTRING(only_printed(utest_fixture)));
+}
+
+UTEST_F(lox, calling_a_class_of_no_initializer_with_arguments_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "class A {} A(1);"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 0") != NULL);
+}
+
+UTEST_F(lox, calling_a_class_with_the_wrong_argument_count_for_its_initializer_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "class A { init(x) { this.x = x; } } A();"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 1") != NULL);
+}
+
+UTEST_F(lox, an_initializer_is_reachable_as_a_property_like_any_other_method) {
+  // the name answered with is printed last, so nothing the run does after it
+  // can take the string out from under the check
+  ASSERT_TRUE(run(utest_fixture, "class A { init() { this.x = 1; } } var a = A();"
+                                 "print a.init() == a; print type(a.init);"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  // calling it again runs it on the instance it was taken from, and hands
+  // that same instance back
+  EXPECT_VALUE_EQ(CLOX_BOOL(true), utest_fixture->printed.values[0]);
+  EXPECT_STREQ("function", CLOX_AS_CSTRING(utest_fixture->printed.values[1]));
+}
+
+UTEST_F(lox, calling_an_instance_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "class A {} A()();"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "call") != NULL);
+}
+
+UTEST_F(lox, a_runtime_error_inside_a_method_is_traced_out_to_the_script) {
+  ASSERT_FALSE(run(utest_fixture, "class A { m() { return 1 + nil; } } A().m();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  ASSERT_EQ((size_t)2, utest_fixture->errors.stack_sizes[0]);
+  EXPECT_STREQ("m", utest_fixture->errors.stacks[0][0].fn_name);
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, utest_fixture->errors.stacks[0][1].fn_name);
+}
+
+UTEST_F(lox, a_method_closes_over_the_scope_its_class_was_declared_in) {
+  // The method captures, so it is a closure the run made rather than a
+  // constant of a chunk, and recording it on the class is the first entry
+  // that table takes -- an allocation, and under the stress build a
+  // collection. What is printed is what came back out of the table.
+  ASSERT_TRUE(run(utest_fixture, "fun make() {"
+                                 "  var v = \"cap\" + \"tured\";"
+                                 "  class A { m() { return v; } }"
+                                 "  return A();"
+                                 "}"
+                                 "print make().m();"));
+
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("captured", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, a_capturing_initializer_is_recorded_like_a_capturing_method) {
+  // the same for the half of the binding that stores instead of recording
+  ASSERT_TRUE(run(utest_fixture, "fun make() {"
+                                 "  var v = \"cap\" + \"tured\";"
+                                 "  class A { init() { this.v = v; } }"
+                                 "  return A();"
+                                 "}"
+                                 "print make().v;"));
+
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("captured", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, an_instance_holds_more_fields_than_its_table_starts_with) {
+  // a fresh instance has no field storage at all, and each name below is a
+  // key of its own: the table is grown several times over on the way through
+  ASSERT_TRUE(run(utest_fixture, "class A {} var a = A();"
+                                 "a.f0 = 0; a.f1 = 1; a.f2 = 2; a.f3 = 3; a.f4 = 4;"
+                                 "a.f5 = 5; a.f6 = 6; a.f7 = 7; a.f8 = 8; a.f9 = 9;"
+                                 "print a.f0 + a.f4 + a.f9;"));
+
+  EXPECT_VALUE_EQ(CLOX_NUMBER(13.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_class_declared_inside_a_function_is_made_afresh_on_every_call) {
+  ASSERT_TRUE(run(utest_fixture, "fun make() { class A {} return A; }"
+                                 "print make() == make();"));
+  EXPECT_VALUE_EQ(CLOX_BOOL(false), only_printed(utest_fixture));
+}

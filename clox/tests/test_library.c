@@ -631,6 +631,28 @@ static clox_value_t a_native(struct library *fixture, const char *name) {
   return CLOX_OBJECT(native);
 }
 
+static clox_value_t a_class(struct library *fixture, const char *name) {
+  clox_class_t *class_ =
+      clox_new_class(&fixture->alloc, clox_test_intern_kept(&fixture->alloc, name));
+  clox_test_keep(&fixture->alloc, class_);
+
+  return CLOX_OBJECT(class_);
+}
+
+static clox_value_t an_instance(struct library *fixture, clox_value_t class_) {
+  clox_instance_t *instance = clox_new_instance(&fixture->alloc, CLOX_AS_CLASS(class_));
+  clox_test_keep(&fixture->alloc, instance);
+
+  return CLOX_OBJECT(instance);
+}
+
+static clox_value_t a_binding(struct library *fixture, clox_value_t receiver, clox_value_t method) {
+  clox_bound_method_t *bound = clox_new_bound_method(&fixture->alloc, receiver, method);
+  clox_test_keep(&fixture->alloc, bound);
+
+  return CLOX_OBJECT(bound);
+}
+
 UTEST_F(library, type_names_the_kind_of_a_value) {
   struct {
     clox_value_t value;
@@ -678,6 +700,38 @@ UTEST_F(library, type_keeps_a_native_apart_from_a_function) {
   EXPECT_STREQ("native", CLOX_AS_CSTRING(kept_result(utest_fixture, &result)));
 }
 
+UTEST_F(library, type_of_a_class_is_the_kind_class) {
+  clox_native_result_t result;
+
+  ASSERT_TRUE(
+      call_library_fn_1(&utest_fixture->vm, "type", a_class(utest_fixture, "Point"), &result));
+  EXPECT_STREQ("class", CLOX_AS_CSTRING(kept_result(utest_fixture, &result)));
+}
+
+UTEST_F(library, type_of_an_instance_is_the_name_of_its_class) {
+  // an instance is of the class it was made from, and there is nothing more
+  // useful to answer with: "instance" would say the same of every one of them
+  clox_value_t class_ = a_class(utest_fixture, "Point");
+  clox_native_result_t result;
+
+  ASSERT_TRUE(
+      call_library_fn_1(&utest_fixture->vm, "type", an_instance(utest_fixture, class_), &result));
+  EXPECT_STREQ("Point", CLOX_AS_CSTRING(kept_result(utest_fixture, &result)));
+}
+
+UTEST_F(library, type_calls_a_binding_a_function_like_the_method_under_it) {
+  // a binding is no more visible to a program than a closure is: both read as
+  // the function they stand for
+  clox_value_t class_ = a_class(utest_fixture, "Point");
+  clox_value_t receiver = an_instance(utest_fixture, class_);
+  clox_value_t method = a_function(utest_fixture, "m");
+  clox_native_result_t result;
+
+  ASSERT_TRUE(call_library_fn_1(&utest_fixture->vm, "type",
+                                a_binding(utest_fixture, receiver, method), &result));
+  EXPECT_STREQ("function", CLOX_AS_CSTRING(kept_result(utest_fixture, &result)));
+}
+
 UTEST_F(library, type_answers_with_a_string_every_time) {
   // the answer is meant to be compared against a string literal in Lox
   clox_value_t values[] = {CLOX_NIL, CLOX_BOOL(true), CLOX_NUMBER(0.0)};
@@ -706,6 +760,8 @@ UTEST_F(library, str_writes_what_print_writes) {
   // str() and the printer must not drift apart: everything below goes through
   // both, and the two texts have to agree
   clox_value_t function = a_function(utest_fixture, "f");
+  clox_value_t class_ = a_class(utest_fixture, "Point");
+  clox_value_t receiver = an_instance(utest_fixture, class_);
   clox_value_t values[] = {
       CLOX_NIL,
       CLOX_BOOL(true),
@@ -718,6 +774,9 @@ UTEST_F(library, str_writes_what_print_writes) {
       a_closure(utest_fixture, function),
       a_function(utest_fixture, CLOX_SCRIPT_NAME),
       a_native(utest_fixture, "nt"),
+      class_,
+      receiver,
+      a_binding(utest_fixture, receiver, function),
   };
 
   for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
