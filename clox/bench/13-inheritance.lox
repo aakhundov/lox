@@ -1,0 +1,133 @@
+// inheritance: what a subclass actually costs at run time. "declare" runs
+// OP_CLASS, OP_METHOD and OP_INHERIT repeatedly, and OP_INHERIT copies the
+// whole superclass method table. "super" calls through two levels of
+// OP_INVOKE_SUPER, which looks the name up in the superclass rather than the
+// receiver. "init" constructs through a chain of initialisers, each one a
+// super.init() call on the way down.
+
+var n_runs = 10;
+
+// A measured time in milliseconds, rounded to two decimals and left-aligned in
+// a fixed column. Both halves are needed for the rows to line up: print
+// separates its arguments with a single space, and a number is written with
+// its trailing zeros dropped, so the two decimals are assembled by hand.
+fun column(value, width) {
+  var ms = floor(value * 100000 + 0.5) / 100;
+  var whole = floor(ms);
+  var frac = floor((ms - whole) * 100 + 0.5);
+
+  if (frac >= 100) {
+    whole = whole + 1;
+    frac = 0;
+  }
+
+  var tail = str(frac);
+  if (frac < 10) tail = "0" + tail;
+
+  var text = str(whole) + "." + tail;
+  return text + repeat(" ", width - len(text));
+}
+
+// One untimed warm-up call, then n_runs timed ones: the warm-up brings the
+// core up to speed and warms the caches, so the first timed run is not the
+// outlier. The printed result is a checksum -- a change that makes the
+// benchmark do less work shows up there instead of as a speedup.
+fun bench(name, body) {
+  body();
+
+  var total = 0;
+  var lo = 0;
+  var hi = 0;
+  var result = 0;
+
+  for (var i = 0; i < n_runs; i = i + 1) {
+    var start = clock();
+    result = body();
+    var elapsed = clock() - start;
+
+    total = total + elapsed;
+    if (i == 0 or elapsed < lo) lo = elapsed;
+    if (elapsed > hi) hi = elapsed;
+  }
+
+  print name + repeat(" ", 21 - len(name)) + column(total / n_runs, 9)
+      + column(lo, 9) + column(hi, 9) + str(result);
+}
+var n_super = 460000;
+var n_init = 190000;
+var n_decls = 100000;
+
+class A {
+  m(n) { return n + 1; }
+}
+
+class B < A {
+  m(n) { return super.m(n) + 1; }
+}
+
+class C < B {
+  m(n) { return super.m(n) + 1; }
+}
+
+class P {
+  init(x) { this.x = x; }
+}
+
+class Q < P {
+  init(x) {
+    super.init(x);
+    this.y = x + 1;
+  }
+}
+
+class R < Q {
+  init(x) {
+    super.init(x);
+    this.z = x + 2;
+  }
+}
+
+fun declare() {
+  var made = 0;
+
+  for (var i = 0; i < n_decls; i = i + 1) {
+    class Base {
+      a() { return 1; }
+      b() { return 2; }
+      c() { return 3; }
+      d() { return 4; }
+    }
+
+    class Derived < Base {
+      e() { return 5; }
+    }
+
+    made = made + Derived().a();
+  }
+
+  return made;
+}
+
+fun super_calls() {
+  var it = C();
+  var acc = 0;
+
+  for (var i = 0; i < n_super; i = i + 1) acc = acc + it.m(i);
+
+  return acc;
+}
+
+fun init_chain() {
+  var acc = 0;
+
+  for (var i = 0; i < n_init; i = i + 1) {
+    var it = R(i);
+    acc = acc + it.z;
+  }
+
+  return acc;
+}
+
+bench("inheritance.declare", declare);
+bench("inheritance.super", super_calls);
+bench("inheritance.init", init_chain);

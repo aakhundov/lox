@@ -1,0 +1,100 @@
+// strings: the object side of the language. "concat" builds a fresh string
+// every iteration, which hashes the result and interns it, so it exercises
+// the allocator, the string hash and the intern table (str() is in the loop
+// because it is the only way to vary the pieces). "equality" compares
+// strings, which is a pointer comparison once both are interned. "natives"
+// runs the string library, each call of which allocates its result.
+
+var n_runs = 10;
+
+// A measured time in milliseconds, rounded to two decimals and left-aligned in
+// a fixed column. Both halves are needed for the rows to line up: print
+// separates its arguments with a single space, and a number is written with
+// its trailing zeros dropped, so the two decimals are assembled by hand.
+fun column(value, width) {
+  var ms = floor(value * 100000 + 0.5) / 100;
+  var whole = floor(ms);
+  var frac = floor((ms - whole) * 100 + 0.5);
+
+  if (frac >= 100) {
+    whole = whole + 1;
+    frac = 0;
+  }
+
+  var tail = str(frac);
+  if (frac < 10) tail = "0" + tail;
+
+  var text = str(whole) + "." + tail;
+  return text + repeat(" ", width - len(text));
+}
+
+// One untimed warm-up call, then n_runs timed ones: the warm-up brings the
+// core up to speed and warms the caches, so the first timed run is not the
+// outlier. The printed result is a checksum -- a change that makes the
+// benchmark do less work shows up there instead of as a speedup.
+fun bench(name, body) {
+  body();
+
+  var total = 0;
+  var lo = 0;
+  var hi = 0;
+  var result = 0;
+
+  for (var i = 0; i < n_runs; i = i + 1) {
+    var start = clock();
+    result = body();
+    var elapsed = clock() - start;
+
+    total = total + elapsed;
+    if (i == 0 or elapsed < lo) lo = elapsed;
+    if (elapsed > hi) hi = elapsed;
+  }
+
+  print name + repeat(" ", 21 - len(name)) + column(total / n_runs, 9)
+      + column(lo, 9) + column(hi, 9) + str(result);
+}
+var n_concat = 70000;
+var n_equality = 730000;
+var n_natives = 84000;
+
+var left = "benchmark";
+var right = "-string";
+var same = "benchmark-string";
+var other = "benchmark-strinq";
+
+fun concat() {
+  var last = "";
+
+  for (var i = 0; i < n_concat; i = i + 1) last = left + str(i) + right;
+
+  return len(last);
+}
+
+fun equality() {
+  var acc = 0;
+  var built = left + right;
+
+  for (var i = 0; i < n_equality; i = i + 1) {
+    if (built == same) acc = acc + 1;
+    if (built != other) acc = acc + 2;
+    if (same == other) acc = acc + 4;
+  }
+
+  return acc;
+}
+
+fun natives() {
+  var acc = 0;
+
+  for (var i = 0; i < n_natives; i = i + 1) {
+    acc = acc + len(upper(same)) + len(lower(other));
+    acc = acc + len(substr(same, 3, 6)) + len(trim("  padded  "));
+    acc = acc + len(replace(same, "mark", "MARK"));
+  }
+
+  return acc;
+}
+
+bench("strings.concat", concat);
+bench("strings.equality", equality);
+bench("strings.natives", natives);

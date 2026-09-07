@@ -1,0 +1,98 @@
+// fields: OP_GET_PROP and OP_SET_PROP_POP, a hash lookup in the instance's
+// own field table for every access. "narrow" keeps three names hot; "wide"
+// spreads the same number of accesses over sixteen names, so the table is
+// larger and the entries are colder.
+
+var n_runs = 10;
+
+// A measured time in milliseconds, rounded to two decimals and left-aligned in
+// a fixed column. Both halves are needed for the rows to line up: print
+// separates its arguments with a single space, and a number is written with
+// its trailing zeros dropped, so the two decimals are assembled by hand.
+fun column(value, width) {
+  var ms = floor(value * 100000 + 0.5) / 100;
+  var whole = floor(ms);
+  var frac = floor((ms - whole) * 100 + 0.5);
+
+  if (frac >= 100) {
+    whole = whole + 1;
+    frac = 0;
+  }
+
+  var tail = str(frac);
+  if (frac < 10) tail = "0" + tail;
+
+  var text = str(whole) + "." + tail;
+  return text + repeat(" ", width - len(text));
+}
+
+// One untimed warm-up call, then n_runs timed ones: the warm-up brings the
+// core up to speed and warms the caches, so the first timed run is not the
+// outlier. The printed result is a checksum -- a change that makes the
+// benchmark do less work shows up there instead of as a speedup.
+fun bench(name, body) {
+  body();
+
+  var total = 0;
+  var lo = 0;
+  var hi = 0;
+  var result = 0;
+
+  for (var i = 0; i < n_runs; i = i + 1) {
+    var start = clock();
+    result = body();
+    var elapsed = clock() - start;
+
+    total = total + elapsed;
+    if (i == 0 or elapsed < lo) lo = elapsed;
+    if (elapsed > hi) hi = elapsed;
+  }
+
+  print name + repeat(" ", 21 - len(name)) + column(total / n_runs, 9)
+      + column(lo, 9) + column(hi, 9) + str(result);
+}
+var n_iters = 720000;
+
+class Narrow {
+  init() {
+    this.x = 0;
+    this.y = 0;
+    this.z = 0;
+  }
+}
+
+class Wide {
+  init() {
+    this.a = 0; this.b = 0; this.c = 0; this.d = 0;
+    this.e = 0; this.f = 0; this.g = 0; this.h = 0;
+    this.i = 0; this.j = 0; this.k = 0; this.l = 0;
+    this.m = 0; this.n = 0; this.o = 0; this.p = 0;
+  }
+}
+
+fun narrow() {
+  var it = Narrow();
+
+  for (var i = 0; i < n_iters; i = i + 1) {
+    it.x = it.x + 1;
+    it.y = it.x + it.z;
+    it.z = it.y + 1;
+  }
+
+  return it.x + it.y + it.z;
+}
+
+fun wide() {
+  var it = Wide();
+
+  for (var i = 0; i < n_iters; i = i + 1) {
+    it.a = it.p + 1;
+    it.h = it.a + it.i;
+    it.p = it.h + 1;
+  }
+
+  return it.a + it.h + it.p;
+}
+
+bench("fields.narrow", narrow);
+bench("fields.wide", wide);

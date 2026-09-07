@@ -1,0 +1,92 @@
+// instances: construction. Every iteration allocates an instance and its
+// field table, so this is the OP_CALL-on-a-class path plus the allocator, and
+// the collector runs underneath it because the objects die immediately.
+// "empty" has no initialiser and no fields; "fields" runs an initialiser that
+// puts four entries in the table.
+
+var n_runs = 10;
+
+// A measured time in milliseconds, rounded to two decimals and left-aligned in
+// a fixed column. Both halves are needed for the rows to line up: print
+// separates its arguments with a single space, and a number is written with
+// its trailing zeros dropped, so the two decimals are assembled by hand.
+fun column(value, width) {
+  var ms = floor(value * 100000 + 0.5) / 100;
+  var whole = floor(ms);
+  var frac = floor((ms - whole) * 100 + 0.5);
+
+  if (frac >= 100) {
+    whole = whole + 1;
+    frac = 0;
+  }
+
+  var tail = str(frac);
+  if (frac < 10) tail = "0" + tail;
+
+  var text = str(whole) + "." + tail;
+  return text + repeat(" ", width - len(text));
+}
+
+// One untimed warm-up call, then n_runs timed ones: the warm-up brings the
+// core up to speed and warms the caches, so the first timed run is not the
+// outlier. The printed result is a checksum -- a change that makes the
+// benchmark do less work shows up there instead of as a speedup.
+fun bench(name, body) {
+  body();
+
+  var total = 0;
+  var lo = 0;
+  var hi = 0;
+  var result = 0;
+
+  for (var i = 0; i < n_runs; i = i + 1) {
+    var start = clock();
+    result = body();
+    var elapsed = clock() - start;
+
+    total = total + elapsed;
+    if (i == 0 or elapsed < lo) lo = elapsed;
+    if (elapsed > hi) hi = elapsed;
+  }
+
+  print name + repeat(" ", 21 - len(name)) + column(total / n_runs, 9)
+      + column(lo, 9) + column(hi, 9) + str(result);
+}
+var n_empty = 600000;
+var n_fields = 220000;
+
+class Empty {}
+
+class Filled {
+  init(x) {
+    this.a = x;
+    this.b = x + 1;
+    this.c = x + 2;
+    this.d = x + 3;
+  }
+}
+
+fun empty() {
+  var acc = 0;
+
+  for (var i = 0; i < n_empty; i = i + 1) {
+    var it = Empty();
+    acc = acc + 1;
+  }
+
+  return acc;
+}
+
+fun filled() {
+  var acc = 0;
+
+  for (var i = 0; i < n_fields; i = i + 1) {
+    var it = Filled(i);
+    acc = acc + it.d;
+  }
+
+  return acc;
+}
+
+bench("instances.empty", empty);
+bench("instances.fields", filled);

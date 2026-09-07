@@ -1,0 +1,85 @@
+// functions: OP_CALL and OP_RETURN -- frame push and pop, the arity check and
+// the argument slots -- at three arities, with bodies small enough that the
+// call itself dominates.
+
+var n_runs = 10;
+
+// A measured time in milliseconds, rounded to two decimals and left-aligned in
+// a fixed column. Both halves are needed for the rows to line up: print
+// separates its arguments with a single space, and a number is written with
+// its trailing zeros dropped, so the two decimals are assembled by hand.
+fun column(value, width) {
+  var ms = floor(value * 100000 + 0.5) / 100;
+  var whole = floor(ms);
+  var frac = floor((ms - whole) * 100 + 0.5);
+
+  if (frac >= 100) {
+    whole = whole + 1;
+    frac = 0;
+  }
+
+  var tail = str(frac);
+  if (frac < 10) tail = "0" + tail;
+
+  var text = str(whole) + "." + tail;
+  return text + repeat(" ", width - len(text));
+}
+
+// One untimed warm-up call, then n_runs timed ones: the warm-up brings the
+// core up to speed and warms the caches, so the first timed run is not the
+// outlier. The printed result is a checksum -- a change that makes the
+// benchmark do less work shows up there instead of as a speedup.
+fun bench(name, body) {
+  body();
+
+  var total = 0;
+  var lo = 0;
+  var hi = 0;
+  var result = 0;
+
+  for (var i = 0; i < n_runs; i = i + 1) {
+    var start = clock();
+    result = body();
+    var elapsed = clock() - start;
+
+    total = total + elapsed;
+    if (i == 0 or elapsed < lo) lo = elapsed;
+    if (elapsed > hi) hi = elapsed;
+  }
+
+  print name + repeat(" ", 21 - len(name)) + column(total / n_runs, 9)
+      + column(lo, 9) + column(hi, 9) + str(result);
+}
+var n_iters = 1150000;
+
+fun f0() { return 1; }
+fun f1(a) { return a; }
+fun f8(a, b, c, d, e, f, g, h) { return a; }
+
+fun call0() {
+  var acc = 0;
+
+  for (var i = 0; i < n_iters; i = i + 1) acc = acc + f0();
+
+  return acc;
+}
+
+fun call1() {
+  var acc = 0;
+
+  for (var i = 0; i < n_iters; i = i + 1) acc = acc + f1(i);
+
+  return acc;
+}
+
+fun call8() {
+  var acc = 0;
+
+  for (var i = 0; i < n_iters; i = i + 1) acc = acc + f8(i, 1, 2, 3, 4, 5, 6, 7);
+
+  return acc;
+}
+
+bench("functions.arg0", call0);
+bench("functions.arg1", call1);
+bench("functions.arg8", call8);

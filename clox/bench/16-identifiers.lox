@@ -1,0 +1,466 @@
+// identifiers: name lookup at scale. The globals table and an instance's
+// field table are the same hash table, and both are keyed by interned
+// strings; these two rows widen each of them past the point where a handful
+// of hot entries stay in cache. 128 global names and 64 field names are
+// written and read once per iteration, in a chain, so no access can be
+// skipped. Generated: the point is the number of distinct names.
+
+var n_runs = 10;
+
+// A measured time in milliseconds, rounded to two decimals and left-aligned in
+// a fixed column. Both halves are needed for the rows to line up: print
+// separates its arguments with a single space, and a number is written with
+// its trailing zeros dropped, so the two decimals are assembled by hand.
+fun column(value, width) {
+  var ms = floor(value * 100000 + 0.5) / 100;
+  var whole = floor(ms);
+  var frac = floor((ms - whole) * 100 + 0.5);
+
+  if (frac >= 100) {
+    whole = whole + 1;
+    frac = 0;
+  }
+
+  var tail = str(frac);
+  if (frac < 10) tail = "0" + tail;
+
+  var text = str(whole) + "." + tail;
+  return text + repeat(" ", width - len(text));
+}
+
+// One untimed warm-up call, then n_runs timed ones: the warm-up brings the
+// core up to speed and warms the caches, so the first timed run is not the
+// outlier. The printed result is a checksum -- a change that makes the
+// benchmark do less work shows up there instead of as a speedup.
+fun bench(name, body) {
+  body();
+
+  var total = 0;
+  var lo = 0;
+  var hi = 0;
+  var result = 0;
+
+  for (var i = 0; i < n_runs; i = i + 1) {
+    var start = clock();
+    result = body();
+    var elapsed = clock() - start;
+
+    total = total + elapsed;
+    if (i == 0 or elapsed < lo) lo = elapsed;
+    if (elapsed > hi) hi = elapsed;
+  }
+
+  print name + repeat(" ", 21 - len(name)) + column(total / n_runs, 9)
+      + column(lo, 9) + column(hi, 9) + str(result);
+}
+var n_globals = 23000;
+var n_fields = 45000;
+
+var v000 = 0;
+var v001 = 0;
+var v002 = 0;
+var v003 = 0;
+var v004 = 0;
+var v005 = 0;
+var v006 = 0;
+var v007 = 0;
+var v008 = 0;
+var v009 = 0;
+var v010 = 0;
+var v011 = 0;
+var v012 = 0;
+var v013 = 0;
+var v014 = 0;
+var v015 = 0;
+var v016 = 0;
+var v017 = 0;
+var v018 = 0;
+var v019 = 0;
+var v020 = 0;
+var v021 = 0;
+var v022 = 0;
+var v023 = 0;
+var v024 = 0;
+var v025 = 0;
+var v026 = 0;
+var v027 = 0;
+var v028 = 0;
+var v029 = 0;
+var v030 = 0;
+var v031 = 0;
+var v032 = 0;
+var v033 = 0;
+var v034 = 0;
+var v035 = 0;
+var v036 = 0;
+var v037 = 0;
+var v038 = 0;
+var v039 = 0;
+var v040 = 0;
+var v041 = 0;
+var v042 = 0;
+var v043 = 0;
+var v044 = 0;
+var v045 = 0;
+var v046 = 0;
+var v047 = 0;
+var v048 = 0;
+var v049 = 0;
+var v050 = 0;
+var v051 = 0;
+var v052 = 0;
+var v053 = 0;
+var v054 = 0;
+var v055 = 0;
+var v056 = 0;
+var v057 = 0;
+var v058 = 0;
+var v059 = 0;
+var v060 = 0;
+var v061 = 0;
+var v062 = 0;
+var v063 = 0;
+var v064 = 0;
+var v065 = 0;
+var v066 = 0;
+var v067 = 0;
+var v068 = 0;
+var v069 = 0;
+var v070 = 0;
+var v071 = 0;
+var v072 = 0;
+var v073 = 0;
+var v074 = 0;
+var v075 = 0;
+var v076 = 0;
+var v077 = 0;
+var v078 = 0;
+var v079 = 0;
+var v080 = 0;
+var v081 = 0;
+var v082 = 0;
+var v083 = 0;
+var v084 = 0;
+var v085 = 0;
+var v086 = 0;
+var v087 = 0;
+var v088 = 0;
+var v089 = 0;
+var v090 = 0;
+var v091 = 0;
+var v092 = 0;
+var v093 = 0;
+var v094 = 0;
+var v095 = 0;
+var v096 = 0;
+var v097 = 0;
+var v098 = 0;
+var v099 = 0;
+var v100 = 0;
+var v101 = 0;
+var v102 = 0;
+var v103 = 0;
+var v104 = 0;
+var v105 = 0;
+var v106 = 0;
+var v107 = 0;
+var v108 = 0;
+var v109 = 0;
+var v110 = 0;
+var v111 = 0;
+var v112 = 0;
+var v113 = 0;
+var v114 = 0;
+var v115 = 0;
+var v116 = 0;
+var v117 = 0;
+var v118 = 0;
+var v119 = 0;
+var v120 = 0;
+var v121 = 0;
+var v122 = 0;
+var v123 = 0;
+var v124 = 0;
+var v125 = 0;
+var v126 = 0;
+var v127 = 0;
+
+class Wide {
+  init() {
+    this.f00 = 0;
+    this.f01 = 0;
+    this.f02 = 0;
+    this.f03 = 0;
+    this.f04 = 0;
+    this.f05 = 0;
+    this.f06 = 0;
+    this.f07 = 0;
+    this.f08 = 0;
+    this.f09 = 0;
+    this.f10 = 0;
+    this.f11 = 0;
+    this.f12 = 0;
+    this.f13 = 0;
+    this.f14 = 0;
+    this.f15 = 0;
+    this.f16 = 0;
+    this.f17 = 0;
+    this.f18 = 0;
+    this.f19 = 0;
+    this.f20 = 0;
+    this.f21 = 0;
+    this.f22 = 0;
+    this.f23 = 0;
+    this.f24 = 0;
+    this.f25 = 0;
+    this.f26 = 0;
+    this.f27 = 0;
+    this.f28 = 0;
+    this.f29 = 0;
+    this.f30 = 0;
+    this.f31 = 0;
+    this.f32 = 0;
+    this.f33 = 0;
+    this.f34 = 0;
+    this.f35 = 0;
+    this.f36 = 0;
+    this.f37 = 0;
+    this.f38 = 0;
+    this.f39 = 0;
+    this.f40 = 0;
+    this.f41 = 0;
+    this.f42 = 0;
+    this.f43 = 0;
+    this.f44 = 0;
+    this.f45 = 0;
+    this.f46 = 0;
+    this.f47 = 0;
+    this.f48 = 0;
+    this.f49 = 0;
+    this.f50 = 0;
+    this.f51 = 0;
+    this.f52 = 0;
+    this.f53 = 0;
+    this.f54 = 0;
+    this.f55 = 0;
+    this.f56 = 0;
+    this.f57 = 0;
+    this.f58 = 0;
+    this.f59 = 0;
+    this.f60 = 0;
+    this.f61 = 0;
+    this.f62 = 0;
+    this.f63 = 0;
+  }
+}
+
+fun wide_globals() {
+  for (var i = 0; i < n_globals; i = i + 1) {
+    v000 = i;
+    v001 = v000 + 1;
+    v002 = v001 + 1;
+    v003 = v002 + 1;
+    v004 = v003 + 1;
+    v005 = v004 + 1;
+    v006 = v005 + 1;
+    v007 = v006 + 1;
+    v008 = v007 + 1;
+    v009 = v008 + 1;
+    v010 = v009 + 1;
+    v011 = v010 + 1;
+    v012 = v011 + 1;
+    v013 = v012 + 1;
+    v014 = v013 + 1;
+    v015 = v014 + 1;
+    v016 = v015 + 1;
+    v017 = v016 + 1;
+    v018 = v017 + 1;
+    v019 = v018 + 1;
+    v020 = v019 + 1;
+    v021 = v020 + 1;
+    v022 = v021 + 1;
+    v023 = v022 + 1;
+    v024 = v023 + 1;
+    v025 = v024 + 1;
+    v026 = v025 + 1;
+    v027 = v026 + 1;
+    v028 = v027 + 1;
+    v029 = v028 + 1;
+    v030 = v029 + 1;
+    v031 = v030 + 1;
+    v032 = v031 + 1;
+    v033 = v032 + 1;
+    v034 = v033 + 1;
+    v035 = v034 + 1;
+    v036 = v035 + 1;
+    v037 = v036 + 1;
+    v038 = v037 + 1;
+    v039 = v038 + 1;
+    v040 = v039 + 1;
+    v041 = v040 + 1;
+    v042 = v041 + 1;
+    v043 = v042 + 1;
+    v044 = v043 + 1;
+    v045 = v044 + 1;
+    v046 = v045 + 1;
+    v047 = v046 + 1;
+    v048 = v047 + 1;
+    v049 = v048 + 1;
+    v050 = v049 + 1;
+    v051 = v050 + 1;
+    v052 = v051 + 1;
+    v053 = v052 + 1;
+    v054 = v053 + 1;
+    v055 = v054 + 1;
+    v056 = v055 + 1;
+    v057 = v056 + 1;
+    v058 = v057 + 1;
+    v059 = v058 + 1;
+    v060 = v059 + 1;
+    v061 = v060 + 1;
+    v062 = v061 + 1;
+    v063 = v062 + 1;
+    v064 = v063 + 1;
+    v065 = v064 + 1;
+    v066 = v065 + 1;
+    v067 = v066 + 1;
+    v068 = v067 + 1;
+    v069 = v068 + 1;
+    v070 = v069 + 1;
+    v071 = v070 + 1;
+    v072 = v071 + 1;
+    v073 = v072 + 1;
+    v074 = v073 + 1;
+    v075 = v074 + 1;
+    v076 = v075 + 1;
+    v077 = v076 + 1;
+    v078 = v077 + 1;
+    v079 = v078 + 1;
+    v080 = v079 + 1;
+    v081 = v080 + 1;
+    v082 = v081 + 1;
+    v083 = v082 + 1;
+    v084 = v083 + 1;
+    v085 = v084 + 1;
+    v086 = v085 + 1;
+    v087 = v086 + 1;
+    v088 = v087 + 1;
+    v089 = v088 + 1;
+    v090 = v089 + 1;
+    v091 = v090 + 1;
+    v092 = v091 + 1;
+    v093 = v092 + 1;
+    v094 = v093 + 1;
+    v095 = v094 + 1;
+    v096 = v095 + 1;
+    v097 = v096 + 1;
+    v098 = v097 + 1;
+    v099 = v098 + 1;
+    v100 = v099 + 1;
+    v101 = v100 + 1;
+    v102 = v101 + 1;
+    v103 = v102 + 1;
+    v104 = v103 + 1;
+    v105 = v104 + 1;
+    v106 = v105 + 1;
+    v107 = v106 + 1;
+    v108 = v107 + 1;
+    v109 = v108 + 1;
+    v110 = v109 + 1;
+    v111 = v110 + 1;
+    v112 = v111 + 1;
+    v113 = v112 + 1;
+    v114 = v113 + 1;
+    v115 = v114 + 1;
+    v116 = v115 + 1;
+    v117 = v116 + 1;
+    v118 = v117 + 1;
+    v119 = v118 + 1;
+    v120 = v119 + 1;
+    v121 = v120 + 1;
+    v122 = v121 + 1;
+    v123 = v122 + 1;
+    v124 = v123 + 1;
+    v125 = v124 + 1;
+    v126 = v125 + 1;
+    v127 = v126 + 1;
+  }
+
+  return v127;
+}
+
+fun wide_fields() {
+  var it = Wide();
+
+  for (var i = 0; i < n_fields; i = i + 1) {
+    it.f00 = i;
+    it.f01 = it.f00 + 1;
+    it.f02 = it.f01 + 1;
+    it.f03 = it.f02 + 1;
+    it.f04 = it.f03 + 1;
+    it.f05 = it.f04 + 1;
+    it.f06 = it.f05 + 1;
+    it.f07 = it.f06 + 1;
+    it.f08 = it.f07 + 1;
+    it.f09 = it.f08 + 1;
+    it.f10 = it.f09 + 1;
+    it.f11 = it.f10 + 1;
+    it.f12 = it.f11 + 1;
+    it.f13 = it.f12 + 1;
+    it.f14 = it.f13 + 1;
+    it.f15 = it.f14 + 1;
+    it.f16 = it.f15 + 1;
+    it.f17 = it.f16 + 1;
+    it.f18 = it.f17 + 1;
+    it.f19 = it.f18 + 1;
+    it.f20 = it.f19 + 1;
+    it.f21 = it.f20 + 1;
+    it.f22 = it.f21 + 1;
+    it.f23 = it.f22 + 1;
+    it.f24 = it.f23 + 1;
+    it.f25 = it.f24 + 1;
+    it.f26 = it.f25 + 1;
+    it.f27 = it.f26 + 1;
+    it.f28 = it.f27 + 1;
+    it.f29 = it.f28 + 1;
+    it.f30 = it.f29 + 1;
+    it.f31 = it.f30 + 1;
+    it.f32 = it.f31 + 1;
+    it.f33 = it.f32 + 1;
+    it.f34 = it.f33 + 1;
+    it.f35 = it.f34 + 1;
+    it.f36 = it.f35 + 1;
+    it.f37 = it.f36 + 1;
+    it.f38 = it.f37 + 1;
+    it.f39 = it.f38 + 1;
+    it.f40 = it.f39 + 1;
+    it.f41 = it.f40 + 1;
+    it.f42 = it.f41 + 1;
+    it.f43 = it.f42 + 1;
+    it.f44 = it.f43 + 1;
+    it.f45 = it.f44 + 1;
+    it.f46 = it.f45 + 1;
+    it.f47 = it.f46 + 1;
+    it.f48 = it.f47 + 1;
+    it.f49 = it.f48 + 1;
+    it.f50 = it.f49 + 1;
+    it.f51 = it.f50 + 1;
+    it.f52 = it.f51 + 1;
+    it.f53 = it.f52 + 1;
+    it.f54 = it.f53 + 1;
+    it.f55 = it.f54 + 1;
+    it.f56 = it.f55 + 1;
+    it.f57 = it.f56 + 1;
+    it.f58 = it.f57 + 1;
+    it.f59 = it.f58 + 1;
+    it.f60 = it.f59 + 1;
+    it.f61 = it.f60 + 1;
+    it.f62 = it.f61 + 1;
+    it.f63 = it.f62 + 1;
+  }
+
+  return it.f63;
+}
+
+bench("identifiers.globals", wide_globals);
+bench("identifiers.fields", wide_fields);

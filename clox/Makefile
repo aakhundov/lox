@@ -45,6 +45,7 @@ RUN_ENV  := ASAN_OPTIONS=$(LEAK_OPT)detect_stack_use_after_return=1 \
 APP := clox
 SRC := $(HERE)src
 TESTS := $(HERE)tests
+BENCH_DIR := $(HERE)bench
 VENDOR := $(HERE)vendor
 BUILD := $(HERE)build
 
@@ -93,9 +94,18 @@ STRESS_BUILD := $(BUILD)/stress
 # the link, which is where a call from one .c into another can finally be
 # inlined. It belongs in CFLAGS rather than LDFLAGS because it has to reach
 # both halves, and the link recipes already pass CFLAGS.
+#
+# -falign-functions=64 is there for the benchmarks rather than for the code it
+# generates. Measured: one function growing by four bytes moved 94 of the 175
+# text symbols, and a benchmark that never touches the code that changed read
+# 8.8% slower purely because the interpreter loop had shifted. Rounding every
+# function start to 64 bytes absorbs a growth that stays inside the same
+# bucket -- a +16-byte edit moved nothing at 64 and everything at 32 -- for
+# about 5KB of padding. It is not a guarantee: a larger edit, or a function
+# added or removed, still shifts what follows.
 RELEASE_BUILD := $(BUILD)/release
 RELEASE_CFLAGS := $(filter-out -fsanitize=% -g3 -O0 -fno-omit-frame-pointer,$(CFLAGS)) \
-                  -O2 -flto=thin -DNDEBUG
+                  -O2 -flto=thin -DNDEBUG -falign-functions=64
 
 # Tests include the headers of what they cover by bare name, and the test
 # framework as <utest.h>. Both are test-only, so they stay out of CPPFLAGS.
@@ -126,7 +136,7 @@ FLAGS_STAMP := $(BUILD)/.flags
 # `force` deliberately has no rule anywhere: a phony target that never exists
 # is always out of date, which is what keeps the flags stamp reconsidered on
 # every run.
-.PHONY: run check test test-stress release run-release coverage coverage-report doctor clean format format-check tidy force
+.PHONY: run check test test-stress release run-release bench coverage coverage-report doctor clean format format-check tidy force
 
 $(EXEC): $(OBJS) $(VENDOR_OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $(EXEC)
@@ -211,6 +221,25 @@ release:
 # compiled into this binary, so there is nothing for those variables to tune.
 run-release: release
 	@$(RELEASE_BUILD)/$(APP) $(ARGS)
+
+# The benchmark suite, on the release build for run-release's reason: the
+# sanitizers are not compiled into that binary, so what gets timed is the code
+# that ships. Each script is self-timing -- a warm-up call, then ten timed ones
+# -- and prints one row per workload: name, mean, min, max, and the value the
+# workload computed, which is there to catch a change that makes a benchmark do
+# less work rather than the same work faster. Every script sizes itself to about
+# a quarter of a second, so the whole suite is a few seconds.
+#
+# The scripts are numbered so that the glob runs them in the order the suite is
+# meant to be read -- dispatch, calls, closures, objects, strings, front end,
+# collector -- rather than alphabetically. BENCH= narrows the run to the ones
+# whose names contain what it is given, so BENCH=gc and BENCH=12 both work, and
+# the n_runs at the top of each script is what to raise for a longer sample.
+bench: release
+	@printf '%-21s%-9s%-9s%-9s%s\n' benchmark 'mean(ms)' 'min(ms)' 'max(ms)' result
+	@for script in $(BENCH_DIR)/*$(BENCH)*.lox; do \
+	    $(RELEASE_BUILD)/$(APP) $$script; \
+	done
 
 # The suite again, with a collection at every allocation. Its value is that it
 # costs no new tests: every case already written allocates, and under stress

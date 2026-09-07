@@ -1,0 +1,111 @@
+// conditionals: OP_JUMP_FALSE, OP_JUMP_FALSE_POP, OP_JUMP_TRUE and OP_JUMP,
+// through if/else and the short-circuiting and/or.
+//
+// Both rows run the same generator and the same shape of test, and differ
+// only in how predictable the outcome is: "taken" compares against a bound
+// that always holds, "mixed" against the midpoint, which the branch predictor
+// cannot learn. The generator is a Lehmer PRNG rather than randint() so the
+// sequence is identical in both rows and costs the same in both.
+
+var n_runs = 10;
+
+// A measured time in milliseconds, rounded to two decimals and left-aligned in
+// a fixed column. Both halves are needed for the rows to line up: print
+// separates its arguments with a single space, and a number is written with
+// its trailing zeros dropped, so the two decimals are assembled by hand.
+fun column(value, width) {
+  var ms = floor(value * 100000 + 0.5) / 100;
+  var whole = floor(ms);
+  var frac = floor((ms - whole) * 100 + 0.5);
+
+  if (frac >= 100) {
+    whole = whole + 1;
+    frac = 0;
+  }
+
+  var tail = str(frac);
+  if (frac < 10) tail = "0" + tail;
+
+  var text = str(whole) + "." + tail;
+  return text + repeat(" ", width - len(text));
+}
+
+// One untimed warm-up call, then n_runs timed ones: the warm-up brings the
+// core up to speed and warms the caches, so the first timed run is not the
+// outlier. The printed result is a checksum -- a change that makes the
+// benchmark do less work shows up there instead of as a speedup.
+fun bench(name, body) {
+  body();
+
+  var total = 0;
+  var lo = 0;
+  var hi = 0;
+  var result = 0;
+
+  for (var i = 0; i < n_runs; i = i + 1) {
+    var start = clock();
+    result = body();
+    var elapsed = clock() - start;
+
+    total = total + elapsed;
+    if (i == 0 or elapsed < lo) lo = elapsed;
+    if (elapsed > hi) hi = elapsed;
+  }
+
+  print name + repeat(" ", 21 - len(name)) + column(total / n_runs, 9)
+      + column(lo, 9) + column(hi, 9) + str(result);
+}
+var n_iters = 310000;
+
+var lcg_state = 1;
+
+fun lcg() {
+  var x = lcg_state * 16807;
+  lcg_state = x - floor(x / 2147483647) * 2147483647;
+  return lcg_state;
+}
+
+fun taken() {
+  lcg_state = 1;
+
+  var acc = 0;
+  var i = 0;
+
+  while (i < n_iters) {
+    var r = lcg();
+
+    if (r > 0 and r < 2147483647) acc = acc + 1;
+    else acc = acc - 1;
+
+    if (r < 0 or r > 1) acc = acc + 2;
+    else acc = acc - 2;
+
+    i = i + 1;
+  }
+
+  return acc;
+}
+
+fun mixed() {
+  lcg_state = 1;
+
+  var acc = 0;
+  var i = 0;
+
+  while (i < n_iters) {
+    var r = lcg();
+
+    if (r > 1073741823 and r < 2147483647) acc = acc + 1;
+    else acc = acc - 1;
+
+    if (r < 536870911 or r > 1610612735) acc = acc + 2;
+    else acc = acc - 2;
+
+    i = i + 1;
+  }
+
+  return acc;
+}
+
+bench("conditionals.taken", taken);
+bench("conditionals.mixed", mixed);

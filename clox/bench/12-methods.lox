@@ -1,0 +1,107 @@
+// methods: the three ways a call on an instance reaches its callee.
+// OP_INVOKE probes the instance's field table first and falls through to the
+// class's method table, so "invoke" pays a miss then a hit and "field" pays a
+// hit on the first probe. "bound" takes the property once, which allocates a
+// bound method, and then calls that object through OP_CALL.
+//
+// There is no row for depth of inheritance: OP_INHERIT copies the superclass
+// method table into the subclass, so an inherited method is found in one
+// probe no matter how deep the chain is.
+
+var n_runs = 10;
+
+// A measured time in milliseconds, rounded to two decimals and left-aligned in
+// a fixed column. Both halves are needed for the rows to line up: print
+// separates its arguments with a single space, and a number is written with
+// its trailing zeros dropped, so the two decimals are assembled by hand.
+fun column(value, width) {
+  var ms = floor(value * 100000 + 0.5) / 100;
+  var whole = floor(ms);
+  var frac = floor((ms - whole) * 100 + 0.5);
+
+  if (frac >= 100) {
+    whole = whole + 1;
+    frac = 0;
+  }
+
+  var tail = str(frac);
+  if (frac < 10) tail = "0" + tail;
+
+  var text = str(whole) + "." + tail;
+  return text + repeat(" ", width - len(text));
+}
+
+// One untimed warm-up call, then n_runs timed ones: the warm-up brings the
+// core up to speed and warms the caches, so the first timed run is not the
+// outlier. The printed result is a checksum -- a change that makes the
+// benchmark do less work shows up there instead of as a speedup.
+fun bench(name, body) {
+  body();
+
+  var total = 0;
+  var lo = 0;
+  var hi = 0;
+  var result = 0;
+
+  for (var i = 0; i < n_runs; i = i + 1) {
+    var start = clock();
+    result = body();
+    var elapsed = clock() - start;
+
+    total = total + elapsed;
+    if (i == 0 or elapsed < lo) lo = elapsed;
+    if (elapsed > hi) hi = elapsed;
+  }
+
+  print name + repeat(" ", 21 - len(name)) + column(total / n_runs, 9)
+      + column(lo, 9) + column(hi, 9) + str(result);
+}
+var n_iters = 900000;
+
+class Counter {
+  init() {
+    this.v = 0;
+    this.fn = nil;
+  }
+
+  add(n) {
+    this.v = this.v + n;
+    return this.v;
+  }
+}
+
+fun invoke() {
+  var it = Counter();
+
+  for (var i = 0; i < n_iters; i = i + 1) it.add(1);
+
+  return it.v;
+}
+
+fun field() {
+  var it = Counter();
+
+  fun add(n) {
+    it.v = it.v + n;
+    return it.v;
+  }
+
+  it.fn = add;
+
+  for (var i = 0; i < n_iters; i = i + 1) it.fn(1);
+
+  return it.v;
+}
+
+fun bound() {
+  var it = Counter();
+  var add = it.add;
+
+  for (var i = 0; i < n_iters; i = i + 1) add(1);
+
+  return it.v;
+}
+
+bench("methods.invoke", invoke);
+bench("methods.field", field);
+bench("methods.bound", bound);
