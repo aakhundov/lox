@@ -15,7 +15,7 @@
 static inline clox_table_entry_t *find_entry(clox_table_entry_t *entries, size_t capacity,
                                              const clox_string_t *key) {
   assert(capacity > 0);
-  size_t index = key->hash % capacity;
+  size_t index = key->hash & (capacity - 1);
   clox_table_entry_t *entry = entries + index;
   clox_table_entry_t *tombstone = NULL;
 
@@ -183,7 +183,7 @@ const clox_string_t *clox_table_get_key_string(const clox_table_t *table, const 
     return NULL;
   }
 
-  size_t index = hash % table->capacity;
+  size_t index = hash & (table->capacity - 1);
   clox_table_entry_t *entry = table->entries + index;
 
   while (1) {
