@@ -10,6 +10,7 @@ Checks: >
   -readability-identifier-length,
   -readability-implicit-bool-conversion,
   -misc-no-recursion,
+  -performance-no-int-to-ptr,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 
 # our own headers only: vendored third-party code is not ours to lint

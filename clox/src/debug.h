@@ -26,10 +26,6 @@
 #define CLOX_STRESS_GC 0
 #endif
 
-#ifndef CLOX_ENABLE_LIBRARY
-#define CLOX_ENABLE_LIBRARY 1
-#endif
-
 void clox_disassemble_chunk_fprintf(FILE *stream, const clox_chunk_t *chunk, const char *name);
 void clox_disassemble_chunk(const clox_chunk_t *chunk, const char *name);
 size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *chunk, size_t offset);

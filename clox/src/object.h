@@ -52,8 +52,8 @@ typedef union clox_native_result_t {
 } clox_native_result_t;
 
 typedef struct clox_vm_t clox_vm_t;
-typedef bool clox_native_fn_t(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                              clox_vm_t *vm);
+typedef bool clox_native_fn_t(size_t arg_count, const clox_value_t *args,
+                              clox_native_result_t *result, clox_vm_t *vm);
 
 typedef struct clox_native_t {
   clox_object_t object;

@@ -227,7 +227,7 @@ UTEST(value, a_string_renders_as_its_characters) {
 UTEST(value, a_size_is_truthy_only_when_it_is_not_zero) {
   EXPECT_FALSE(clox_value_is_truthy(CLOX_SIZE(0)));
   EXPECT_TRUE(clox_value_is_truthy(CLOX_SIZE(1)));
-  EXPECT_TRUE(clox_value_is_truthy(CLOX_SIZE(SIZE_MAX)));
+  EXPECT_TRUE(clox_value_is_truthy(CLOX_SIZE(UINT32_MAX)));
 }
 
 UTEST(value, sizes_are_equal_by_value) {

@@ -37,7 +37,7 @@ static const clox_pos_t POS = {.line = 1, .col = 1};
 
 // A body for the natives these tests allocate. Nothing calls it; a native
 // without a function is rejected before it is ever recorded.
-static bool a_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+static bool a_native(size_t arg_count, const clox_value_t *args, clox_native_result_t *result,
                      clox_vm_t *vm) {
   (void)arg_count;
   (void)args;
@@ -729,7 +729,7 @@ static size_t forced_collections;
 
 // The allocator to collect is the one the calling VM was built with, which the
 // VM hands over with the call.
-static bool collect_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+static bool collect_native(size_t arg_count, const clox_value_t *args, clox_native_result_t *result,
                            clox_vm_t *vm) {
   (void)arg_count;
   (void)args;

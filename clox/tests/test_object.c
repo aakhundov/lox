@@ -24,8 +24,8 @@ struct object {
 
 // A body for the native tests. It returns its argument count, so a test can
 // tell an invocation that reached this function from one that did not.
-static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                            clox_vm_t *vm) {
+static bool counting_native(size_t arg_count, const clox_value_t *args,
+                            clox_native_result_t *result, clox_vm_t *vm) {
   (void)args;
   (void)vm;
 
@@ -34,7 +34,7 @@ static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_re
 }
 
 // A second body, distinguishable from the first by its result.
-static bool nil_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+static bool nil_native(size_t arg_count, const clox_value_t *args, clox_native_result_t *result,
                        clox_vm_t *vm) {
   (void)arg_count;
   (void)args;

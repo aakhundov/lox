@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "chunk.h"
+#include "common.h"
 #include "debug.h"
 #include "memory.h"
 #include "table.h"
@@ -25,6 +26,7 @@
 static inline clox_object_t *start_allocation(clox_allocator_t *a, size_t size,
                                               clox_object_type_t type) {
   clox_object_t *obj = (clox_object_t *)clox_reallocate(a, NULL, 0, size);
+  assert(CLOX_AS_OBJECT(CLOX_OBJECT(obj)) == obj); // pointer round-trip
 
   obj->type = type;
   obj->is_marked = false;
@@ -279,30 +281,30 @@ bool clox_object_equals(clox_value_t a, clox_value_t b) {
   assert(CLOX_IS_OBJECT(a));
   assert(CLOX_IS_OBJECT(b));
 
-  if (CLOX_AS_OBJECT(a)->type != CLOX_AS_OBJECT(b)->type) {
-    return false;
+  clox_object_type_t a_type = CLOX_AS_OBJECT(a)->type;
+  if (a_type == OBJ_CLOSURE || a_type == OBJ_BOUND_METHOD) {
+    clox_object_type_t b_type = CLOX_AS_OBJECT(b)->type;
+    if (a_type != b_type) {
+      return false;
+    }
+    if (a_type == OBJ_CLOSURE) {
+      // compare closures' underlying functions
+      return clox_object_equals(CLOX_OBJECT(CLOX_AS_CLOSURE(a)->function),
+                                CLOX_OBJECT(CLOX_AS_CLOSURE(b)->function));
+    }
+    if (a_type == OBJ_BOUND_METHOD) {
+      // compare bound methods' underlying methods
+      return clox_value_equals(CLOX_AS_BOUND_METHOD(a)->method, CLOX_AS_BOUND_METHOD(b)->method);
+    }
   }
 
-  switch (CLOX_AS_OBJECT(a)->type) {
-  case OBJ_STRING:
-    // compare raw pointers to string objects:
-    // this works due to the string interning
-    return CLOX_AS_STRING(a) == CLOX_AS_STRING(b);
-  case OBJ_CLOSURE:
-    // compare closures' underlying functions
-    return clox_object_equals(CLOX_OBJECT(CLOX_AS_CLOSURE(a)->function),
-                              CLOX_OBJECT(CLOX_AS_CLOSURE(b)->function));
-  case OBJ_BOUND_METHOD:
-    // compare bound methods' underlying methods
-    return clox_value_equals(CLOX_AS_BOUND_METHOD(a)->method, CLOX_AS_BOUND_METHOD(b)->method);
-  case OBJ_FUNCTION:
-  case OBJ_NATIVE:
-  case OBJ_UPVALUE:
-  case OBJ_CLASS:
-  case OBJ_INSTANCE:
-    // compare object pointers
-    return CLOX_AS_OBJECT(a) == CLOX_AS_OBJECT(b);
-  }
+#if CLOX_NAN_BOXING
+  // compare bit patterns
+  return a == b;
+#else
+  // compare object pointers
+  return CLOX_AS_OBJECT(a) == CLOX_AS_OBJECT(b);
+#endif
 }
 
 void clox_object_fprintf(FILE *stream, clox_value_t val) {

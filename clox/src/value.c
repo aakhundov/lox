@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "common.h"
 #include "memory.h"
 #include "object.h"
 
@@ -78,6 +79,19 @@ void clox_value_array_free(clox_value_array_t *arr) {
 void clox_value_fprintf(FILE *stream, clox_value_t val) {
   assert(stream != NULL);
 
+#if CLOX_NAN_BOXING
+  if (CLOX_IS_BOOL(val)) {
+    (void)fprintf(stream, CLOX_AS_BOOL(val) ? "true" : "false");
+  } else if (CLOX_IS_NIL(val)) {
+    (void)fprintf(stream, "nil");
+  } else if (CLOX_IS_NUMBER(val)) {
+    (void)fprintf(stream, "%g", CLOX_AS_NUMBER(val));
+  } else if (CLOX_IS_SIZE(val)) {
+    (void)fprintf(stream, "%u", CLOX_AS_SIZE(val));
+  } else { // OBJECT
+    clox_object_fprintf(stream, val);
+  }
+#else
   switch (val.type) {
   case VAL_BOOL:
     (void)fprintf(stream, CLOX_AS_BOOL(val) ? "true" : "false");
@@ -89,12 +103,13 @@ void clox_value_fprintf(FILE *stream, clox_value_t val) {
     (void)fprintf(stream, "%g", CLOX_AS_NUMBER(val));
     break;
   case VAL_SIZE:
-    (void)fprintf(stream, "%zu", CLOX_AS_SIZE(val));
+    (void)fprintf(stream, "%u", CLOX_AS_SIZE(val));
     break;
   case VAL_OBJECT:
     clox_object_fprintf(stream, val);
     break;
   }
+#endif
 }
 
 void clox_value_printf(clox_value_t val) {
@@ -104,6 +119,15 @@ void clox_value_printf(clox_value_t val) {
 void clox_value_repr_fprintf(FILE *stream, clox_value_t val) {
   assert(stream != NULL);
 
+#if CLOX_NAN_BOXING
+  if (CLOX_IS_NUMBER(val)) {
+    number_repr_fprintf(stream, CLOX_AS_NUMBER(val));
+  } else if (CLOX_IS_OBJECT(val)) {
+    clox_object_repr_fprintf(stream, val);
+  } else { // BOOL, NIL, SIZE
+    clox_value_fprintf(stream, val);
+  }
+#else
   switch (val.type) {
   case VAL_BOOL:
   case VAL_NIL:
@@ -118,6 +142,7 @@ void clox_value_repr_fprintf(FILE *stream, clox_value_t val) {
     clox_object_repr_fprintf(stream, val);
     break;
   }
+#endif
 }
 
 void clox_value_repr_printf(clox_value_t val) {
@@ -125,6 +150,22 @@ void clox_value_repr_printf(clox_value_t val) {
 }
 
 bool clox_value_is_truthy(clox_value_t val) {
+#if CLOX_NAN_BOXING
+  if (CLOX_IS_BOOL(val)) {
+    return CLOX_AS_BOOL(val);
+  }
+  if (CLOX_IS_NIL(val)) {
+    return false;
+  }
+  if (CLOX_IS_NUMBER(val)) {
+    return CLOX_AS_NUMBER(val) != 0.0;
+  }
+  if (CLOX_IS_SIZE(val)) {
+    return CLOX_AS_SIZE(val) != 0;
+  }
+  // OBJECT
+  return clox_object_is_truthy(val);
+#else
   switch (val.type) {
   case VAL_BOOL:
     return CLOX_AS_BOOL(val);
@@ -137,9 +178,22 @@ bool clox_value_is_truthy(clox_value_t val) {
   case VAL_OBJECT:
     return clox_object_is_truthy(val);
   }
+#endif
 }
 
 bool clox_value_equals(clox_value_t a, clox_value_t b) {
+#if CLOX_NAN_BOXING
+  if (CLOX_IS_NUMBER(a) && CLOX_IS_NUMBER(b)) {
+    // number-specific equality: NaNs != itself
+    return CLOX_AS_NUMBER(a) == CLOX_AS_NUMBER(b);
+  }
+  if (CLOX_IS_OBJECT(a) && CLOX_IS_OBJECT(b)) {
+    // objects can be compared by content
+    return clox_object_equals(a, b);
+  }
+  // compare bit patterns
+  return a == b;
+#else
   if (a.type != b.type) {
     return false;
   }
@@ -156,4 +210,5 @@ bool clox_value_equals(clox_value_t a, clox_value_t b) {
   case VAL_OBJECT:
     return clox_object_equals(a, b);
   }
+#endif
 }

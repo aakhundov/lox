@@ -258,8 +258,8 @@ static void emit_closure(struct vm *fixture, const clox_function_t *callee,
 
 // Native bodies for the tests. Each reports something about the call it got,
 // so a test can tell what the VM handed over from what it did not.
-static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                            clox_vm_t *vm) {
+static bool counting_native(size_t arg_count, const clox_value_t *args,
+                            clox_native_result_t *result, clox_vm_t *vm) {
   (void)args;
   (void)vm;
 
@@ -267,8 +267,8 @@ static bool counting_native(size_t arg_count, clox_value_t *args, clox_native_re
   return true;
 }
 
-static bool first_arg_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                             clox_vm_t *vm) {
+static bool first_arg_native(size_t arg_count, const clox_value_t *args,
+                             clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
 
   result->value = (arg_count == 0) ? CLOX_NIL : args[0];
@@ -279,8 +279,8 @@ static bool first_arg_native(size_t arg_count, clox_value_t *args, clox_native_r
 // carried the VM making it rather than some other one.
 static clox_vm_t *called_with_vm;
 
-static bool vm_reporting_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool vm_reporting_native(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   (void)args;
 
@@ -291,7 +291,7 @@ static bool vm_reporting_native(size_t arg_count, clox_value_t *args, clox_nativ
 
 // A body that always fails, so a test can follow the message a native writes
 // all the way out to the error handler.
-static bool failing_native(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
+static bool failing_native(size_t arg_count, const clox_value_t *args, clox_native_result_t *result,
                            clox_vm_t *vm) {
   (void)arg_count;
   (void)args;

@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "chunk.h"
+#include "common.h"
 #include "debug.h"
 #include "error.h"
 #include "memory.h"
@@ -17,7 +18,7 @@
 #include "table.h"
 #include "value.h"
 
-#if CLOX_ENABLE_LIBRARY
+#if CLOX_LIBRARY
 #include "library.h"
 #endif
 
@@ -304,7 +305,7 @@ static inline clox_upvalue_t *capture_upvalue(clox_vm_t *vm, clox_value_t *local
   return new_upvalue;
 }
 
-static inline void close_upvalues(clox_vm_t *vm, clox_value_t *last) {
+static inline void close_upvalues(clox_vm_t *vm, const clox_value_t *last) {
   while (vm->open_upvalues != NULL && vm->open_upvalues->location >= last) {
     clox_upvalue_t *upvalue = vm->open_upvalues;
     upvalue->closed = *upvalue->location;
@@ -519,6 +520,7 @@ static bool run(clox_vm_t *vm) {
         ERROR("superclass must be a class");
       }
       clox_class_t *class_ = CLOX_AS_CLASS(PEEK(0));
+      assert(class_ != NULL); // to make analyzer happy
       clox_table_copy(&class_->methods, &CLOX_AS_CLASS(superclass)->methods);
       class_->init = CLOX_AS_CLASS(superclass)->init;
       POP(); // (sub)class
@@ -791,7 +793,7 @@ void clox_vm_init(clox_vm_t *vm, clox_allocator_t *alloc) {
   vm->init_method_name = CLOX_AS_STRING(
       CLOX_STRING_COPY(vm->allocator, CLOX_INIT_METHOD_NAME, strlen(CLOX_INIT_METHOD_NAME)));
 
-#if CLOX_ENABLE_LIBRARY
+#if CLOX_LIBRARY
   // define built-in native functions
   for (size_t i = 0; i < CLOX_LIBRARY_SIZE; i++) {
     clox_library_fn_t lib_fn = clox_library_fns[i];

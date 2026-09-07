@@ -3,6 +3,14 @@
 
 #include <stddef.h>
 
+#ifndef CLOX_LIBRARY
+#define CLOX_LIBRARY 1
+#endif
+
+#ifndef CLOX_NAN_BOXING
+#define CLOX_NAN_BOXING 1
+#endif
+
 #define CLOX_ARRAY_SIZE(arr) (sizeof((arr)) / sizeof(*(arr)))
 
 typedef struct clox_pos_t {

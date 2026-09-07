@@ -36,8 +36,8 @@ static const clox_library_fn_t *library_entry(const char *name) {
 // making the call would. The VM has already enforced the declared arity by the
 // time a body runs, so these calls pass what the entry asked for and the result
 // says what the body did with it.
-static bool call_library_fn(clox_vm_t *vm, const char *name, size_t arg_count, clox_value_t *args,
-                            clox_native_result_t *result) {
+static bool call_library_fn(clox_vm_t *vm, const char *name, size_t arg_count,
+                            const clox_value_t *args, clox_native_result_t *result) {
   const clox_library_fn_t *entry = library_entry(name);
   if (entry == NULL) {
     return false;
@@ -866,7 +866,7 @@ UTEST_F(library, chr_rejects_a_non_integer_code) {
 // substr, upper, lower, trim, repeat and replace all answer with a string, and
 // every one of these cases is "this text in, that text out".
 static void expect_string_result(int *utest_result, struct library *fixture, const char *name,
-                                 size_t arg_count, clox_value_t *args, const char *expected) {
+                                 size_t arg_count, const clox_value_t *args, const char *expected) {
   clox_native_result_t result;
   ASSERT_TRUE_MSG(call_library_fn(&fixture->vm, name, arg_count, args, &result), expected);
   clox_value_t text = kept_result(fixture, &result);

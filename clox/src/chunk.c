@@ -48,9 +48,10 @@ static inline size_t add_constant(clox_chunk_t *c, clox_value_t val, bool *cache
   size_t index = c->constants.length; // where new value will land
   clox_value_array_write(&c->constants, val);
 
-  if (CLOX_IS_STRING(val)) {
-    // add the new index to the cache
-    clox_table_set(&c->string_constants, CLOX_AS_STRING(val), CLOX_SIZE(index));
+  if (CLOX_IS_STRING(val) && index <= UINT32_MAX) {
+    // add new index to cache (when fits in uint32_t)
+    // cast is safe: the range checked in if condition
+    clox_table_set(&c->string_constants, CLOX_AS_STRING(val), CLOX_SIZE((uint32_t)index));
   }
 
   if (CLOX_IS_OBJECT(val)) {

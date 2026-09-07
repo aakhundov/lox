@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "common.h"
 #include "memory.h"
 #include "object.h"
 #include "value.h"
@@ -63,7 +64,7 @@ static double random_double(clox_vm_t *vm) {
   return (double)(bits >> DOUBLE_MANTISSA_DROPPED) * DOUBLE_MANTISSA_SCALE;
 }
 
-static bool clox_library_fn_clock(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_clock(size_t arg_count, const clox_value_t *args,
                                   clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)args;
@@ -73,7 +74,7 @@ static bool clox_library_fn_clock(size_t arg_count, clox_value_t *args,
   return true;
 }
 
-static bool clox_library_fn_sleep(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_sleep(size_t arg_count, const clox_value_t *args,
                                   clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)arg_count;
@@ -91,8 +92,8 @@ static bool clox_library_fn_sleep(size_t arg_count, clox_value_t *args,
 
 // Wall-clock seconds since the epoch, to clock()'s CPU seconds. Resolution is
 // one second: time_t is all ISO C offers, and it matches sleep()'s grain.
-static bool clox_library_fn_time(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                 clox_vm_t *vm) {
+static bool clox_library_fn_time(size_t arg_count, const clox_value_t *args,
+                                 clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)args;
   (void)arg_count;
@@ -106,8 +107,8 @@ static bool clox_library_fn_time(size_t arg_count, clox_value_t *args, clox_nati
 // Failing routes the halt through the ordinary runtime-error return instead,
 // which tears the VM down on the way out and ends a REPL line rather than the
 // session.
-static bool clox_library_fn_exit(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                 clox_vm_t *vm) {
+static bool clox_library_fn_exit(size_t arg_count, const clox_value_t *args,
+                                 clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)args;
   (void)arg_count;
@@ -121,8 +122,8 @@ static bool clox_library_fn_exit(size_t arg_count, clox_value_t *args, clox_nati
 // reclaimed. Everything the run still needs is reachable while a native is
 // running -- the arguments included, which sit on the stack until the call
 // returns -- so the collection is safe wherever the program puts the call.
-static bool clox_library_fn_gc(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                               clox_vm_t *vm) {
+static bool clox_library_fn_gc(size_t arg_count, const clox_value_t *args,
+                               clox_native_result_t *result, clox_vm_t *vm) {
   (void)args;
   (void)arg_count;
 
@@ -137,8 +138,8 @@ static bool clox_library_fn_gc(size_t arg_count, clox_value_t *args, clox_native
 
 // Seeds the calling VM, and only it: a second VM in the same process keeps the
 // stream it was on.
-static bool clox_library_fn_seed(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                 clox_vm_t *vm) {
+static bool clox_library_fn_seed(size_t arg_count, const clox_value_t *args,
+                                 clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_INTEGER(args[0]), "first argument must be integer");
 
@@ -152,7 +153,7 @@ static bool clox_library_fn_seed(size_t arg_count, clox_value_t *args, clox_nati
   return true;
 }
 
-static bool clox_library_fn_random(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_random(size_t arg_count, const clox_value_t *args,
                                    clox_native_result_t *result, clox_vm_t *vm) {
   (void)args;
   (void)arg_count;
@@ -161,7 +162,7 @@ static bool clox_library_fn_random(size_t arg_count, clox_value_t *args,
   return true;
 }
 
-static bool clox_library_fn_randint(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_randint(size_t arg_count, const clox_value_t *args,
                                     clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_INTEGER(args[0]), "first argument must be integer");
@@ -178,8 +179,8 @@ static bool clox_library_fn_randint(size_t arg_count, clox_value_t *args,
 // No domain checks below: OP_DIVIDE already lets 1/0 through as an infinity,
 // so the language's arithmetic is IEEE all the way down and sqrt(-1) has no
 // business being the one operation that raises a runtime error instead.
-static bool clox_library_fn_sqrt(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                 clox_vm_t *vm) {
+static bool clox_library_fn_sqrt(size_t arg_count, const clox_value_t *args,
+                                 clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)arg_count;
   CHECK(CLOX_IS_NUMBER(args[0]), "first argument must be number");
@@ -188,8 +189,8 @@ static bool clox_library_fn_sqrt(size_t arg_count, clox_value_t *args, clox_nati
   return true;
 }
 
-static bool clox_library_fn_pow(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool clox_library_fn_pow(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)arg_count;
   CHECK(CLOX_IS_NUMBER(args[0]), "first argument must be number");
@@ -199,8 +200,8 @@ static bool clox_library_fn_pow(size_t arg_count, clox_value_t *args, clox_nativ
   return true;
 }
 
-static bool clox_library_fn_abs(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool clox_library_fn_abs(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)arg_count;
   CHECK(CLOX_IS_NUMBER(args[0]), "first argument must be number");
@@ -209,7 +210,7 @@ static bool clox_library_fn_abs(size_t arg_count, clox_value_t *args, clox_nativ
   return true;
 }
 
-static bool clox_library_fn_floor(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_floor(size_t arg_count, const clox_value_t *args,
                                   clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)arg_count;
@@ -219,8 +220,8 @@ static bool clox_library_fn_floor(size_t arg_count, clox_value_t *args,
   return true;
 }
 
-static bool clox_library_fn_ceil(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                 clox_vm_t *vm) {
+static bool clox_library_fn_ceil(size_t arg_count, const clox_value_t *args,
+                                 clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)arg_count;
   CHECK(CLOX_IS_NUMBER(args[0]), "first argument must be number");
@@ -231,8 +232,8 @@ static bool clox_library_fn_ceil(size_t arg_count, clox_value_t *args, clox_nati
 
 // fmin / fmax rather than a bare comparison: they return the non-NaN operand,
 // so one NaN in the middle of the arguments cannot swallow the whole result.
-static bool clox_library_fn_min(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool clox_library_fn_min(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   CHECK(arg_count > 0, "function expects at least one argument");
   CHECK(CLOX_IS_NUMBER(args[0]), "first argument must be number");
@@ -247,8 +248,8 @@ static bool clox_library_fn_min(size_t arg_count, clox_value_t *args, clox_nativ
   return true;
 }
 
-static bool clox_library_fn_max(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool clox_library_fn_max(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   CHECK(arg_count > 0, "function expects at least one argument");
   CHECK(CLOX_IS_NUMBER(args[0]), "first argument must be number");
@@ -265,8 +266,8 @@ static bool clox_library_fn_max(size_t arg_count, clox_value_t *args, clox_nativ
 
 // Length in bytes, not characters: strings are byte sequences here, and the
 // scanner does nothing to decode UTF-8.
-static bool clox_library_fn_len(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool clox_library_fn_len(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
@@ -275,8 +276,8 @@ static bool clox_library_fn_len(size_t arg_count, clox_value_t *args, clox_nativ
   return true;
 }
 
-static bool clox_library_fn_ord(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool clox_library_fn_ord(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)vm;
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
@@ -289,8 +290,8 @@ static bool clox_library_fn_ord(size_t arg_count, clox_value_t *args, clox_nativ
   return true;
 }
 
-static bool clox_library_fn_chr(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool clox_library_fn_chr(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_INTEGER(args[0]), "first argument must be integer");
 
@@ -308,7 +309,7 @@ static bool clox_library_fn_chr(size_t arg_count, clox_value_t *args, clox_nativ
 // The bytes [start, start + length) of the string, clamped to what is there: a
 // start past the end reads as the empty string, and a length running past it
 // stops at the end, rather than either being an error.
-static bool clox_library_fn_substr(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_substr(size_t arg_count, const clox_value_t *args,
                                    clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
@@ -346,7 +347,7 @@ static clox_value_t map_string(clox_allocator_t *alloc, const clox_string_t *str
 
 // ASCII is all upper() and lower() change: toupper and tolower go by the
 // locale, and the interpreter never leaves the C one it starts in.
-static bool clox_library_fn_upper(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_upper(size_t arg_count, const clox_value_t *args,
                                   clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
@@ -355,7 +356,7 @@ static bool clox_library_fn_upper(size_t arg_count, clox_value_t *args,
   return true;
 }
 
-static bool clox_library_fn_lower(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_lower(size_t arg_count, const clox_value_t *args,
                                   clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
@@ -367,8 +368,8 @@ static bool clox_library_fn_lower(size_t arg_count, clox_value_t *args,
 // The string without the whitespace at either end of it, whitespace being what
 // isspace() calls one: space, tab, newline, carriage return, form feed, vertical
 // tab.
-static bool clox_library_fn_trim(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                 clox_vm_t *vm) {
+static bool clox_library_fn_trim(size_t arg_count, const clox_value_t *args,
+                                 clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
 
@@ -387,7 +388,7 @@ static bool clox_library_fn_trim(size_t arg_count, clox_value_t *args, clox_nati
   return true;
 }
 
-static bool clox_library_fn_repeat(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_repeat(size_t arg_count, const clox_value_t *args,
                                    clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
@@ -425,7 +426,7 @@ static inline bool matches_at(const clox_string_t *string, size_t index,
 // Every occurrence of (from) in the string becomes (to), left to right. What a
 // replacement writes is not looked at again, so replace("aa", "a", "aa") ends
 // after one pass rather than running away.
-static bool clox_library_fn_replace(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_replace(size_t arg_count, const clox_value_t *args,
                                     clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
@@ -478,6 +479,17 @@ static bool clox_library_fn_replace(size_t arg_count, clox_value_t *args,
 // a program, so both read as "function"; a native keeps a name of its own, as
 // the printer keeps <nt clock> apart from <fn f> too.
 static const char *value_type_name(clox_value_t val) {
+#if CLOX_NAN_BOXING
+  if (CLOX_IS_BOOL(val)) {
+    return "bool";
+  }
+  if (CLOX_IS_NIL(val)) {
+    return "nil";
+  }
+  if (CLOX_IS_NUMBER(val) || CLOX_IS_SIZE(val)) {
+    return "number";
+  }
+#else
   switch (val.type) {
   case VAL_BOOL:
     return "bool";
@@ -487,32 +499,36 @@ static const char *value_type_name(clox_value_t val) {
   case VAL_SIZE:
     return "number";
   case VAL_OBJECT:
-    switch (CLOX_OBJECT_TYPE(val)) {
-    case OBJ_STRING:
-      return "string";
-    case OBJ_FUNCTION:
-    case OBJ_CLOSURE:
-    case OBJ_BOUND_METHOD:
-      return "function";
-    case OBJ_NATIVE:
-      return "native";
-    case OBJ_CLASS:
-      return "class";
-    case OBJ_INSTANCE:
-      // type of instance is the class name
-      return CLOX_AS_INSTANCE(val)->class_->name->chars;
-    case OBJ_UPVALUE:
-      break; // never a value a program holds
-    }
     break;
   }
+#endif
 
-  assert(false); // every type a program can hold is named above
+  // OBJECT
+  switch (CLOX_OBJECT_TYPE(val)) {
+  case OBJ_STRING:
+    return "string";
+  case OBJ_FUNCTION:
+  case OBJ_CLOSURE:
+  case OBJ_BOUND_METHOD:
+    return "function";
+  case OBJ_NATIVE:
+    return "native";
+  case OBJ_CLASS:
+    return "class";
+  case OBJ_INSTANCE:
+    // type of instance is the class name
+    return CLOX_AS_INSTANCE(val)->class_->name->chars;
+  case OBJ_UPVALUE:
+    break; // never a value a program holds
+  }
+
+  // every type a program can hold is named above
+  assert(0 && "unreachable");
   return "";
 }
 
-static bool clox_library_fn_type(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                 clox_vm_t *vm) {
+static bool clox_library_fn_type(size_t arg_count, const clox_value_t *args,
+                                 clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
 
   const char *name = value_type_name(args[0]);
@@ -555,6 +571,22 @@ static int format_object(char *buffer, size_t size, clox_value_t val) {
 }
 
 static int format_value(char *buffer, size_t size, clox_value_t val) {
+#if CLOX_NAN_BOXING
+  if (CLOX_IS_BOOL(val)) {
+    return snprintf(buffer, size, "%s", CLOX_AS_BOOL(val) ? "true" : "false");
+  }
+  if (CLOX_IS_NIL(val)) {
+    return snprintf(buffer, size, "nil");
+  }
+  if (CLOX_IS_NUMBER(val)) {
+    return snprintf(buffer, size, "%g", CLOX_AS_NUMBER(val));
+  }
+  if (CLOX_IS_SIZE(val)) {
+    return snprintf(buffer, size, "%u", CLOX_AS_SIZE(val));
+  }
+  // OBJECT
+  return format_object(buffer, size, val);
+#else
   switch (val.type) {
   case VAL_BOOL:
     return snprintf(buffer, size, "%s", CLOX_AS_BOOL(val) ? "true" : "false");
@@ -563,14 +595,15 @@ static int format_value(char *buffer, size_t size, clox_value_t val) {
   case VAL_NUMBER:
     return snprintf(buffer, size, "%g", CLOX_AS_NUMBER(val));
   case VAL_SIZE:
-    return snprintf(buffer, size, "%zu", CLOX_AS_SIZE(val));
+    return snprintf(buffer, size, "%u", CLOX_AS_SIZE(val));
   case VAL_OBJECT:
     return format_object(buffer, size, val);
   }
+#endif
 }
 
-static bool clox_library_fn_str(size_t arg_count, clox_value_t *args, clox_native_result_t *result,
-                                clox_vm_t *vm) {
+static bool clox_library_fn_str(size_t arg_count, const clox_value_t *args,
+                                clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
 
   if (CLOX_IS_STRING(args[0])) {
@@ -596,7 +629,7 @@ static bool clox_library_fn_str(size_t arg_count, clox_value_t *args, clox_nativ
 // One line of standard input, without the newline that ends it. Input that ends
 // before a newline arrives reads as what came before it, so end of input on its
 // own reads as the empty string, exactly as an empty line does.
-static bool clox_library_fn_read_line(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_read_line(size_t arg_count, const clox_value_t *args,
                                       clox_native_result_t *result, clox_vm_t *vm) {
   (void)args;
   (void)arg_count;
@@ -681,7 +714,7 @@ static const char *read_whole_file(clox_allocator_t *alloc, const char *path, ch
   return NULL;
 }
 
-static bool clox_library_fn_read_file(size_t arg_count, clox_value_t *args,
+static bool clox_library_fn_read_file(size_t arg_count, const clox_value_t *args,
                                       clox_native_result_t *result, clox_vm_t *vm) {
   (void)arg_count;
   CHECK(CLOX_IS_STRING(args[0]), "first argument must be string");
