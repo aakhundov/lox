@@ -117,6 +117,16 @@ static void emit_invoke(struct vm *fixture, const char *name, size_t arg_count) 
   emit(fixture, (clox_byte_t)arg_count);
 }
 
+// The same for a super invoke. What it names the method in is the class on the
+// stack rather than the receiver's own, so the caller writes the receiver, the
+// arguments and then the class, and the instruction takes the class back off.
+static void emit_invoke_super(struct vm *fixture, const char *name, size_t arg_count) {
+  (void)clox_write_constant(&fixture->function->chunk, OP_INVOKE_SUPER,
+                            clox_test_string_kept(&fixture->alloc, name, strlen(name)), POS);
+  // cast is safe: the tests here count their own arguments
+  emit(fixture, (clox_byte_t)arg_count);
+}
+
 // A class of the given name, and an instance of one. Both are built before
 // anything in the interpreter holds them, so both are the test's to root.
 static clox_class_t *make_class(struct vm *fixture, const char *name) {
@@ -2211,6 +2221,171 @@ UTEST_F(vm, an_initializer_instruction_reaches_the_closure_through_both_places_i
   EXPECT_STREQ("init", CLOX_AS_CLOSURE(class_->init)->function->name);
 }
 
+// A class carrying one method under the given name, for the inherit and super
+// tests, which need a class to reach a method through rather than a method
+// that reports anything about the call.
+static clox_function_t *class_method(struct vm *fixture, clox_class_t *class_, const char *name) {
+  clox_function_t *method = make_callee(fixture, name, 0);
+  emit_to(method, OP_RETURN_NIL);
+  (void)clox_table_set(&class_->methods, clox_test_intern_kept(&fixture->alloc, name),
+                       CLOX_OBJECT(method));
+
+  return method;
+}
+
+UTEST_F(vm, an_inherit_copies_the_methods_of_the_superclass_onto_the_class_over_it) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *method = class_method(utest_fixture, superclass, "m");
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+
+  // the superclass goes on first and the subclass over it, as a declaration
+  // pushes them: the copy runs from the one below to the one above
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit(utest_fixture, OP_INHERIT);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+
+  clox_value_t found;
+  ASSERT_TRUE(
+      clox_table_get(&subclass->methods, clox_test_intern(&utest_fixture->alloc, "m"), &found));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(method), found);
+}
+
+UTEST_F(vm, an_inherit_leaves_the_superclass_and_takes_the_subclass) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+
+  // a marker below the pair tells a subclass taken off the stack from one left
+  // on it; what stays behind is the slot the methods reach super through
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit(utest_fixture, OP_INHERIT);
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_OBJECT(superclass), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, an_inherit_carries_the_initializer_over_as_well) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *init = class_method(utest_fixture, superclass, "init");
+  superclass->init = CLOX_OBJECT(init);
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit(utest_fixture, OP_INHERIT);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+
+  // the initializer is kept in a slot of its own beside the table, and a call
+  // of the class reads that slot: copying the table alone would leave a
+  // subclass declaring no initializer of its own taking no arguments at all
+  EXPECT_VALUE_EQ(CLOX_OBJECT(init), subclass->init);
+}
+
+UTEST_F(vm, a_class_inheriting_from_one_without_an_initializer_keeps_that_slot_empty) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  (void)class_method(utest_fixture, superclass, "m");
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit(utest_fixture, OP_INHERIT);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_TRUE(CLOX_IS_NIL(subclass->init));
+}
+
+UTEST_F(vm, a_method_recorded_after_an_inherit_writes_over_the_one_it_copied) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  (void)class_method(utest_fixture, superclass, "m");
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+  clox_function_t *own = make_callee(utest_fixture, "own", 0);
+
+  // the inherit runs before the body binds anything, so a method of the same
+  // name is the one left standing
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit(utest_fixture, OP_INHERIT);
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit_bare_callee(utest_fixture, own);
+  emit_property(utest_fixture, OP_METHOD, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+
+  clox_value_t found;
+  ASSERT_TRUE(
+      clox_table_get(&subclass->methods, clox_test_intern(&utest_fixture->alloc, "m"), &found));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(own), found);
+}
+
+UTEST_F(vm, an_initializer_recorded_after_an_inherit_writes_over_the_inherited_one) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *inherited = class_method(utest_fixture, superclass, "init");
+  superclass->init = CLOX_OBJECT(inherited);
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+  clox_function_t *own = make_callee(utest_fixture, "init", 0);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit(utest_fixture, OP_INHERIT);
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit_bare_callee(utest_fixture, own);
+  emit_property(utest_fixture, OP_METHOD, "init");
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+
+  // the slot the inherit filled is written over, and not only the table
+  EXPECT_VALUE_EQ(CLOX_OBJECT(own), subclass->init);
+}
+
+UTEST_F(vm, an_inherit_from_something_that_is_not_a_class_is_a_runtime_error) {
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(subclass));
+  emit(utest_fixture, OP_INHERIT);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "superclass") != NULL);
+}
+
+UTEST_F(vm, an_inherit_holds_both_classes_while_the_table_it_copies_into_grows) {
+  // Classes the run made, reachable from the globals table and from nothing
+  // the test holds. Copying into a table that was empty grows it -- an
+  // allocation, and under the stress build a collection -- so reading the
+  // method back afterwards is what says both classes were still there.
+  clox_function_t *method = make_callee(utest_fixture, "m", 0);
+  emit_to(method, OP_RETURN_NIL);
+
+  emit_property(utest_fixture, OP_CLASS, "Super");
+  emit_closure(utest_fixture, method, NULL);
+  emit_property(utest_fixture, OP_METHOD, "m");
+  emit_global(utest_fixture, OP_DEF_GLOBAL, "Super");
+  emit_property(utest_fixture, OP_CLASS, "Sub");
+  emit_global(utest_fixture, OP_DEF_GLOBAL, "Sub");
+
+  emit_global(utest_fixture, OP_GET_GLOBAL, "Super");
+  emit_global(utest_fixture, OP_GET_GLOBAL, "Sub");
+  emit(utest_fixture, OP_INHERIT);
+  emit(utest_fixture, OP_POP); // the superclass the inherit left behind
+  emit_global(utest_fixture, OP_GET_GLOBAL, "Sub");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_TRUE(CLOX_IS_CLASS(utest_fixture->printed.values[0]));
+
+  clox_value_t found;
+  ASSERT_TRUE(clox_table_get(&CLOX_AS_CLASS(utest_fixture->printed.values[0])->methods,
+                             clox_test_intern(&utest_fixture->alloc, "m"), &found));
+  ASSERT_TRUE(CLOX_IS_CLOSURE(found));
+  EXPECT_STREQ("m", CLOX_AS_CLOSURE(found)->function->name);
+}
+
 UTEST_F(vm, a_property_get_reads_a_field_of_the_instance) {
   clox_class_t *class_ = make_class(utest_fixture, "Named");
   clox_instance_t *instance = make_instance(utest_fixture, class_);
@@ -2303,6 +2478,96 @@ UTEST_F(vm, a_property_get_of_a_class_is_a_runtime_error) {
 
   EXPECT_FALSE(interpret(utest_fixture, 1));
   EXPECT_EQ((size_t)1, utest_fixture->errors.count);
+}
+
+UTEST_F(vm, a_super_get_binds_a_method_of_the_class_it_names_over_the_receiver) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *method = class_method(utest_fixture, superclass, "m");
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+  clox_instance_t *instance = make_instance(utest_fixture, subclass);
+
+  // the receiver goes on first and the class to look the name up in over it,
+  // as a method compiled from super pushes them
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_property(utest_fixture, OP_GET_SUPER, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  clox_value_t bound = utest_fixture->printed.values[0];
+  ASSERT_TRUE(CLOX_IS_BOUND_METHOD(bound));
+  // the method comes from the class named, the receiver from the instance
+  // under it
+  EXPECT_VALUE_EQ(CLOX_OBJECT(instance), CLOX_AS_BOUND_METHOD(bound)->receiver);
+  EXPECT_VALUE_EQ(CLOX_OBJECT(method), CLOX_AS_BOUND_METHOD(bound)->method);
+}
+
+UTEST_F(vm, a_super_get_takes_both_the_class_and_the_receiver_off_the_stack) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  (void)class_method(utest_fixture, superclass, "m");
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+
+  // a marker below the pair says the binding stands where the receiver did,
+  // and that the class over it went with it
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_property(utest_fixture, OP_GET_SUPER, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_TRUE(CLOX_IS_BOUND_METHOD(utest_fixture->printed.values[1]));
+}
+
+UTEST_F(vm, a_super_get_reads_the_class_it_names_and_not_the_one_the_receiver_has) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *inherited = class_method(utest_fixture, superclass, "m");
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+  (void)class_method(utest_fixture, subclass, "m");
+  clox_instance_t *instance = make_instance(utest_fixture, subclass);
+
+  // both classes carry the name; naming one is the whole point of the
+  // instruction, and the receiver's own is not consulted
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_property(utest_fixture, OP_GET_SUPER, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  clox_value_t bound = utest_fixture->printed.values[0];
+  ASSERT_TRUE(CLOX_IS_BOUND_METHOD(bound));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(inherited), CLOX_AS_BOUND_METHOD(bound)->method);
+}
+
+UTEST_F(vm, a_super_get_does_not_read_a_field_of_the_receiver) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *method = class_method(utest_fixture, superclass, "m");
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_NUMBER(42.0));
+
+  // a property get answers with a field of that name before a method; a super
+  // get reads a class, and a class has no fields to answer with
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_property(utest_fixture, OP_GET_SUPER, "m");
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  clox_value_t bound = utest_fixture->printed.values[0];
+  ASSERT_TRUE(CLOX_IS_BOUND_METHOD(bound));
+  EXPECT_VALUE_EQ(CLOX_OBJECT(method), CLOX_AS_BOUND_METHOD(bound)->method);
+}
+
+UTEST_F(vm, a_super_get_of_a_name_the_class_does_not_have_is_a_runtime_error) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_property(utest_fixture, OP_GET_SUPER, "missing");
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "missing") != NULL);
 }
 
 UTEST_F(vm, a_property_set_records_the_field_and_leaves_the_value) {
@@ -2765,6 +3030,164 @@ UTEST_F(vm, an_invoke_carries_on_where_it_left_off_when_the_call_takes_no_frame)
   emit_invoke(utest_fixture, "f", 0);
   emit_constant(utest_fixture, CLOX_OBJECT(instance));
   emit_invoke(utest_fixture, "f", 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(0.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, a_super_invoke_runs_a_method_of_the_class_it_names_on_the_receiver) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  (void)method_returning_its_slot(utest_fixture, superclass, "m", 0);
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+  clox_instance_t *instance = make_instance(utest_fixture, subclass);
+
+  // the receiver already stands where a call frame expects its callee, and the
+  // class over it is gone by the time the frame is made
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "m", 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_OBJECT(instance), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_super_invoke_passes_its_arguments_between_the_receiver_and_the_class) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  // slot 1 is the first argument, the slot after the receiver
+  (void)method_returning_its_slot(utest_fixture, superclass, "m", 1);
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+
+  // the class is pushed last and taken off first, so the arguments below it
+  // are left where a frame reads them
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(42.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "m", 1);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_super_invoke_leaves_its_result_where_the_receiver_stood) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *method = make_callee(utest_fixture, "m", 1);
+  emit_constant_to(method, CLOX_NUMBER(42.0));
+  emit_to(method, OP_RETURN);
+  (void)clox_table_set(&superclass->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(method));
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+
+  // a marker below the receiver says the receiver, the argument and the class
+  // were all taken with the frame that ran on them
+  emit_constant(utest_fixture, CLOX_NUMBER(1.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_NUMBER(2.0));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "m", 1);
+
+  ASSERT_TRUE(interpret(utest_fixture, 2));
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(vm, a_super_invoke_calls_the_class_it_names_and_not_the_one_the_receiver_has) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *inherited = make_callee(utest_fixture, "inherited", 0);
+  emit_constant_to(inherited, CLOX_NUMBER(1.0));
+  emit_to(inherited, OP_RETURN);
+  (void)clox_table_set(&superclass->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(inherited));
+
+  clox_class_t *subclass = make_class(utest_fixture, "Sub");
+  clox_function_t *own = make_callee(utest_fixture, "own", 0);
+  emit_constant_to(own, CLOX_NUMBER(42.0));
+  emit_to(own, OP_RETURN);
+  (void)clox_table_set(&subclass->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(own));
+  clox_instance_t *instance = make_instance(utest_fixture, subclass);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "m", 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  // the class named is what the name is looked up in, however the receiver's
+  // own class answers it
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_super_invoke_does_not_call_a_field_of_the_receiver) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_function_t *method = make_callee(utest_fixture, "m", 0);
+  emit_constant_to(method, CLOX_NUMBER(1.0));
+  emit_to(method, OP_RETURN);
+  (void)clox_table_set(&superclass->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(method));
+
+  clox_function_t *field_fn = make_callee(utest_fixture, "field", 0);
+  emit_constant_to(field_fn, CLOX_NUMBER(42.0));
+  emit_to(field_fn, OP_RETURN);
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+  (void)clox_table_set(&instance->fields, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       CLOX_OBJECT(field_fn));
+
+  // an ordinary invoke calls a field of that name before a method; a super
+  // invoke reads a class, which has no fields to reach first
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "m", 0);
+
+  ASSERT_TRUE(interpret(utest_fixture, 1));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(1.0), utest_fixture->printed.values[0]);
+}
+
+UTEST_F(vm, a_super_invoke_of_a_name_the_class_does_not_have_is_a_runtime_error) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "missing", 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "missing") != NULL);
+}
+
+UTEST_F(vm, a_super_invoke_of_another_arity_than_the_method_takes_is_a_runtime_error) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  (void)method_returning_its_slot(utest_fixture, superclass, "m", 1);
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "m", 0);
+
+  EXPECT_FALSE(interpret(utest_fixture, 1));
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "expected 1") != NULL);
+}
+
+UTEST_F(vm, a_super_invoke_carries_on_where_it_left_off_when_the_call_takes_no_frame) {
+  clox_class_t *superclass = make_class(utest_fixture, "Super");
+  clox_value_t native = CLOX_NATIVE(&utest_fixture->alloc, "counting", 0, counting_native);
+  clox_test_keep(&utest_fixture->alloc, CLOX_AS_OBJECT(native));
+  (void)clox_table_set(&superclass->methods, clox_test_intern_kept(&utest_fixture->alloc, "m"),
+                       native);
+  clox_instance_t *instance = make_instance(utest_fixture, superclass);
+
+  // two of them in a row: an instruction pointer picked up from the wrong
+  // frame would read the second one as something else
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "m", 0);
+  emit_constant(utest_fixture, CLOX_OBJECT(instance));
+  emit_constant(utest_fixture, CLOX_OBJECT(superclass));
+  emit_invoke_super(utest_fixture, "m", 0);
 
   ASSERT_TRUE(interpret(utest_fixture, 2));
   ASSERT_EQ((size_t)2, utest_fixture->printed.count);

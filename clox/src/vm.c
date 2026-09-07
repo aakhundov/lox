@@ -250,7 +250,7 @@ static inline bool invoke_from_class(clox_vm_t *vm, const clox_class_t *class_,
                                      const clox_string_t *name, size_t arg_count) {
   clox_value_t method;
   if (!clox_table_get(&class_->methods, name, &method)) {
-    error(vm, "undefined property '%s'", name->chars);
+    error(vm, "undefined method '%s'", name->chars);
     return false;
   }
 
@@ -408,6 +408,21 @@ static bool run(clox_vm_t *vm) {
 
       break;
     }
+    case OP_GET_SUPER:
+    case OP_GET_SUPER_LONG: {
+      const clox_class_t *class_ = CLOX_AS_CLASS(POP());
+      const clox_string_t *name = READ_STRING(opcode);
+
+      clox_value_t method;
+      if (clox_table_get(&class_->methods, name, &method)) {
+        clox_value_t bm = CLOX_BOUND_METHOD(vm->allocator, PEEK(0), method);
+        POP(); // instance
+        PUSH(bm);
+      } else {
+        ERROR("undefined method '%s'", name->chars);
+      }
+      break;
+    }
     case OP_GET_LOCAL:
       PUSH(frame->slots[READ_BYTE()]);
       break;
@@ -495,7 +510,18 @@ static bool run(clox_vm_t *vm) {
         class_->init = PEEK(0);
       }
       clox_table_set(&class_->methods, name, PEEK(0));
-      POP();
+      POP(); // method
+      break;
+    }
+    case OP_INHERIT: {
+      clox_value_t superclass = PEEK(1);
+      if (!CLOX_IS_CLASS(superclass)) {
+        ERROR("superclass must be a class");
+      }
+      clox_class_t *class_ = CLOX_AS_CLASS(PEEK(0));
+      clox_table_copy(&class_->methods, &CLOX_AS_CLASS(superclass)->methods);
+      class_->init = CLOX_AS_CLASS(superclass)->init;
+      POP(); // (sub)class
       break;
     }
     case OP_NIL:
@@ -632,6 +658,20 @@ static bool run(clox_vm_t *vm) {
       size_t arg_count = READ_BYTE();
       frame->ip = ip; // for transitive error() calls
       if (!invoke(vm, PEEK(arg_count), name, arg_count)) {
+        return false; // invoke failed
+      }
+      // pick up the new call frame locally
+      frame = &vm->frames[vm->frame_count - 1];
+      ip = frame->ip;
+      break;
+    }
+    case OP_INVOKE_SUPER:
+    case OP_INVOKE_SUPER_LONG: {
+      const clox_class_t *class_ = CLOX_AS_CLASS(POP());
+      const clox_string_t *name = READ_STRING(opcode);
+      size_t arg_count = READ_BYTE();
+      frame->ip = ip; // for transitive error() calls
+      if (!invoke_from_class(vm, class_, name, arg_count)) {
         return false; // invoke failed
       }
       // pick up the new call frame locally

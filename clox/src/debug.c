@@ -14,8 +14,8 @@
 #define PAD_SIZE 40
 #define POS_SIZE 11
 
-static size_t const_instruction(FILE *stream, const clox_chunk_t *chunk, clox_op_code_t opcode,
-                                clox_value_t *value, size_t offset) {
+static inline size_t const_instruction(FILE *stream, const clox_chunk_t *chunk,
+                                       clox_op_code_t opcode, clox_value_t *value, size_t offset) {
   const clox_byte_t *ip = chunk->code + offset + 1; // skip the opcode
   clox_value_t val = clox_read_constant(chunk, opcode, &ip);
   assert(ip > chunk->code + offset + 1); // ip has moved
@@ -30,13 +30,14 @@ static size_t const_instruction(FILE *stream, const clox_chunk_t *chunk, clox_op
   return (size_t)(ip - chunk->code);
 }
 
-static size_t byte_instruction(FILE *stream, const clox_chunk_t *chunk, size_t offset) {
+static inline size_t byte_instruction(FILE *stream, const clox_chunk_t *chunk, size_t offset) {
   clox_byte_t byte = chunk->code[offset + 1];
   (void)fprintf(stream, "0x%02x", byte);
   return offset + 2; // opcode + byte
 }
 
-static size_t jump_instruction(FILE *stream, const clox_chunk_t *chunk, int sign, size_t offset) {
+static inline size_t jump_instruction(FILE *stream, const clox_chunk_t *chunk, int sign,
+                                      size_t offset) {
   assert(sign == 1 || sign == -1);
 
   size_t jump = ((size_t)chunk->code[offset + 1] << CHAR_BIT);
@@ -48,8 +49,12 @@ static size_t jump_instruction(FILE *stream, const clox_chunk_t *chunk, int sign
   return offset + 3; // opcode + 2 bytes
 }
 
-static size_t append_upvalues(FILE *stream, const clox_chunk_t *chunk, size_t count,
-                              size_t offset) {
+static inline size_t closure_instruction(FILE *stream, const clox_chunk_t *chunk,
+                                         clox_op_code_t opcode, size_t offset) {
+  clox_value_t val;
+  offset = const_instruction(stream, chunk, opcode, &val, offset);
+
+  size_t count = CLOX_AS_FUNCTION(val)->upvalue_count;
   for (size_t i = 0; i < count; i++) {
     bool is_local = (chunk->code[offset++] == 1);
     size_t index = chunk->code[offset++];
@@ -59,7 +64,10 @@ static size_t append_upvalues(FILE *stream, const clox_chunk_t *chunk, size_t co
   return offset; // incremented above
 }
 
-static size_t append_arg_count(FILE *stream, const clox_chunk_t *chunk, size_t offset) {
+static inline size_t invoke_instruction(FILE *stream, const clox_chunk_t *chunk,
+                                        clox_op_code_t opcode, size_t offset) {
+  offset = const_instruction(stream, chunk, opcode, NULL, offset);
+
   clox_byte_t arg_count = chunk->code[offset++];
   (void)fprintf(stream, " 0x%02x", arg_count);
 
@@ -109,6 +117,7 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_PRINT:
     case OP_RETURN:
     case OP_RETURN_NIL:
+    case OP_INHERIT:
       offset++; // just opcode
       break;
     case OP_CONSTANT:
@@ -131,22 +140,20 @@ size_t clox_disassemble_instruction_fprintf(FILE *stream, const clox_chunk_t *ch
     case OP_CLASS_LONG:
     case OP_METHOD:
     case OP_METHOD_LONG:
+    case OP_GET_SUPER:
+    case OP_GET_SUPER_LONG:
       offset = const_instruction(stream, chunk, opcode, NULL, offset);
       break;
     case OP_CLOSURE:
-    case OP_CLOSURE_LONG: {
-      clox_value_t val;
-      offset = const_instruction(stream, chunk, opcode, &val, offset);
-      size_t count = CLOX_AS_FUNCTION(val)->upvalue_count;
-      offset = append_upvalues(stream, chunk, count, offset);
+    case OP_CLOSURE_LONG:
+      offset = closure_instruction(stream, chunk, opcode, offset);
       break;
-    }
     case OP_INVOKE:
-    case OP_INVOKE_LONG: {
-      offset = const_instruction(stream, chunk, opcode, NULL, offset);
-      offset = append_arg_count(stream, chunk, offset);
+    case OP_INVOKE_LONG:
+    case OP_INVOKE_SUPER:
+    case OP_INVOKE_SUPER_LONG:
+      offset = invoke_instruction(stream, chunk, opcode, offset);
       break;
-    }
     case OP_GET_LOCAL:
     case OP_SET_LOCAL:
     case OP_SET_LOCAL_POP:

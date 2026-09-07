@@ -90,7 +90,8 @@ static bool takes_upvalue_operands(clox_op_code_t opcode) {
 // the same reason as the list above -- a new opcode of this shape that is not
 // named here fails the walks below on the stride it did not advance by.
 static bool takes_arg_count_operand(clox_op_code_t opcode) {
-  return opcode == OP_INVOKE || opcode == OP_INVOKE_LONG;
+  return opcode == OP_INVOKE || opcode == OP_INVOKE_LONG || opcode == OP_INVOKE_SUPER ||
+         opcode == OP_INVOKE_SUPER_LONG;
 }
 
 // A function to close over, declaring the given number of upvalues. What it
@@ -304,6 +305,47 @@ UTEST_F(debug, walking_a_chunk_of_invoke_instructions_lands_exactly_on_its_end) 
 
   EXPECT_EQ(chunk->length, offset);
   EXPECT_EQ((size_t)4, instructions);
+}
+
+UTEST_F(debug, a_super_get_names_the_method_it_reaches) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_TRUE(clox_write_constant(chunk, OP_GET_SUPER,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "method", 6), POS));
+
+  // the class the name is looked up in stands on the stack rather than in the
+  // code, so the name is the whole of what the instruction carries
+  EXPECT_EQ((size_t)2, disassemble_one(utest_fixture, 0));
+  EXPECT_TRUE(strstr(utest_fixture->text, "OP_GET_SUPER") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "\"method\"") != NULL);
+}
+
+UTEST_F(debug, a_super_invoke_names_the_method_it_calls_and_the_arguments_it_passes) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  ASSERT_TRUE(clox_write_constant(chunk, OP_INVOKE_SUPER,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "method", 6), POS));
+  write_arg_count(utest_fixture, 2);
+
+  // the same shape an ordinary invoke has: a name and then a count
+  ASSERT_EQ((size_t)3, disassemble_one(utest_fixture, 0));
+  EXPECT_TRUE(strstr(utest_fixture->text, "OP_INVOKE_SUPER") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "\"method\"") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "0x02") != NULL);
+}
+
+UTEST_F(debug, a_long_super_invoke_advances_past_its_wider_index_and_its_count) {
+  clox_chunk_t *chunk = &utest_fixture->chunk;
+  for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
+    ASSERT_TRUE(clox_write_constant(chunk, OP_CONSTANT, CLOX_NUMBER((double)i), POS));
+  }
+
+  size_t offset = chunk->length;
+  ASSERT_TRUE(clox_write_constant(chunk, OP_INVOKE_SUPER,
+                                  CLOX_STRING_COPY(&utest_fixture->alloc, "method", 6), POS));
+  write_arg_count(utest_fixture, 1);
+
+  EXPECT_EQ(offset + 5, disassemble_one(utest_fixture, offset));
+  EXPECT_TRUE(strstr(utest_fixture->text, "OP_INVOKE_SUPER_LONG") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->text, "0x01") != NULL);
 }
 
 UTEST_F(debug, a_closure_capturing_nothing_advances_like_any_constant_instruction) {

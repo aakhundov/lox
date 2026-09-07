@@ -317,6 +317,15 @@ static inline clox_function_t *end_frame(clox_compiler_t *c) {
   return function;
 }
 
+static inline clox_token_t synthetic_token(const char *name) {
+  clox_token_t token;
+  token.start = name;
+  token.length = strlen(name);
+  token.type = TOKEN_IDENTIFIER;
+  token.pos = (clox_pos_t){.line = 1, .col = 1}; // dummy
+  return token;
+}
+
 typedef enum clox_precedence_t {
   PREC_NONE,
   PREC_ASSIGNMENT, // =
@@ -344,6 +353,7 @@ static void declaration(clox_compiler_t *c);
 static void var_declaration(clox_compiler_t *c);
 static void statement(clox_compiler_t *c);
 static void expression_statement(clox_compiler_t *c);
+static void variable(clox_compiler_t *c, bool can_assign);
 static clox_parse_rule_t get_rule(clox_token_type_t type);
 
 static void parse(clox_compiler_t *c, clox_precedence_t prec) {
@@ -917,31 +927,56 @@ static void class_declaration(clox_compiler_t *c) {
   clox_token_t keyword = c->previous;
   consume(c, TOKEN_IDENTIFIER, "expect class name");
 
-  clox_token_t name = c->previous;
-  clox_value_t name_str = CLOX_STRING_COPY(c->allocator, name.start, name.length);
+  clox_token_t class_name = c->previous;
+  clox_value_t class_name_str = CLOX_STRING_COPY(c->allocator, class_name.start, class_name.length);
 
-  emit_constant(c, OP_CLASS, name_str, &name);
+  emit_constant(c, OP_CLASS, class_name_str, &class_name);
 
   if (FRAME(c)->scope_depth > 0) { // local scope
     // locally declared class name
     // must be visible from methods
-    declare_variable(c, &name);
+    declare_variable(c, &class_name);
     mark_initialized(c);
   } else { // global scope
-    emit_constant(c, OP_DEF_GLOBAL, name_str, &keyword);
+    emit_constant(c, OP_DEF_GLOBAL, class_name_str, &keyword);
   }
 
   clox_compile_class_t current_class;
+  current_class.has_superclass = false;
   current_class.enclosing = c->class_;
   c->class_ = &current_class;
 
-  named_variable(c, &name, false);
+  if (match(c, TOKEN_LESS)) {
+    consume(c, TOKEN_IDENTIFIER, "expect superclass name");
+    clox_token_t superclass_name = c->previous;
+
+    if (names_equal(&class_name, &superclass_name)) {
+      error(c, &superclass_name, "class can't inherit from itself");
+    }
+
+    begin_scope(c); // super scope
+
+    variable(c, false); // super variable
+    clox_token_t super_token = synthetic_token("super");
+    add_local(c, FRAME(c), &super_token); // for super variable
+    mark_initialized(c);
+
+    named_variable(c, &class_name, false); // class
+    emit_opcode(c, OP_INHERIT, &superclass_name);
+    current_class.has_superclass = true;
+  }
+
+  named_variable(c, &class_name, false);
   consume(c, TOKEN_LEFT_BRACE, "expect '{' before class body");
   while (!check(c, TOKEN_RIGHT_BRACE) && !check(c, TOKEN_EOF)) {
     method(c);
   }
   consume(c, TOKEN_RIGHT_BRACE, "expect '}' after class body");
-  emit_opcode(c, OP_POP, &name); // name
+  emit_opcode(c, OP_POP, &class_name); // name
+
+  if (current_class.has_superclass) {
+    end_scope(c, &class_name); // super scope
+  }
 
   c->class_ = c->class_->enclosing;
 }
@@ -1257,6 +1292,44 @@ static void this_(clox_compiler_t *c, bool can_assign) {
   }
 
   variable(c, false);
+}
+
+static void super_(clox_compiler_t *c, bool can_assign) {
+  (void)can_assign;
+  clox_token_t keyword = c->previous;
+
+  if (c->class_ == NULL) {
+    error(c, &keyword, "super allowed only inside class methods");
+  } else if (!c->class_->has_superclass) {
+    error(c, &keyword, "super allowed only in class with superclass");
+  }
+
+  consume(c, TOKEN_DOT, "expect '.' after super");
+  consume(c, TOKEN_IDENTIFIER, "expect superclass method name");
+
+  clox_token_t method = c->previous;
+  clox_value_t method_str = CLOX_STRING_COPY(c->allocator, method.start, method.length);
+
+  clox_push_durable(c->allocator, CLOX_AS_OBJECT(method_str));
+
+  clox_token_t this_token = synthetic_token("this");
+  named_variable(c, &this_token, false);
+  clox_token_t super_token = synthetic_token("super");
+
+  if (match(c, TOKEN_LEFT_PAREN)) {
+    // (this) pushed before the args
+    size_t arg_count = argument_list(c);
+    // (super) pushed after the args
+    named_variable(c, &super_token, false);
+    emit_constant(c, OP_INVOKE_SUPER, method_str, &method);
+    // cast is safe: range check is done in argument_list
+    emit_byte(c, (clox_byte_t)arg_count, &method);
+  } else {
+    named_variable(c, &super_token, false);
+    emit_constant(c, OP_GET_SUPER, method_str, &method);
+  }
+
+  clox_pop_durable(c->allocator);
 }
 
 static const clox_parse_rule_t parse_rules[] = {

@@ -61,6 +61,7 @@ typedef struct clox_compile_frame_t {
 } clox_compile_frame_t;
 
 typedef struct clox_compile_class_t {
+  bool has_superclass;
   struct clox_compile_class_t *enclosing;
 } clox_compile_class_t;
 

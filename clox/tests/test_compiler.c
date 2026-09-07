@@ -167,6 +167,21 @@ static const char *past_a_byte_of_constants(char (*buffer)[SOURCE_SIZE], const c
   return *buffer;
 }
 
+// The same filler inside a method of a subclass, for the statements whose
+// index is written into the method's own chunk rather than the script's: a
+// super instruction names its method there, and only a method carrying a byte
+// of constants of its own reaches the long form of one.
+static const char *method_past_a_byte_of_constants(char (*buffer)[SOURCE_SIZE],
+                                                   const char *statement) {
+  size_t written = (size_t)snprintf(*buffer, SOURCE_SIZE, "class B < A { m() {");
+  for (size_t i = 0; i < OVER_BYTE_INDEX; i++) {
+    written += (size_t)snprintf(*buffer + written, SOURCE_SIZE - written, "%zu;", i);
+  }
+  (void)snprintf(*buffer + written, SOURCE_SIZE - written, "%s } }", statement);
+
+  return *buffer;
+}
+
 // Renders "fun f(p0,p1,...){}" over count parameters into buffer.
 static const char *function_of_params(char (*buffer)[SOURCE_SIZE], size_t count) {
   size_t written = (size_t)snprintf(*buffer, SOURCE_SIZE, "fun f(");
@@ -2030,6 +2045,225 @@ UTEST_F(compiler, only_the_whole_name_init_makes_an_initializer) {
   ASSERT_TRUE(method != NULL);
   // a name the initializer's name is a prefix of is an ordinary method
   EXPECT_CODE(&method->chunk, OP_RETURN_NIL, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_superclass_clause_pushes_both_classes_and_inherits_between_them) {
+  ASSERT_TRUE(compile(utest_fixture, "class B < A {}"));
+
+  // the superclass is pushed first and the subclass onto it, so the inherit
+  // reads the pair in that order and takes the subclass back off; what the
+  // superclass is left standing in is the slot super names, and the second
+  // pop at the end is that slot going away with the scope around it
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_DEF_GLOBAL, 0, OP_GET_GLOBAL, 1,
+              OP_GET_GLOBAL, 0, OP_INHERIT, OP_GET_GLOBAL, 0, OP_POP, OP_POP, OP_RETURN_NIL);
+  EXPECT_STREQ("B", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[0]));
+  EXPECT_STREQ("A", CLOX_AS_CSTRING(utest_fixture->function->chunk.constants.values[1]));
+}
+
+UTEST_F(compiler, a_class_declared_in_a_block_inherits_off_a_slot_of_its_own) {
+  ASSERT_TRUE(compile(utest_fixture, "{ class B < A {} }"));
+
+  // the subclass is already a local of the block, so the inherit reads it back
+  // off that slot; the superclass takes the slot after it, and the three pops
+  // are the body's copy, the superclass and the class the block declared
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_GET_GLOBAL, 1, OP_GET_LOCAL, 1,
+              OP_INHERIT, OP_GET_LOCAL, 1, OP_POP, OP_POP, OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_class_without_a_superclass_opens_no_scope_to_close) {
+  // the pair of pops above is what the clause costs: a class declared without
+  // one leaves a single pop, and no scope was opened to pop a second time
+  ASSERT_TRUE(compile(utest_fixture, "class B {}"));
+
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_DEF_GLOBAL, 0, OP_GET_GLOBAL, 0,
+              OP_POP, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_method_using_super_captures_the_slot_the_superclass_stands_in) {
+  ASSERT_TRUE(compile(utest_fixture, "class B < A { m() { super.m(); } }"));
+
+  // the method captures that slot, so the scope closes it on the way out
+  // rather than popping it
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_DEF_GLOBAL, 0, OP_GET_GLOBAL, 1,
+              OP_GET_GLOBAL, 0, OP_INHERIT, OP_GET_GLOBAL, 0, OP_CLOSURE, 2, 1, 1, OP_METHOD, 3,
+              OP_POP, OP_CLOSE_UPVALUE, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_super_call_pushes_the_receiver_then_the_class_it_reaches_through) {
+  ASSERT_TRUE(compile(utest_fixture, "class B < A { m() { super.m(); } }"));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 2);
+  ASSERT_TRUE(method != NULL);
+  // the receiver goes where a call frame expects its callee and the class on
+  // top of it, so the invoke has only to take the class back off
+  EXPECT_CODE(&method->chunk, OP_GET_LOCAL, 0, OP_GET_UPVALUE, 0, OP_INVOKE_SUPER, 0, 0, OP_POP,
+              OP_RETURN_NIL);
+  EXPECT_STREQ("m", CLOX_AS_CSTRING(method->chunk.constants.values[0]));
+}
+
+UTEST_F(compiler, a_super_call_pushes_its_arguments_between_the_receiver_and_the_class) {
+  ASSERT_TRUE(compile(utest_fixture, "class B < A { m() { super.m(1, 2); } }"));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 2);
+  ASSERT_TRUE(method != NULL);
+  // the arguments stand where a frame expects them, above the receiver: the
+  // class is pushed after them and is gone again before the call is made
+  EXPECT_CODE(&method->chunk, OP_GET_LOCAL, 0, OP_CONSTANT, 0, OP_CONSTANT, 1, OP_GET_UPVALUE, 0,
+              OP_INVOKE_SUPER, 2, 2, OP_POP, OP_RETURN_NIL);
+  // the arguments are compiled before the name is written, so the name takes
+  // the constant index after theirs
+  EXPECT_STREQ("m", CLOX_AS_CSTRING(method->chunk.constants.values[2]));
+}
+
+UTEST_F(compiler, a_super_that_is_read_and_not_called_is_a_get) {
+  // the two forms part on the '(' the way a property's do
+  ASSERT_TRUE(compile(utest_fixture, "class B < A { m() { return super.m; } }"));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 2);
+  ASSERT_TRUE(method != NULL);
+  EXPECT_CODE(&method->chunk, OP_GET_LOCAL, 0, OP_GET_UPVALUE, 0, OP_GET_SUPER, 0, OP_RETURN,
+              OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, one_superclass_slot_serves_every_method_that_names_it) {
+  ASSERT_TRUE(
+      compile(utest_fixture, "class B < A { one() { super.one(); } two() { super.two(); } }"));
+
+  // both closures capture the same slot, and the scope closes it once
+  EXPECT_CODE(&utest_fixture->function->chunk, OP_CLASS, 0, OP_DEF_GLOBAL, 0, OP_GET_GLOBAL, 1,
+              OP_GET_GLOBAL, 0, OP_INHERIT, OP_GET_GLOBAL, 0, OP_CLOSURE, 2, 1, 1, OP_METHOD, 3,
+              OP_CLOSURE, 4, 1, 1, OP_METHOD, 5, OP_POP, OP_CLOSE_UPVALUE, OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, super_inside_a_function_in_a_method_is_reached_through_an_upvalue) {
+  ASSERT_TRUE(compile(utest_fixture, "class B < A { m() { fun f() { super.m(); } } }"));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 2);
+  ASSERT_TRUE(method != NULL);
+  // the receiver is a local of the method and the superclass an upvalue of it,
+  // so the function declared in the body captures one of each
+  EXPECT_CODE(&method->chunk, OP_CLOSURE, 0, 1, 0, 0, 0, OP_RETURN_NIL);
+
+  clox_function_t *inner = function_constant(&method->chunk, 0);
+  ASSERT_TRUE(inner != NULL);
+  EXPECT_EQ((size_t)2, inner->upvalue_count);
+  EXPECT_CODE(&inner->chunk, OP_GET_UPVALUE, 0, OP_GET_UPVALUE, 1, OP_INVOKE_SUPER, 0, 0, OP_POP,
+              OP_RETURN_NIL);
+}
+
+UTEST_F(compiler, a_super_call_at_a_long_index_takes_the_long_form) {
+  char source[SOURCE_SIZE];
+  ASSERT_TRUE(compile(utest_fixture, method_past_a_byte_of_constants(&source, "super.m(1);")));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 2);
+  ASSERT_TRUE(method != NULL);
+  // the tail is the long invoke, its three index bytes and its count, then
+  // the pop and the method's own return
+  const clox_chunk_t *chunk = &method->chunk;
+  ASSERT_TRUE(chunk->length >= 7);
+  EXPECT_EQ((clox_byte_t)OP_INVOKE_SUPER_LONG, chunk->code[chunk->length - 7]);
+  EXPECT_EQ((clox_byte_t)1, chunk->code[chunk->length - 3]);
+  EXPECT_EQ((clox_byte_t)OP_POP, chunk->code[chunk->length - 2]);
+  EXPECT_EQ((clox_byte_t)OP_RETURN_NIL, chunk->code[chunk->length - 1]);
+}
+
+UTEST_F(compiler, a_super_get_at_a_long_index_takes_the_long_form) {
+  char source[SOURCE_SIZE];
+  ASSERT_TRUE(compile(utest_fixture, method_past_a_byte_of_constants(&source, "super.m;")));
+
+  clox_function_t *method = function_constant(&utest_fixture->function->chunk, 2);
+  ASSERT_TRUE(method != NULL);
+  const clox_chunk_t *chunk = &method->chunk;
+  ASSERT_TRUE(chunk->length >= 6);
+  EXPECT_EQ((clox_byte_t)OP_GET_SUPER_LONG, chunk->code[chunk->length - 6]);
+  EXPECT_EQ((clox_byte_t)OP_POP, chunk->code[chunk->length - 2]);
+  EXPECT_EQ((clox_byte_t)OP_RETURN_NIL, chunk->code[chunk->length - 1]);
+}
+
+UTEST_F(compiler, a_class_inheriting_from_itself_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class A < A {}"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "inherit") != NULL);
+}
+
+UTEST_F(compiler, a_class_inheriting_from_a_name_declared_over_its_own_is_reported) {
+  // the name is what the clause is read against, not the value standing under
+  // it: an outer class of that name is no way around the rule
+  EXPECT_FALSE(compile(utest_fixture, "class A {} { class A < A {} }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "inherit") != NULL);
+}
+
+UTEST_F(compiler, a_superclass_that_is_not_a_name_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class B < 1 {}"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "superclass name") != NULL);
+}
+
+UTEST_F(compiler, super_outside_a_class_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "print super.m;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "super") != NULL);
+}
+
+UTEST_F(compiler, super_in_a_function_outside_a_class_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "fun f() { return super.m; }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "super") != NULL);
+}
+
+UTEST_F(compiler, super_after_the_class_it_was_written_in_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class B < A {} print super.m;"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "super") != NULL);
+}
+
+UTEST_F(compiler, super_in_a_class_declared_without_a_superclass_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class A { m() { super.m(); } }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "superclass") != NULL);
+}
+
+UTEST_F(compiler, super_in_a_class_nested_in_one_that_has_a_superclass_is_reported) {
+  // the class the name belongs to is the innermost one, whatever the class
+  // around it was declared with
+  EXPECT_FALSE(compile(utest_fixture, "class B < A { m() { class I { n() { super.n(); } } } }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "superclass") != NULL);
+}
+
+UTEST_F(compiler, super_is_reachable_again_after_a_nested_class_that_had_none) {
+  // and the class the name belongs to is restored with the declaration that
+  // took it, rather than left as the innermost one seen
+  EXPECT_TRUE(compile(utest_fixture, "class B < A { m() { class I {} super.m(); } }"));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(compiler, a_nested_class_reaches_a_superclass_of_its_own) {
+  EXPECT_TRUE(compile(utest_fixture, "class B < A { m() { class I < A { n() { super.n(); } } } }"));
+  EXPECT_EQ((size_t)0, utest_fixture->errors.count);
+}
+
+UTEST_F(compiler, super_without_a_method_after_it_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class B < A { m() { super; } }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "after super") != NULL);
+}
+
+UTEST_F(compiler, super_naming_something_that_is_not_a_method_is_reported) {
+  EXPECT_FALSE(compile(utest_fixture, "class B < A { m() { super.(); } }"));
+
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "method name") != NULL);
 }
 
 UTEST_F(compiler, a_property_get_names_the_property_it_reads) {

@@ -1660,7 +1660,9 @@ UTEST_F(lox, calling_a_property_of_a_class_is_a_runtime_error) {
 UTEST_F(lox, calling_a_name_the_instance_does_not_have_is_a_runtime_error) {
   ASSERT_FALSE(run(utest_fixture, "class A {} A().m();"));
   ASSERT_TRUE(utest_fixture->errors.count > 0);
-  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "undefined property") != NULL);
+  // a call reaches a field before a method, but a name that is neither is
+  // reported as the method it was written as: the call is what went wrong
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "undefined method") != NULL);
 }
 
 UTEST_F(lox, calling_a_field_that_is_not_callable_is_a_runtime_error) {
@@ -1691,4 +1693,193 @@ UTEST_F(lox, a_method_call_on_a_capturing_method_survives_a_collection) {
   clox_value_t result = only_printed(utest_fixture);
   ASSERT_TRUE(CLOX_IS_STRING(result));
   EXPECT_STREQ("captured", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, a_subclass_answers_with_a_method_of_its_superclass) {
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 42; } } class B < A {} print B().m();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_method_of_a_subclass_writes_over_the_one_it_inherited) {
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 1; } }"
+                                 "class B < A { m() { return 42; } }"
+                                 "print B().m();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_subclass_declaring_no_initializer_runs_the_one_it_inherited) {
+  // a call of the class reads a slot of its own rather than looking the name
+  // up, so the initializer has to be carried over with the methods
+  ASSERT_TRUE(run(utest_fixture, "class A { init() { this.x = 42; } }"
+                                 "class B < A {}"
+                                 "print B().x;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_subclass_declaring_no_initializer_takes_the_arguments_of_the_inherited_one) {
+  // the same slot is what says how many arguments a call of the class takes:
+  // an empty one would make this the no-initializer case and refuse them
+  ASSERT_TRUE(run(utest_fixture, "class A { init(x) { this.x = x; } }"
+                                 "class B < A {}"
+                                 "print B(42).x;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_initializer_of_a_subclass_writes_over_the_inherited_one) {
+  ASSERT_TRUE(run(utest_fixture, "class A { init() { this.x = 1; } }"
+                                 "class B < A { init() { this.x = 42; } }"
+                                 "print B().x;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_method_is_inherited_down_a_chain_of_classes) {
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 42; } }"
+                                 "class B < A {} class C < B {}"
+                                 "print C().m();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_initializer_is_inherited_down_a_chain_of_classes) {
+  // each declaration copies what the one before it ended up with, so a class
+  // two links down still reaches it
+  ASSERT_TRUE(run(utest_fixture, "class A { init(x) { this.x = x; } }"
+                                 "class B < A {} class C < B {}"
+                                 "print C(42).x;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, an_inherited_method_runs_on_the_receiver_it_was_called_through) {
+  ASSERT_TRUE(run(utest_fixture, "class A { get() { return this.x; } }"
+                                 "class B < A { init() { this.x = 42; } }"
+                                 "print B().get();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, super_calls_the_method_the_subclass_wrote_over) {
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 1; } }"
+                                 "class B < A { m() { return super.m() + 41; } }"
+                                 "print B().m();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, super_names_the_class_it_was_written_in_and_not_the_receivers_own) {
+  // Each super reaches the superclass of the class its method was declared on,
+  // which is fixed when that class is. Reading it off the receiver instead
+  // would send C's call back to C and run forever.
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return \"A\"; } }"
+                                 "class B < A { m() { return \"B\" + super.m(); } }"
+                                 "class C < B { m() { return \"C\" + super.m(); } }"
+                                 "print C().m();"));
+
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("CBA", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, super_runs_the_initializer_of_the_superclass_on_the_new_instance) {
+  ASSERT_TRUE(run(utest_fixture, "class A { init(x) { this.x = x; } }"
+                                 "class B < A { init() { super.init(42); } }"
+                                 "print B().x;"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_super_method_taken_and_not_called_keeps_the_receiver_it_was_reached_through) {
+  ASSERT_TRUE(run(utest_fixture, "class A { get() { return this.x; } }"
+                                 "class B < A { init() { this.x = 42; }"
+                                 "              take() { return super.get; } }"
+                                 "print B().take()();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, super_reaches_the_superclass_from_a_function_inside_a_method) {
+  // the superclass is a local of the declaration, so a function nested in a
+  // method captures it the way it captures the receiver
+  ASSERT_TRUE(run(utest_fixture, "class A { m() { return 42; } }"
+                                 "class B < A { m() { fun f() { return super.m(); } return f(); } }"
+                                 "print B().m();"));
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), only_printed(utest_fixture));
+}
+
+UTEST_F(lox, a_class_declared_in_a_block_inherits_without_disturbing_the_stack) {
+  // the clause opens a scope of its own inside the block: a slot left behind
+  // or popped twice would show up in what the locals around it read back
+  ASSERT_TRUE(run(utest_fixture, "{ class A { m() { return 1; } }"
+                                 "  class B < A { m() { return super.m() + 41; } }"
+                                 "  var probe = 7;"
+                                 "  print B().m(); print probe; }"));
+
+  ASSERT_EQ((size_t)2, utest_fixture->printed.count);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(42.0), utest_fixture->printed.values[0]);
+  EXPECT_VALUE_EQ(CLOX_NUMBER(7.0), utest_fixture->printed.values[1]);
+}
+
+UTEST_F(lox, a_super_call_survives_a_collection) {
+  // the superclass is reachable from nowhere but the capture the subclass's
+  // method holds, and the scope it was declared in is long gone by the call
+  ASSERT_TRUE(run(utest_fixture, "fun make() {"
+                                 "  class A { get() { return \"sup\" + \"er\"; } }"
+                                 "  class B < A { get() { return super.get(); } }"
+                                 "  return B();"
+                                 "}"
+                                 "var b = make();"
+                                 "gc();"
+                                 "print b.get();"));
+
+  clox_value_t result = only_printed(utest_fixture);
+  ASSERT_TRUE(CLOX_IS_STRING(result));
+  EXPECT_STREQ("super", CLOX_AS_CSTRING(result));
+}
+
+UTEST_F(lox, inheriting_from_something_that_is_not_a_class_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "var A = 1; class B < A {}"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "superclass") != NULL);
+}
+
+UTEST_F(lox, a_class_inheriting_from_itself_is_a_compilation_error) {
+  ASSERT_FALSE(run(utest_fixture, "class A < A {}"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "inherit") != NULL);
+}
+
+UTEST_F(lox, super_outside_a_class_is_a_compilation_error) {
+  ASSERT_FALSE(run(utest_fixture, "print super.m;"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "super") != NULL);
+}
+
+UTEST_F(lox, super_in_a_class_without_a_superclass_is_a_compilation_error) {
+  ASSERT_FALSE(run(utest_fixture, "class A { m() { return super.m(); } }"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "superclass") != NULL);
+}
+
+UTEST_F(lox, a_super_call_of_a_name_the_superclass_does_not_have_is_a_runtime_error) {
+  ASSERT_FALSE(run(utest_fixture, "class A {} class B < A { m() { super.nope(); } } B().m();"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "undefined method") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "nope") != NULL);
+}
+
+UTEST_F(lox, a_super_get_of_a_name_the_superclass_does_not_have_is_reported_the_same_way) {
+  // the two forms of super part on the '(' alone, and a name neither of them
+  // finds is the one failure: it reads as such however it was written
+  ASSERT_FALSE(
+      run(utest_fixture, "class A {} class B < A { m() { return super.nope; } } B().m();"));
+  ASSERT_TRUE(utest_fixture->errors.count > 0);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "undefined method") != NULL);
+  EXPECT_TRUE(strstr(utest_fixture->errors.messages[0], "nope") != NULL);
+}
+
+UTEST_F(lox, a_runtime_error_inside_a_super_call_is_traced_out_to_the_script) {
+  ASSERT_FALSE(run(utest_fixture, "class A { m() { return 1 + nil; } }"
+                                  "class B < A { m() { return super.m(); } }"
+                                  "B().m();"));
+
+  ASSERT_EQ((size_t)1, utest_fixture->errors.count);
+  // the super call takes a frame like any other, so the trace names both
+  ASSERT_EQ((size_t)3, utest_fixture->errors.stack_sizes[0]);
+  EXPECT_STREQ("m", utest_fixture->errors.stacks[0][0].fn_name);
+  EXPECT_STREQ("m", utest_fixture->errors.stacks[0][1].fn_name);
+  EXPECT_STREQ(CLOX_SCRIPT_NAME, utest_fixture->errors.stacks[0][2].fn_name);
 }
